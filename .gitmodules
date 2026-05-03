@@ -1,8 +1,0 @@
-[submodule "bte"]
-	path = bte
-	url = ./bte
-
-[submodule "sbc"]
-	path = sbc
-	url = ./sbc
-

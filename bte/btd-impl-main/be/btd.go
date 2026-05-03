@@ -1,0 +1,430 @@
+package be
+
+import (
+	"btd/curves"
+	"btd/elgamal"
+	"btd/prf"
+	"fmt"
+	"go.dedis.ch/kyber/v4"
+	"go.dedis.ch/kyber/v4/pairing"
+	"go.dedis.ch/kyber/v4/share"
+	"hash"
+	"math"
+	"strconv"
+)
+
+type Proof struct {
+	Ap   kyber.Point
+	Bp   kyber.Point
+	Yp   kyber.Point
+	KHat kyber.Scalar
+	UHat kyber.Scalar
+}
+
+type CT struct {
+	I       int
+	Gamma   kyber.Point
+	Kp      kyber.Point
+	C       elgamal.CT
+	Pi      Proof
+	Context []byte
+}
+
+type BTD struct {
+	suite pairing.Suite
+	prf   *prf.PRF
+	eg    *elgamal.ElGamal
+	B     int
+	H     *Hasher
+	T     int
+	N     int
+}
+
+func (b *BTD) VerifyCT(ct CT) (bool, error) {
+	if ct.I < 0 || ct.I >= b.B {
+		return false, fmt.Errorf("ciphertext index out of domain: %d", ct.I)
+	}
+	h, err := b.SHash(b.eg.PK, ct, ct.Pi.Ap, ct.Pi.Bp, ct.Pi.Yp)
+	if err != nil {
+		return false, err
+	}
+	al := b.suite.G1().Point().Mul(ct.Pi.UHat, nil)
+	ar := b.suite.G1().Point().Add(ct.Pi.Ap, b.suite.G1().Point().Mul(h, ct.C.A))
+	if !al.Equal(ar) {
+		return false, nil
+	}
+	bl := b.suite.G1().Point().Add(b.suite.G1().Point().Mul(ct.Pi.UHat, b.eg.PK), b.suite.G1().Point().Mul(ct.Pi.KHat, nil))
+	br := b.suite.G1().Point().Add(ct.Pi.Bp, b.suite.G1().Point().Mul(h, ct.C.B))
+	if !bl.Equal(br) {
+		return false, nil
+	}
+	yl := b.suite.G1().Point().Mul(ct.Pi.KHat, b.prf.G1xi[ct.I])
+	yr := b.suite.G1().Point().Add(ct.Pi.Yp, b.suite.G1().Point().Mul(h, ct.Kp))
+	if !yl.Equal(yr) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func NewBTD(suite curves.Suite, B int) *BTD {
+	prf := prf.PRFSetup(suite, B, true)
+	eg := elgamal.NewElGamal(suite.G1(), suite.RandomStream())
+	return &BTD{
+		suite: suite,
+		prf:   prf,
+		eg:    eg,
+		B:     B,
+		H:     &Hasher{hash: suite.Hash()},
+	}
+}
+
+func NewBTDFromSeed(suite curves.Suite, B int, seed []byte) *BTD {
+	prf := prf.PRFSetupFromSeed(suite, B, seed)
+	eg := elgamal.NewElGamal(suite.G1(), suite.RandomStream())
+	return &BTD{
+		suite: suite,
+		prf:   prf,
+		eg:    eg,
+		B:     B,
+		H:     &Hasher{hash: suite.Hash()},
+	}
+}
+
+func (b *BTD) KeyGen(n, t int) ([]*share.PriShare, kyber.Point) {
+	// Key Generation is just ElGamal KeyGen
+	sk, pk := b.eg.KeyGen(n, t)
+	b.T, b.N = t, n
+	return sk, pk
+}
+
+func (b *BTD) Enc(pk kyber.Point, i int, m kyber.Point) (CT, error) {
+	return b.EncWithContext(pk, i, m, nil)
+}
+
+func (b *BTD) EncWithContext(pk kyber.Point, i int, m kyber.Point, context []byte) (CT, error) {
+	// Generate a PRF key
+	k := b.prf.KeyGen()
+	// Puncture it in the i-th index
+	kp, err := b.prf.Puncture(k, i)
+	if err != nil {
+		return CT{}, err
+	}
+	// Compute K = g_1^k
+	K := b.suite.G1().Point().Mul(k, nil)
+	// Encrypt K in ElGamal
+	egct, u := b.eg.Enc(pk, K)
+	// Evaluate the PRF on the punctured index to compute the pad
+	pad, err := b.prf.Eval(k, i)
+	if err != nil {
+		return CT{}, err
+	}
+	// Pad the message as gamma = m * PRF(k, i)
+	gamma := b.suite.GT().Point().Add(pad, m)
+	// Compute a Schnorr-like ZK proof that encryptor knows a PRF key k and ElGamal randomness u such that kp is a
+	// punctured key of k at index i and the ElGamal ciphertext encrypts K = g_1^k.
+	uN := b.suite.G1().Scalar().Pick(b.suite.RandomStream())
+	kN := b.suite.G1().Scalar().Pick(b.suite.RandomStream())
+	Ap := b.suite.G1().Point().Mul(uN, nil)
+	Bp := b.suite.G1().Point().Add(b.suite.G1().Point().Mul(uN, b.eg.PK), b.suite.G1().Point().Mul(kN, nil))
+	yp := b.suite.G1().Point().Mul(kN, b.prf.G1xi[i])
+	ct := CT{
+		I:       i,
+		Gamma:   gamma,
+		Kp:      kp,
+		C:       egct,
+		Context: append([]byte(nil), context...),
+	}
+	h, err := b.SHash(pk, ct, Ap, Bp, yp)
+	if err != nil {
+		return CT{}, err
+	}
+	uHat := b.suite.G1().Scalar().Add(uN, b.suite.G1().Scalar().Mul(u, h))
+	kHat := b.suite.G1().Scalar().Add(kN, b.suite.G1().Scalar().Mul(k, h))
+	ct.Pi = Proof{
+		Ap:   Ap,
+		Bp:   Bp,
+		Yp:   yp,
+		KHat: kHat,
+		UHat: uHat,
+	}
+	return ct, nil
+}
+
+func (b *BTD) BatchDec(cts []CT, i int, verify bool) (*share.PubShare, error) {
+	if len(cts) > b.B {
+		return nil, fmt.Errorf("too many ciphertexts for the given crs")
+	}
+	if err := validateDistinctIndices(cts); err != nil {
+		return nil, err
+	}
+	// Compute ElGamal decryption share of the sum of the ElGamal ciphertexts in the batch.
+	C, err := b.SumEGCt(cts, verify)
+	if err != nil {
+		return nil, err
+	}
+	return b.eg.PDec(C, i), nil
+}
+
+func (b *BTD) BatchDecWithShare(cts []CT, sk *share.PriShare, verify bool) (*share.PubShare, error) {
+	if len(cts) > b.B {
+		return nil, fmt.Errorf("too many ciphertexts for the given crs")
+	}
+	if err := validateDistinctIndices(cts); err != nil {
+		return nil, err
+	}
+	C, err := b.SumEGCt(cts, verify)
+	if err != nil {
+		return nil, err
+	}
+	return b.eg.PDecWithShare(C, sk), nil
+}
+
+func (b *BTD) BatchCombineMessages(cts []CT, d []*share.PubShare, verify bool) ([]kyber.Point, int, error) {
+	// Keep count of the number of pairings for testing purposes.
+	count := 0
+	ActualB := len(cts)
+	if ActualB > b.B {
+		return nil, count, fmt.Errorf("too many ciphertexts for the given crs")
+	}
+	if err := validateDistinctIndices(cts); err != nil {
+		return nil, count, err
+	}
+	C, err := b.SumEGCt(cts, verify)
+	if err != nil {
+		return nil, count, err
+	}
+	// Combine all ElGamal decryption shares to obtain K = g_1^{sum(k_i)}
+	K, err := b.eg.Combine(C, d)
+	if err != nil {
+		return nil, count, err
+	}
+	msgs := make([]kyber.Point, len(cts))
+	// decrypt each ciphertext in the batch (1 iteration = 1 ciphertext)
+	for idx, ct := range cts {
+		count++
+		// compute PRF(sum(k_i), i ) through exponential evaluation with K
+		prfKi, err := b.prf.ExpEval(K, ct.I)
+		if err != nil {
+			return nil, count, err
+		}
+		sum := b.suite.GT().Point().Null()
+		// iterate over all other ciphertexts in the batch
+		for j := 0; j < ActualB; j++ {
+			ji := cts[j].I
+			if ji == ct.I {
+				continue
+			}
+			count++
+			// compute PRF(k_j, i) through punctured evaluation with kp_j
+			peval, err := b.prf.PEval(cts[j].Kp, ji, ct.I)
+			if err != nil {
+				return nil, count, err
+			}
+			// compute the sum of all the punctured evaluations
+			sum = b.suite.GT().Point().Add(sum, peval)
+		}
+		// compute the message by undoing the padding m = (gamma + sum(PRf(k_j, i))) - PRF(sum(k_i), i)
+		msgs[idx] = b.suite.GT().Point().Sub(b.suite.GT().Point().Add(ct.Gamma, sum), prfKi)
+	}
+	return msgs, count, nil
+}
+
+func validateDistinctIndices(cts []CT) error {
+	seen := make(map[int]bool, len(cts))
+	for _, ct := range cts {
+		if seen[ct.I] {
+			return fmt.Errorf("duplicate ciphertext index in batch: %d", ct.I)
+		}
+		seen[ct.I] = true
+	}
+	return nil
+}
+
+func (b *BTD) BatchCombine(cts []CT, d []*share.PubShare, verify bool) (int, error) {
+	_, count, err := b.BatchCombineMessages(cts, d, verify)
+	return count, err
+}
+
+// Outdated optimization, not used for final results!
+func (b *BTD) BatchDecOpt(cts []CT, i int, verify bool) ([]*share.PubShare, error) {
+	L := len(cts)
+	if L > b.B {
+		return nil, fmt.Errorf("too many ciphertexts for the given crs")
+	}
+	if verify { //verify all the zk proofs in the batch
+		for _, ct := range cts {
+			ok, err := b.VerifyCT(ct)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("proof failed for index %d", ct.I)
+			}
+		}
+	}
+	lgL := int(math.Ceil(math.Log2(float64(L))))
+	Ks := make([]*share.PubShare, lgL)
+	var err error
+	for l := 0; l < lgL; l++ {
+		x := math.Pow(2, float64(l))
+		start := int(math.Floor(float64(L) * (x - 1.0) / x))
+		Ks[l], err = b.BatchDec(cts[start:], i, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return Ks, nil
+}
+
+// Outdated optimization, not used for final result!
+func (b *BTD) BatchCombineOpt(cts []CT, ShareKs [][]*share.PubShare, verify bool) (int, error) {
+	count := 0
+	L := len(cts)
+	if L > b.B {
+		return count, fmt.Errorf("too many ciphertexts for the given crs")
+	}
+	lgL := int(math.Ceil(math.Log2(float64(L))))
+	Ks := make([]kyber.Point, lgL)
+	for l := 0; l < lgL; l++ {
+		x := math.Pow(2, float64(l))
+		start := int(math.Floor(float64(L) * (x - 1.0) / x))
+		shares := make([]*share.PubShare, len(ShareKs))
+		for j, s := range ShareKs {
+			shares[j] = s[l]
+		}
+		C, err := b.SumEGCt(cts[start:], verify)
+		if err != nil {
+			return count, err
+		}
+		Ks[l], err = b.eg.Combine(C, shares)
+		if err != nil {
+			return count, err
+		}
+	}
+	KsIdx := 1
+	oldStart := 0
+	for idx, ct := range cts {
+		count++
+		sum := b.suite.GT().Point().Null()
+		x := math.Pow(2, float64(KsIdx))
+		nextStart := int(math.Floor(float64(L) * (x - 1.0) / x))
+
+		if idx >= nextStart && KsIdx+1 < len(Ks) {
+			KsIdx++
+			oldStart = nextStart
+			nextX := math.Pow(2, float64(KsIdx))
+			nextNextStart := int(math.Floor(float64(L) * (nextX - 1.0) / nextX))
+			nextStart = nextNextStart
+		}
+		prfKi, err := b.prf.ExpEval(Ks[KsIdx-1], ct.I)
+		if err != nil {
+			return count, err
+		}
+		if idx > oldStart {
+			for j := oldStart; j < idx; j++ {
+				count++
+				peval, err := b.prf.PEval(cts[j].Kp, cts[j].I, ct.I)
+				if err != nil {
+					return count, err
+				}
+				sum = b.suite.GT().Point().Add(sum, peval)
+			}
+		}
+		for j := idx + 1; j < L; j++ {
+			var eval kyber.Point
+
+			if KsIdx < len(Ks) && j == nextStart {
+				count++
+				eval, err = b.prf.ExpEval(Ks[KsIdx], ct.I)
+				if err != nil {
+					return count, err
+				}
+				sum = b.suite.GT().Point().Add(sum, eval)
+				break
+			}
+			count++
+			eval, err = b.prf.PEval(cts[j].Kp, cts[j].I, ct.I)
+			if err != nil {
+				return count, err
+			}
+			sum = b.suite.GT().Point().Add(sum, eval)
+
+		}
+		_ = b.suite.GT().Point().Sub(b.suite.GT().Point().Add(ct.Gamma, sum), prfKi) // TODO: maybe remove this line
+	}
+	return count, nil
+}
+
+func (b *BTD) SumEGCt(cts []CT, verify bool) (elgamal.CT, error) {
+	// Sum up all ElGamal ciphertext within the BTD ciphertexts.
+	// Also verify the proof, if verify is set to true.
+	sum := b.eg.NullEGct()
+	for _, ct := range cts {
+		if verify {
+			ok, err := b.VerifyCT(ct)
+			if err != nil {
+				return sum, err
+			}
+			if !ok {
+				return sum, fmt.Errorf("proof failed for index %d", ct.I)
+			}
+		}
+		sum = b.eg.AddCT(sum, ct.C)
+	}
+	return sum, nil
+}
+
+type Hasher struct {
+	hash hash.Hash
+}
+
+func (h *Hasher) Hash(a []byte) []byte {
+	h.hash.Reset()
+	h.hash.Write(a)
+	return h.hash.Sum(nil)
+}
+
+func (h *Hasher) Size() int {
+	return h.hash.Size()
+}
+
+func (b *BTD) SHash(pk kyber.Point, c CT, Ap, Bp, yp kyber.Point) (kyber.Scalar, error) {
+	// Hash to compute the challenge for Schnorr ZK proof.
+	h := b.suite.Hash()
+	h.Reset()
+	if _, err := h.Write([]byte(fmt.Sprintf("bte-v1:B=%d", b.B))); err != nil {
+		return nil, err
+
+	}
+	if _, err := pk.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := Ap.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := Bp.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := yp.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := h.Write([]byte(strconv.Itoa(c.I))); err != nil {
+		return nil, err
+	}
+	if _, err := h.Write(c.Context); err != nil {
+		return nil, err
+	}
+	if _, err := c.Gamma.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := c.Kp.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := c.C.A.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := c.C.B.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	return b.suite.G1().Scalar().SetBytes(h.Sum(nil)), nil
+}

@@ -1,0 +1,19 @@
+.DS_Store
+**/.DS_Store
+
+# Go/build caches and binaries
+bin/
+dist/
+coverage.out
+*.test
+
+# Local experiment outputs
+results/
+pic-node/results/
+*.log
+
+# Temporary local configs with threshold key material
+cluster.json
+pic-cluster*.json
+!pic-node/pic-cluster.local.json
+

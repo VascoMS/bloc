@@ -1,0 +1,49 @@
+{
+  "cluster_id": "pic-local",
+  "bmax": 16,
+  "n": 4,
+  "threshold": 3,
+  "slot": 1,
+  "crs_seed_hex": "8be9ec97fed14b67b0f91e5aad23ba1cb413cb5e012798fde985e466359bc71c",
+  "nodes": [
+    {
+      "id": 0,
+      "consensus_addr": "127.0.0.1:19300",
+      "http_addr": "127.0.0.1:18300"
+    },
+    {
+      "id": 1,
+      "consensus_addr": "127.0.0.1:19301",
+      "http_addr": "127.0.0.1:18301"
+    },
+    {
+      "id": 2,
+      "consensus_addr": "127.0.0.1:19302",
+      "http_addr": "127.0.0.1:18302"
+    },
+    {
+      "id": 3,
+      "consensus_addr": "127.0.0.1:19303",
+      "http_addr": "127.0.0.1:18303"
+    }
+  ],
+  "public_key_hex": "894bc62f6050276d017ac8047556d8ab84062690b2e19dd503ee73d4aa897ac82f525ff6b669889059eaeb94e6c2acd0",
+  "shares": [
+    {
+      "operator_id": 0,
+      "scalar_hex": "67a7321af9becbb2790870e1e36b04c58c4809bde6f2562f72f09ede11c8971b"
+    },
+    {
+      "operator_id": 1,
+      "scalar_hex": "2b4efc47738b771951db0bb22e10760521359c1ae2605cac906565d7684e2709"
+    },
+    {
+      "operator_id": 2,
+      "scalar_hex": "089186e03f2986eedb0ae487e71932a79792c43f557846f38aca8c88c28675e4"
+    },
+    {
+      "operator_id": 3,
+      "scalar_hex": "735c79388636787b47d1d36b182712b2431d262e40387103622012f1207183ad"
+    }
+  ]
+}

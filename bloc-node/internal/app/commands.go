@@ -24,7 +24,7 @@ func genConfig(args []string) error {
 	bmax := fs.Int("bmax", 128, "BTE PRF domain and maximum encrypted batch size")
 	baseConsensus := fs.Int("base-consensus-port", 9000, "first TCP consensus port")
 	baseHTTP := fs.Int("base-http-port", 8000, "first HTTP port")
-	clusterID := fs.String("cluster-id", "pic-local", "cluster identifier")
+	clusterID := fs.String("cluster-id", "bloc-local", "cluster identifier")
 	slot := fs.Uint64("slot", 1, "default slot")
 	maxDecryptedGas := fs.Uint64("max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	maxDecryptedTxs := fs.Int("max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")

@@ -1,4 +1,4 @@
-module pic-node
+module bloc-node
 
 go 1.22
 

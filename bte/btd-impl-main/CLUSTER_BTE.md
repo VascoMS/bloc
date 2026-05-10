@@ -142,7 +142,7 @@ results, err := cluster.CombineShares(plan, shares)
 - Checks `SHA256(rawTx)` against the committed plaintext hash.
 - Returns results in original consensus order.
 
-The cluster block builder can then apply the PIC materialization rule:
+The cluster block builder can then apply the BLOC materialization rule:
 
 1. If decryption succeeds, the hash matches, and the raw transaction is syntactically valid, replace the placeholder with the raw transaction.
 2. Otherwise retain the placeholder or apply the deterministic fallback rule defined by the larger protocol.
@@ -179,7 +179,7 @@ Known missing pieces:
 - No stable cross-language wire format commitment beyond this Go binary encoding.
 - No concurrency or networking layer for share gossip/collection.
 
-The next hardening step should be public share-verifiability, because the PIC protocol needs to tolerate operators that withhold or publish malformed decryption shares.
+The next hardening step should be public share-verifiability, because the BLOC protocol needs to tolerate operators that withhold or publish malformed decryption shares.
 
 ## Running Tests And Benchmarks
 

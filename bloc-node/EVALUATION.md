@@ -1,6 +1,6 @@
-# PIC Evaluation Plan and Current Gaps
+# BLOC Evaluation Plan and Current Gaps
 
-This document maps the research questions from `../papers/PIC_Final.pdf` to
+This document maps the research questions from `../papers/BLOC_Final.pdf` to
 the current prototype and identifies what is still missing before the results
 can support stronger deployment claims.
 
@@ -9,7 +9,7 @@ can support stronger deployment claims.
 Current test path:
 
 ```sh
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 8,32,128 \
   --tx-size 256 \
@@ -49,7 +49,7 @@ Missing:
 Current test path:
 
 ```sh
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 8,32,128 \
   --tx-size 512 \
@@ -87,7 +87,7 @@ Current test path:
 
 ```sh
 # Censorship/omission style behavior.
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 16 \
   --tx-size 256 \
@@ -97,7 +97,7 @@ go run ./cmd/pic-node eval-local \
   --out-dir results/rq3-omit
 
 # Decryption-share withholding.
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 16 \
   --tx-size 256 \
@@ -112,7 +112,7 @@ Fault modes available now:
 - `omit-proposal`: node proposes an empty encrypted batch.
 - `withhold-share`: node participates in ACS but releases no BTE shares.
 - `corrupt-share`: node sends malformed share encodings to peers.
-- `--delay`: adds a fixed send delay for that node when running `pic-node run`
+- `--delay`: adds a fixed send delay for that node when running `bloc-node run`
   manually.
 
 Correctness checks available now:
@@ -135,7 +135,7 @@ Missing:
 Current test path:
 
 ```sh
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 32 \
   --tx-size 256 \

@@ -1,11 +1,11 @@
-# PIC Node Prototype
+# BLOC Node Prototype
 
 This module wires the local HoneyBadger ACS implementation to the BEAT-MEV
 batched threshold encryption code so separate operator processes can agree on
 encrypted inclusion lists and decrypt a deterministic transaction set only after
 agreement.
 
-It follows the prototype sequence from `../papers/PIC_Final.pdf`:
+It follows the prototype sequence from `../papers/BLOC_Final.pdf`:
 
 1. Clients submit raw transaction bytes plus plaintext scheduling metadata to an
    operator HTTP endpoint.
@@ -28,32 +28,32 @@ instead of signed Ethereum transactions.
 From this directory:
 
 ```sh
-go run ./cmd/pic-node gen-config \
+go run ./cmd/bloc-node gen-config \
   --nodes 4 \
   --threshold 3 \
   --bmax 16 \
   --max-decrypted-gas 63000 \
   --base-consensus-port 19300 \
   --base-http-port 18300 \
-  --out pic-cluster.local.json
+  --out bloc-cluster.local.json
 ```
 
 Start four operators in separate terminals:
 
 ```sh
-go run ./cmd/pic-node run --config pic-cluster.local.json --id 0 --out results/manual/node-0.json
-go run ./cmd/pic-node run --config pic-cluster.local.json --id 1 --out results/manual/node-1.json
-go run ./cmd/pic-node run --config pic-cluster.local.json --id 2 --out results/manual/node-2.json
-go run ./cmd/pic-node run --config pic-cluster.local.json --id 3 --out results/manual/node-3.json
+go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 0 --out results/manual/node-0.json
+go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 1 --out results/manual/node-1.json
+go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 2 --out results/manual/node-2.json
+go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 3 --out results/manual/node-3.json
 ```
 
 Submit one transaction to each operator:
 
 ```sh
-go run ./cmd/pic-node submit --url http://127.0.0.1:18300 --tx 0x010203 --gas 21000 --fee-wei 40 --from 0x01 --nonce 0
-go run ./cmd/pic-node submit --url http://127.0.0.1:18301 --tx 0x040506 --gas 21000 --fee-wei 30 --from 0x02 --nonce 0
-go run ./cmd/pic-node submit --url http://127.0.0.1:18302 --tx 0x070809 --gas 21000 --fee-wei 20 --from 0x03 --nonce 0
-go run ./cmd/pic-node submit --url http://127.0.0.1:18303 --tx 0x0a0b0c --gas 21000 --fee-wei 10 --from 0x04 --nonce 0
+go run ./cmd/bloc-node submit --url http://127.0.0.1:18300 --tx 0x010203 --gas 21000 --fee-wei 40 --from 0x01 --nonce 0
+go run ./cmd/bloc-node submit --url http://127.0.0.1:18301 --tx 0x040506 --gas 21000 --fee-wei 30 --from 0x02 --nonce 0
+go run ./cmd/bloc-node submit --url http://127.0.0.1:18302 --tx 0x070809 --gas 21000 --fee-wei 20 --from 0x03 --nonce 0
+go run ./cmd/bloc-node submit --url http://127.0.0.1:18303 --tx 0x0a0b0c --gas 21000 --fee-wei 10 --from 0x04 --nonce 0
 ```
 
 Trigger the slot:
@@ -102,7 +102,7 @@ a stable public CRS artifact and DKG-generated key shares.
 Run a reproducible local experiment without manually opening four terminals:
 
 ```sh
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 8,32 \
   --tx-size 256 \
@@ -123,7 +123,7 @@ The harness writes:
 Blockspace sweep example:
 
 ```sh
-go run ./cmd/pic-node eval-local \
+go run ./cmd/bloc-node eval-local \
   --nodes 4 \
   --batch-sizes 32 \
   --tx-size 256 \
@@ -137,8 +137,8 @@ Useful fault-injection examples:
 
 ```sh
 # One node proposes an empty batch but still participates otherwise.
-go run ./cmd/pic-node eval-local --fault 3:omit-proposal
+go run ./cmd/bloc-node eval-local --fault 3:omit-proposal
 
 # One node withholds BTE decryption shares.
-go run ./cmd/pic-node eval-local --fault 3:withhold-share
+go run ./cmd/bloc-node eval-local --fault 3:withhold-share
 ```

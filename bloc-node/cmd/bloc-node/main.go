@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"pic-node/internal/app"
+	"bloc-node/internal/app"
 )
 
 func main() {

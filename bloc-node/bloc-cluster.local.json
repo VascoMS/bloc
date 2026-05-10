@@ -1,5 +1,5 @@
 {
-  "cluster_id": "pic-local",
+  "cluster_id": "bloc-local",
   "bmax": 16,
   "n": 4,
   "threshold": 3,

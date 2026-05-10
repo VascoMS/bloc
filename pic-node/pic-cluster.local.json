@@ -28,6 +28,14 @@
     }
   ],
   "public_key_hex": "894bc62f6050276d017ac8047556d8ab84062690b2e19dd503ee73d4aa897ac82f525ff6b669889059eaeb94e6c2acd0",
+  "blockspace": {
+    "max_decrypted_gas": 0,
+    "max_decrypted_txs": 0,
+    "default_tx_gas": 21000
+  },
+  "provider": {
+    "mode": "direct"
+  },
   "shares": [
     {
       "operator_id": 0,

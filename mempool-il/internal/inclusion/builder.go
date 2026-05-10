@@ -30,12 +30,13 @@ func NewBuilder(cfg Config) *Builder {
 }
 
 type Item struct {
-	Hash              string `json:"hash"`
-	From              string `json:"from"`
-	Nonce             uint64 `json:"nonce"`
-	Gas               uint64 `json:"gas"`
-	Kind              string `json:"kind"`
-	EffectiveFeePerGW string `json:"effective_fee_per_gas_wei"`
+	Hash                   string `json:"hash"`
+	From                   string `json:"from"`
+	Nonce                  uint64 `json:"nonce"`
+	Gas                    uint64 `json:"gas"`
+	Kind                   string `json:"kind"`
+	EffectiveFeePerGW      string `json:"effective_fee_per_gas_wei"`
+	PlaceholderEnvelopeHex string `json:"placeholder_envelope_hex,omitempty"`
 }
 
 type List struct {
@@ -87,13 +88,18 @@ func (b *Builder) Build(snapshot mempool.Snapshot) List {
 			continue
 		}
 		fee := tx.EffectiveFeePerGas()
+		placeholderEnvelope := ""
+		if tx.Kind == mempool.TxKindPlaceholder {
+			placeholderEnvelope = strings.TrimPrefix(tx.Input, "0x")
+		}
 		items = append(items, Item{
-			Hash:              tx.Hash,
-			From:              tx.From,
-			Nonce:             tx.Nonce,
-			Gas:               tx.Gas,
-			Kind:              string(tx.Kind),
-			EffectiveFeePerGW: fee.String(),
+			Hash:                   tx.Hash,
+			From:                   tx.From,
+			Nonce:                  tx.Nonce,
+			Gas:                    tx.Gas,
+			Kind:                   string(tx.Kind),
+			EffectiveFeePerGW:      fee.String(),
+			PlaceholderEnvelopeHex: placeholderEnvelope,
 		})
 		totalGas += tx.Gas
 	}

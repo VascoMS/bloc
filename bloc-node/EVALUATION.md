@@ -15,6 +15,7 @@ go run ./cmd/bloc-node eval-local \
   --tx-size 256 \
   --bmax 128 \
   --tx-gas 21000 \
+  --network tcp \
   --out-dir results/rq1-local
 ```
 
@@ -55,6 +56,7 @@ go run ./cmd/bloc-node eval-local \
   --tx-size 512 \
   --bmax 128 \
   --max-decrypted-gas 1344000 \
+  --network libp2p \
   --out-dir results/rq2-local
 
 cd ../bte/btd-impl-main
@@ -68,6 +70,7 @@ Metrics available now:
 
 - ACS and share message counts: `outbound_messages`, `inbound_messages`
 - ACS and share byte counts: `outbound_bytes`, `inbound_bytes`
+- transport mode in evaluator output: `network`
 - ciphertext count and plaintext byte workload size
 - skipped ciphertext count under blockspace caps:
   `metrics.skipped_ciphertexts`

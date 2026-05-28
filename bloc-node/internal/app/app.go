@@ -6,6 +6,9 @@ import (
 	"os"
 )
 
+// Run dispatches the bloc-node CLI. It also registers gob protocol types before
+// any command starts because both the compatibility TCP transport and current
+// ACS payload adapter depend on gob's concrete type registry.
 func Run(args []string) {
 	registerGobTypes()
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)

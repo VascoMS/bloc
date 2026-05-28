@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestProtoEnvelopeCodecRoundTrip(t *testing.T) {
+	codec := ProtoEnvelopeCodec{}
+	in := WireEnvelope{From: 1, To: 2, Direct: true, Kind: "share", Slot: 9, Share: &WireShare{
+		OperatorID: 1,
+		BatchIDHex: "abcd",
+		SubBatchID: 3,
+		PointHex:   "ef01",
+	}}
+
+	data, err := codec.Encode(in)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	out, err := codec.Decode(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.From != in.From || out.To != in.To || out.Direct != in.Direct || out.Kind != in.Kind || out.Slot != in.Slot {
+		t.Fatalf("decoded envelope header mismatch: %+v", out)
+	}
+	if out.Share == nil || out.Share.OperatorID != in.Share.OperatorID || out.Share.BatchIDHex != in.Share.BatchIDHex || out.Share.SubBatchID != in.Share.SubBatchID || out.Share.PointHex != in.Share.PointHex {
+		t.Fatalf("decoded share mismatch: %+v", out.Share)
+	}
+}
+
 func TestMergeInclusionListsDeterministicAcrossListOrder(t *testing.T) {
 	a := testPlaceholder("a", 21000, "10", "0xbbb", 1)
 	b := testPlaceholder("b", 21000, "20", "0xaaa", 0)

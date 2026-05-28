@@ -20,8 +20,10 @@ It follows the prototype sequence from `../papers/BLOC_Final.pdf`:
    the same plaintext transaction set.
 
 This is a deployability harness, not a production DVT client. It uses a
-trusted-dealer config generator, local TCP/gob messages, and raw byte payloads
-instead of signed Ethereum transactions.
+trusted-dealer config generator, raw byte payloads instead of signed Ethereum
+transactions, and a pluggable node-to-node transport. The default transport is
+the original local TCP mode; `--network libp2p` enables a static-peer libp2p
+Gossipsub backend.
 
 ## Quick Local Run
 
@@ -33,6 +35,7 @@ go run ./cmd/bloc-node gen-config \
   --threshold 3 \
   --bmax 16 \
   --max-decrypted-gas 63000 \
+  --network tcp \
   --base-consensus-port 19300 \
   --base-http-port 18300 \
   --out bloc-cluster.local.json
@@ -89,6 +92,13 @@ selected gas, and `plaintexts_hex` ordering.
 - `blockspace.max_decrypted_txs`, where `0` means `bmax`;
 - `blockspace.default_tx_gas`, used for raw submissions without metadata;
 - `provider.mode`, currently `direct` or `mempool-http`.
+- `network.mode`, currently `tcp` or `libp2p`;
+- libp2p multiaddrs and operator peer IDs for static-peer P2P runs.
+
+Node-to-node messages use a versioned BLOC envelope encoded with protobuf wire
+format. The current ACS payload adapter still serializes HBBFT Go structs with
+`gob`; replacing that payload adapter with generated protobuf messages is the
+next wire-format hardening step.
 
 The current implementation intentionally has no PBS/builder interaction and no
 prefix-constraint data model. It materializes a PBS-independent decrypted
@@ -109,6 +119,7 @@ go run ./cmd/bloc-node eval-local \
   --bmax 64 \
   --max-decrypted-gas 252000 \
   --tx-gas 21000 \
+  --network tcp \
   --base-port 24000 \
   --out-dir results/local
 ```
@@ -131,6 +142,19 @@ go run ./cmd/bloc-node eval-local \
   --tx-gas 21000 \
   --max-decrypted-gas 168000 \
   --out-dir results/blockspace-8tx
+```
+
+Static-peer libp2p smoke run:
+
+```sh
+go run ./cmd/bloc-node eval-local \
+  --nodes 4 \
+  --batch-sizes 8 \
+  --tx-size 256 \
+  --bmax 16 \
+  --network libp2p \
+  --base-port 26000 \
+  --out-dir results/libp2p-local
 ```
 
 Useful fault-injection examples:

@@ -6,6 +6,8 @@ import (
 	"github.com/anthdm/hbbft"
 )
 
+// registerGobTypes registers HoneyBadger concrete message types used inside
+// interface fields. Gob decoding fails without these registrations.
 func registerGobTypes() {
 	gob.Register(&hbbft.SlotMessage{})
 	gob.Register(&hbbft.ACSMessage{})

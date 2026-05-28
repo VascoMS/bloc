@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +22,9 @@ import (
 	"go.dedis.ch/kyber/v4/share"
 )
 
+// newNode builds the full operator state from shared cluster config and the
+// requested node id. It validates that the node has both membership metadata and
+// a BTE secret share before creating ACS and transport instances.
 func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 	normalizeConfig(&cfg)
 	var self NodeConfig
@@ -90,9 +93,11 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 		Config: hbbft.Config{N: cfg.N, F: (cfg.N - 1) / 3, ID: id, Nodes: ids, BatchSize: cfg.BMax},
 		Slot:   cfg.Slot,
 	})
+	node.transport = newTransport(node)
 	return node, nil
 }
 
+// parseFaults converts evaluator fault names into runtime fault switches.
 func parseFaults(raw string, delay time.Duration) FaultConfig {
 	faults := FaultConfig{Delay: delay}
 	for _, part := range strings.Split(raw, ",") {
@@ -111,25 +116,13 @@ func parseFaults(raw string, delay time.Duration) FaultConfig {
 	return faults
 }
 
-func (n *Node) listenConsensus() error {
-	ln, err := net.Listen("tcp", n.self.ConsensusAddr)
-	if err != nil {
-		return err
-	}
-	log.Printf("node %d consensus listening on %s", n.self.ID, n.self.ConsensusAddr)
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				log.Printf("accept: %v", err)
-				continue
-			}
-			go n.handleConn(conn)
-		}
-	}()
-	return nil
+// startTransport starts the configured node-to-node network backend.
+func (n *Node) startTransport() error {
+	return n.transport.Start(context.Background(), n.handleEnvelope)
 }
 
+// listenHTTP exposes the prototype control plane used by manual tests and the
+// local evaluator.
 func (n *Node) listenHTTP(outPath string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -165,6 +158,8 @@ func (n *Node) listenHTTP(outPath string) error {
 	return nil
 }
 
+// handleSubmitTx encrypts a submitted raw transaction into a placeholder and
+// stores it in the node-local pending proposal buffer.
 func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
@@ -234,6 +229,8 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"hash": hash, "index": index, "ciphertext_bytes": len(encoded), "gas": req.Gas})
 }
 
+// startConsensus builds this node's inclusion-list proposal, inputs it into the
+// slot ACS instance, and drains any initial ACS messages.
 func (n *Node) startConsensus() error {
 	var err error
 	n.startOnce.Do(func() {
@@ -268,19 +265,12 @@ func (n *Node) startConsensus() error {
 	return err
 }
 
-func (n *Node) handleConn(conn net.Conn) {
-	defer conn.Close()
-	data, err := io.ReadAll(conn)
-	if err != nil {
-		log.Printf("read envelope: %v", err)
+// handleEnvelope is the common inbound message path for every transport.
+func (n *Node) handleEnvelope(env WireEnvelope, size int) {
+	if env.Direct && env.To != n.self.ID {
 		return
 	}
-	var env WireEnvelope
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&env); err != nil {
-		log.Printf("decode envelope: %v", err)
-		return
-	}
-	n.recordInbound(env.Kind, len(data))
+	n.recordInbound(env.Kind, size)
 	switch env.Kind {
 	case "acs":
 		if env.ACS == nil {
@@ -311,12 +301,16 @@ func (n *Node) handleConn(conn net.Conn) {
 	}
 }
 
+// isBenignDuplicate recognizes duplicate ACS messages that can happen during
+// local retries and are safe to ignore.
 func isBenignDuplicate(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "received multiple readys") ||
 		strings.Contains(msg, "received multiple echos")
 }
 
+// drainACSMessages forwards all pending HoneyBadger ACS messages emitted by the
+// local ACS state machine.
 func (n *Node) drainACSMessages() {
 	for _, msg := range n.slot.Messages() {
 		slotMsg, ok := msg.Payload.(*hbbft.SlotMessage)
@@ -328,6 +322,9 @@ func (n *Node) drainACSMessages() {
 	}
 }
 
+// tryOutput checks whether ACS has decided. Once it has, every correct node
+// canonicalizes the decided inclusion lists, applies the deterministic merge
+// rule, plans BTE sub-batches, and gossips decryption shares.
 func (n *Node) tryOutput() {
 	out := n.slot.Output()
 	if out == nil {
@@ -430,6 +427,8 @@ func (n *Node) tryOutput() {
 	n.tryCombine()
 }
 
+// finishEmptyMaterializedSet records a successful slot result when ACS decides
+// no decryptable ciphertexts.
 func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInclusionSet, merged MergedEncryptedSet) {
 	now := time.Now()
 	n.mu.Lock()
@@ -476,6 +475,8 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 	log.Printf("node %d materialized empty transaction set after ACS (%d lists/%d candidates)", n.self.ID, len(agreed.Lists), agreed.TotalItems)
 }
 
+// tryCombine attempts BTE reconstruction once the node has threshold shares for
+// every planned sub-batch.
 func (n *Node) tryCombine() {
 	n.mu.Lock()
 	if n.result != nil || !n.planned {
@@ -535,6 +536,8 @@ func (n *Node) tryCombine() {
 	n.mu.Unlock()
 }
 
+// addWireShare validates and converts a transport share into the BTE library
+// type before deduplication.
 func (n *Node) addWireShare(w WireShare) error {
 	batchID, err := hex.DecodeString(w.BatchIDHex)
 	if err != nil {
@@ -557,6 +560,7 @@ func (n *Node) addWireShare(w WireShare) error {
 	})
 }
 
+// addShare deduplicates a BTE share and updates share-related metrics.
 func (n *Node) addShare(d be.DecryptionShare) error {
 	key := fmt.Sprintf("%x/%d/%d", d.BatchID, d.SubBatchID, d.OperatorID)
 	n.mu.Lock()
@@ -576,6 +580,7 @@ func (n *Node) addShare(d be.DecryptionShare) error {
 	return nil
 }
 
+// marshalShare converts a BTE decryption share into transport-safe hex fields.
 func (n *Node) marshalShare(d be.DecryptionShare) (WireShare, error) {
 	pointHex, err := marshalPointHex(d.Share.V)
 	if err != nil {
@@ -589,38 +594,22 @@ func (n *Node) marshalShare(d be.DecryptionShare) (WireShare, error) {
 	}, nil
 }
 
+// sendEnvelope fills in local routing fields and sends one direct envelope in a
+// goroutine so ACS state-machine progress is not blocked by network I/O.
 func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
-	peer, ok := n.peers[to]
-	if !ok {
-		log.Printf("unknown peer %d", to)
-		return
-	}
 	go func() {
 		if n.faults.Delay > 0 {
 			time.Sleep(n.faults.Delay)
 		}
-		var buf bytes.Buffer
-		if err := gob.NewEncoder(&buf).Encode(env); err != nil {
-			log.Printf("encode %s to %d failed: %v", env.Kind, to, err)
+		env.From = n.self.ID
+		env.To = to
+		env.Direct = true
+		size, err := n.transport.Send(context.Background(), to, env)
+		if err != nil {
+			log.Printf("send %s to %d failed: %v", env.Kind, to, err)
 			return
 		}
-		data := buf.Bytes()
-		var lastErr error
-		for attempt := 0; attempt < 20; attempt++ {
-			conn, err := net.DialTimeout("tcp", peer.ConsensusAddr, 500*time.Millisecond)
-			if err == nil {
-				_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-				_, err = conn.Write(data)
-				_ = conn.Close()
-				if err == nil {
-					n.recordOutbound(env.Kind, len(data))
-					return
-				}
-			}
-			lastErr = err
-			time.Sleep(100 * time.Millisecond)
-		}
-		log.Printf("send %s to %d failed: %v", env.Kind, to, lastErr)
+		n.recordOutbound(env.Kind, size)
 	}()
 }
 

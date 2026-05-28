@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// readConfig loads a cluster JSON file and applies runtime defaults.
 func readConfig(path string) (ConfigFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -21,11 +22,16 @@ func readConfig(path string) (ConfigFile, error) {
 	return cfg, nil
 }
 
+// normalizeConfig fills defaults for fields added after the first prototype
+// configs so older local configs remain usable.
 func normalizeConfig(cfg *ConfigFile) {
 	if cfg.Blockspace.DefaultTxGas == 0 {
 		cfg.Blockspace.DefaultTxGas = 21000
 	}
 	if cfg.Provider.Mode == "" {
 		cfg.Provider.Mode = "direct"
+	}
+	if cfg.Network.Mode == "" {
+		cfg.Network.Mode = "tcp"
 	}
 }

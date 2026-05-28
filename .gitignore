@@ -17,3 +17,4 @@ cluster.json
 pic-cluster*.json
 !pic-node/pic-cluster.local.json
 
+bloc-node/DOCUMENTATION.md

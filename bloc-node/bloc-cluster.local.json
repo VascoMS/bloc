@@ -36,6 +36,9 @@
   "provider": {
     "mode": "direct"
   },
+  "network": {
+    "mode": "tcp"
+  },
   "shares": [
     {
       "operator_id": 0,

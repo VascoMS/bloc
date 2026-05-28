@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// buildInclusionList loads the node's proposal from the configured provider.
 func (n *Node) buildInclusionList() (InclusionList, error) {
 	switch n.cfg.Provider.Mode {
 	case "", "direct":
@@ -24,6 +25,8 @@ func (n *Node) buildInclusionList() (InclusionList, error) {
 	}
 }
 
+// fetchMempoolInclusionList adapts the standalone mempool-il HTTP response into
+// the bloc-node InclusionList type.
 func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 	if n.cfg.Provider.MempoolURL == "" {
 		return InclusionList{}, fmt.Errorf("provider mempool-http requires mempool_url")

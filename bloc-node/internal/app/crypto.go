@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -8,10 +9,13 @@ import (
 	"strings"
 
 	"btd/curves"
+	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
+	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/pairing/bls12381/kilic"
 )
 
+// newSuite returns the pairing suite used by the current BTE integration.
 func newSuite() curves.Suite {
 	return curves.NewSuite(kilic.NewBLS12381Suite())
 }
@@ -56,11 +60,14 @@ func unmarshalScalarHex(suite curves.Suite, h string) (kyber.Scalar, error) {
 	return s, nil
 }
 
+// hashHex returns a lowercase SHA-256 hex digest.
 func hashHex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
 }
 
+// decodeHexMaybe accepts hex strings with or without 0x and falls back to raw
+// bytes for non-hex input.
 func decodeHexMaybe(s string) ([]byte, error) {
 	s = strings.TrimSpace(strings.TrimPrefix(s, "0x"))
 	if s == "" {
@@ -73,4 +80,22 @@ func decodeHexMaybe(s string) ([]byte, error) {
 		return []byte(s), nil
 	}
 	return hex.DecodeString(s)
+}
+
+// generateLibP2PIdentity creates the static Ed25519 identity stored in local
+// cluster configs for libp2p experiments.
+func generateLibP2PIdentity() (string, string, error) {
+	priv, _, err := libp2pcrypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	raw, err := libp2pcrypto.MarshalPrivateKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	id, err := libp2ppeer.IDFromPrivateKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(raw), id.String(), nil
 }

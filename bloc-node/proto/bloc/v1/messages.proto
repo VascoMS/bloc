@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package bloc.v1;
+
+option go_package = "bloc-node/internal/pb/blocv1";
+
+message Envelope {
+  uint32 version = 1;
+  uint64 from = 2;
+  uint64 to = 3;
+  bool direct = 4;
+  string kind = 5;
+  uint64 slot = 6;
+  oneof payload {
+    SlotMessage acs = 10;
+    WireShare share = 11;
+  }
+}
+
+message WireShare {
+  uint64 operator_id = 1;
+  string batch_id_hex = 2;
+  uint64 sub_batch_id = 3;
+  string point_hex = 4;
+}
+
+message SlotMessage {
+  uint64 slot = 1;
+  ACSMessage payload = 2;
+}
+
+message ACSMessage {
+  uint64 proposer_id = 1;
+  oneof payload {
+    AgreementMessage agreement = 2;
+    BroadcastMessage broadcast = 3;
+  }
+}
+
+message AgreementMessage {
+  uint64 epoch = 1;
+  oneof message {
+    BvalRequest bval = 2;
+    AuxRequest aux = 3;
+  }
+}
+
+message BvalRequest {
+  bool value = 1;
+}
+
+message AuxRequest {
+  bool value = 1;
+}
+
+message BroadcastMessage {
+  oneof payload {
+    ProofRequest proof = 1;
+    EchoRequest echo = 2;
+    ReadyRequest ready = 3;
+  }
+}
+
+message ProofRequest {
+  bytes root_hash = 1;
+  repeated bytes proof = 2;
+  uint64 index = 3;
+  uint64 leaves = 4;
+}
+
+message EchoRequest {
+  ProofRequest proof = 1;
+}
+
+message ReadyRequest {
+  bytes root_hash = 1;
+}
+
+message InclusionList {
+  uint64 slot = 1;
+  uint64 operator_id = 2;
+  repeated EncryptedPlaceholder items = 3;
+}
+
+message EncryptedPlaceholder {
+  string hash = 1;
+  bytes ciphertext = 2;
+  uint64 gas = 3;
+  string effective_fee_per_gas_wei = 4;
+  string from = 5;
+  uint64 nonce = 6;
+  string kind = 7;
+}

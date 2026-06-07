@@ -31,6 +31,7 @@ Metrics available now:
   `metrics.agreed_ciphertexts`
 - selected decrypted set size: `metrics.selected_ciphertexts`,
   `metrics.selected_gas`
+- decrypted Ethereum transaction hashes: `ethereum_tx_hashes`
 
 Interpretation:
 
@@ -71,7 +72,9 @@ Metrics available now:
 - ACS and share message counts: `outbound_messages`, `inbound_messages`
 - ACS and share byte counts: `outbound_bytes`, `inbound_bytes`
 - transport mode in evaluator output: `network`
+- protobuf-backed BLOC messages for libp2p ACS/share transport
 - ciphertext count and plaintext byte workload size
+- syntactically valid signed Ethereum transaction payloads in evaluator runs
 - skipped ciphertext count under blockspace caps:
   `metrics.skipped_ciphertexts`
 - BTE standalone full-path benchmark timings
@@ -123,6 +126,7 @@ Correctness checks available now:
 - all reporting nodes have the same `batch_id`;
 - all reporting nodes have the same materialized transaction-set hashes;
 - all reporting nodes have the same `plaintexts_hex`;
+- all reporting nodes have the same parsed `ethereum_tx_hashes`;
 - runs fail cleanly on timeout if not enough shares are available.
 
 Missing:
@@ -168,9 +172,21 @@ Missing:
 
 - Ethereum placeholder transaction format;
 - devnet gas estimator for placeholder calldata;
-- deterministic replacement of placeholders with signed Ethereum transactions;
+- executable replacement of placeholders with signed Ethereum transactions;
 - historical base-fee / priority-fee trace ingestion;
 - real proposer reward and operational-cost model.
+
+## MVP Demo Script
+
+Run the bundled demo scenarios with:
+
+```sh
+cd bloc-node
+./scripts/demo-local.sh
+```
+
+The script saves normal TCP, blockspace cap, withheld-share, and optional
+libp2p smoke outputs under `results/mvp-demo/<timestamp>/`.
 
 ## DVT/Ethereum Track
 
@@ -179,7 +195,7 @@ for a full deployability claim. The DVT/Ethereum track must add:
 
 - integration with an SSV/DVT proposer workflow or an equivalent threshold
   signing harness;
-- Ethereum transaction parsing and syntactic validation;
+- execution-client/devnet validation of decrypted signed transactions;
 - deterministic block materialization from committed placeholders;
 - execution-client/devnet validation and gas measurement;
 - DKG or documented key-management replacement for trusted-dealer configs.

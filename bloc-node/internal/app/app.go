@@ -33,6 +33,10 @@ func Run(args []string) {
 		if err := evalLocal(args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "report":
+		if err := reportDemo(args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -45,5 +49,6 @@ func usage() {
   bloc-node run --config cluster.json --id 0 --slot 1 --start-after 3s
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results
+  bloc-node report --dir results/mvp-demo/latest --out results/mvp-demo/latest/DEMO_REPORT.md
 `)
 }

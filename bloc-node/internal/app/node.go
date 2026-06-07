@@ -1,9 +1,7 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"bloc-node/internal/app/ethdemo"
+	"bloc-node/internal/app/inclusion"
 	"btd/be"
 	"github.com/anthdm/hbbft"
 	"go.dedis.ch/kyber/v4/share"
@@ -82,7 +82,7 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 		metrics: Metrics{
 			SharesNeededPerSub: cfg.Threshold,
 			MaxDecryptedGas:    cfg.Blockspace.MaxDecryptedGas,
-			MaxDecryptedTxs:    effectiveMaxDecryptedTxs(cfg.Blockspace, cfg.BMax),
+			MaxDecryptedTxs:    inclusion.EffectiveMaxDecryptedTxs(cfg.Blockspace, cfg.BMax),
 			OutboundMessages:   make(map[string]int),
 			InboundMessages:    make(map[string]int),
 			OutboundBytes:      make(map[string]int64),
@@ -192,7 +192,7 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	if req.EffectiveFeePerGasWei == "" {
 		req.EffectiveFeePerGasWei = "0"
 	}
-	if _, ok := parseBigInt(req.EffectiveFeePerGasWei); !ok {
+	if !validNonNegativeDecimal(req.EffectiveFeePerGasWei) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "effective_fee_per_gas_wei must be a non-negative integer"})
 		return
 	}
@@ -242,20 +242,20 @@ func (n *Node) startConsensus() error {
 		}
 		if n.faults.OmitProposal {
 			list.Items = nil
-			list.Hash = hashInclusionList(list)
+			list.Hash = inclusion.HashInclusionList(list)
 		}
 		n.mu.Lock()
 		n.metrics.SlotStartUnixNano = start.UnixNano()
 		n.metrics.ProposalTxs = len(list.Items)
 		n.metrics.ProposalHash = list.Hash
 		n.mu.Unlock()
-		var buf bytes.Buffer
-		err = gob.NewEncoder(&buf).Encode(list)
+		encodedList, encodeErr := inclusion.EncodeList(list)
+		err = encodeErr
 		if err != nil {
 			return
 		}
 		log.Printf("node %d starting slot %d with inclusion list %s (%d items)", n.self.ID, n.cfg.Slot, list.Hash, len(list.Items))
-		err = n.slot.InputBatch(buf.Bytes())
+		err = n.slot.InputBatch(encodedList)
 		if err != nil {
 			return
 		}
@@ -333,16 +333,16 @@ func (n *Node) tryOutput() {
 	decisionAt := time.Now()
 	lists := make([]InclusionList, 0, len(out.OrderedBatches))
 	for _, accepted := range out.OrderedBatches {
-		var list InclusionList
-		if err := gob.NewDecoder(bytes.NewReader(accepted.Batch)).Decode(&list); err != nil {
+		list, err := inclusion.DecodeList(accepted.Batch)
+		if err != nil {
 			log.Printf("decode accepted inclusion list from %d: %v", accepted.ProposerID, err)
 			return
 		}
-		list.Hash = hashInclusionList(list)
+		list.Hash = inclusion.HashInclusionList(list)
 		lists = append(lists, list)
 	}
-	agreed := newAgreedInclusionSet(n.cfg.Slot, lists)
-	merged := mergeInclusionLists(n.cfg.Slot, lists, n.cfg.Blockspace, n.cfg.BMax)
+	agreed := inclusion.NewAgreedSet(n.cfg.Slot, lists)
+	merged := inclusion.Merge(n.cfg.Slot, lists, n.cfg.Blockspace, n.cfg.BMax)
 	var encrypted []be.Ciphertext
 	for _, item := range merged.Items {
 		ct, err := n.cluster.UnmarshalCiphertext(item.Ciphertext)
@@ -373,7 +373,7 @@ func (n *Node) tryOutput() {
 		AgreedSetHash:   agreed.Hash,
 		MergedSetHash:   merged.Hash,
 		SelectedGas:     merged.SelectedGas,
-		EncryptedHashes: encryptedHashes(merged.Items),
+		EncryptedHashes: inclusion.EncryptedHashes(merged.Items),
 	}
 	n.planned = true
 	n.metrics.ACSDecisionUnixNano = decisionAt.UnixNano()
@@ -442,7 +442,7 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 		AgreedSetHash:   agreed.Hash,
 		MergedSetHash:   merged.Hash,
 		SelectedGas:     merged.SelectedGas,
-		EncryptedHashes: encryptedHashes(merged.Items),
+		EncryptedHashes: inclusion.EncryptedHashes(merged.Items),
 		PlaintextHashes: []string{},
 		PlaintextsHex:   []string{},
 	}
@@ -487,6 +487,10 @@ func (n *Node) tryCombine() {
 	material := n.material
 	shares := append([]be.DecryptionShare(nil), n.shares...)
 	n.mu.Unlock()
+	shares, rejected := matchingSharesForPlan(shares, plan)
+	if rejected > 0 {
+		log.Printf("ignored %d shares for other batches or sub-batches while waiting for batch %s", rejected, hex.EncodeToString(plan.BatchID[:]))
+	}
 	if !hasThresholdPerSubBatch(shares, plan, n.cfg.Threshold) {
 		return
 	}
@@ -499,6 +503,8 @@ func (n *Node) tryCombine() {
 	combineAt := time.Now()
 	plaintexts := make([]string, len(results))
 	plaintextHashes := make([]string, len(results))
+	ethereumTxHashes := make([]string, len(results))
+	ethereumTxs := make([]EthereumTxSummary, len(results))
 	for i, r := range results {
 		if r.Err != nil || !r.HashOK {
 			plaintexts[i] = "ERROR:" + r.Err.Error()
@@ -507,9 +513,18 @@ func (n *Node) tryCombine() {
 		}
 		plaintexts[i] = "0x" + hex.EncodeToString(r.RawTx)
 		plaintextHashes[i] = hashHex(r.RawTx)
+		txSummary, err := ethdemo.Parse(r.RawTx)
+		if err != nil {
+			plaintexts[i] = "ERROR:invalid ethereum transaction:" + err.Error()
+			continue
+		}
+		ethereumTxHashes[i] = txSummary.Hash
+		ethereumTxs[i] = txSummary
 	}
 	material.PlaintextsHex = plaintexts
 	material.PlaintextHashes = plaintextHashes
+	material.EthereumTxHashes = ethereumTxHashes
+	material.EthereumTxs = ethereumTxs
 	result := &Result{
 		Slot:         n.cfg.Slot,
 		NodeID:       n.self.ID,
@@ -693,9 +708,6 @@ func (n *Node) writeResultWhenReady(path string) {
 func hasThresholdPerSubBatch(shares []be.DecryptionShare, plan be.BatchPlan, threshold int) bool {
 	counts := make(map[int]map[int]bool)
 	for _, d := range shares {
-		if d.BatchID != plan.BatchID {
-			continue
-		}
 		if counts[d.SubBatchID] == nil {
 			counts[d.SubBatchID] = make(map[int]bool)
 		}
@@ -707,4 +719,17 @@ func hasThresholdPerSubBatch(shares []be.DecryptionShare, plan be.BatchPlan, thr
 		}
 	}
 	return true
+}
+
+func matchingSharesForPlan(shares []be.DecryptionShare, plan be.BatchPlan) ([]be.DecryptionShare, int) {
+	matching := make([]be.DecryptionShare, 0, len(shares))
+	rejected := 0
+	for _, d := range shares {
+		if d.BatchID != plan.BatchID || d.SubBatchID < 0 || d.SubBatchID >= len(plan.SubBatches) {
+			rejected++
+			continue
+		}
+		matching = append(matching, d)
+	}
+	return matching, rejected
 }

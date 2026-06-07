@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"bloc-node/internal/app/inclusion"
 )
 
 // buildInclusionList loads the node's proposal from the configured provider.
@@ -16,7 +18,7 @@ func (n *Node) buildInclusionList() (InclusionList, error) {
 		items := append([]EncryptedPlaceholder(nil), n.pending...)
 		n.mu.Unlock()
 		list := InclusionList{Slot: n.cfg.Slot, OperatorID: n.self.ID, Items: items}
-		list.Hash = hashInclusionList(list)
+		list.Hash = inclusion.HashInclusionList(list)
 		return list, nil
 	case "mempool-http":
 		return n.fetchMempoolInclusionList()
@@ -91,6 +93,6 @@ func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 		})
 	}
 	list := InclusionList{Slot: n.cfg.Slot, OperatorID: n.self.ID, Items: items}
-	list.Hash = hashInclusionList(list)
+	list.Hash = inclusion.HashInclusionList(list)
 	return list, nil
 }

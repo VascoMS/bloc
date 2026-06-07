@@ -1,15 +1,17 @@
-package app
+package inclusion
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"math/big"
 	"sort"
 	"strings"
 )
 
-// hashInclusionList returns the stable identity of an inclusion-list proposal.
+// HashInclusionList returns the stable identity of an inclusion-list proposal.
 // The Hash field is excluded so nodes can recompute and verify list identity.
-func hashInclusionList(list InclusionList) string {
+func HashInclusionList(list InclusionList) string {
 	type canonical struct {
 		Slot       uint64                 `json:"slot"`
 		OperatorID uint64                 `json:"operator_id"`
@@ -19,12 +21,12 @@ func hashInclusionList(list InclusionList) string {
 	return hashHex(data)
 }
 
-// newAgreedInclusionSet canonicalizes the ACS output independently of the order
-// in which a local HoneyBadger instance exposes accepted batches.
-func newAgreedInclusionSet(slot uint64, lists []InclusionList) AgreedInclusionSet {
+// NewAgreedSet canonicalizes the ACS output independently of the order in
+// which a local HoneyBadger instance exposes accepted batches.
+func NewAgreedSet(slot uint64, lists []InclusionList) AgreedInclusionSet {
 	canonicalLists := append([]InclusionList(nil), lists...)
 	for i := range canonicalLists {
-		canonicalLists[i].Hash = hashInclusionList(canonicalLists[i])
+		canonicalLists[i].Hash = HashInclusionList(canonicalLists[i])
 	}
 	sort.Slice(canonicalLists, func(i, j int) bool {
 		if canonicalLists[i].Hash != canonicalLists[j].Hash {
@@ -44,9 +46,9 @@ func newAgreedInclusionSet(slot uint64, lists []InclusionList) AgreedInclusionSe
 	return AgreedInclusionSet{Slot: slot, Lists: canonicalLists, Hash: hashHex(data), TotalItems: total}
 }
 
-// mergeInclusionLists deduplicates agreed encrypted placeholders and applies the
-// deterministic ordering and blockspace limits that define the decrypted set.
-func mergeInclusionLists(slot uint64, lists []InclusionList, blockspace BlockspaceConfig, bmax int) MergedEncryptedSet {
+// Merge deduplicates agreed encrypted placeholders and applies the deterministic
+// ordering and blockspace limits that define the decrypted set.
+func Merge(slot uint64, lists []InclusionList, blockspace BlockspaceConfig, bmax int) MergedEncryptedSet {
 	unique := make(map[string]EncryptedPlaceholder)
 	for _, list := range lists {
 		for _, item := range list.Items {
@@ -66,7 +68,7 @@ func mergeInclusionLists(slot uint64, lists []InclusionList, blockspace Blockspa
 	}
 	sortPlaceholders(candidates)
 
-	maxTxs := effectiveMaxDecryptedTxs(blockspace, bmax)
+	maxTxs := EffectiveMaxDecryptedTxs(blockspace, bmax)
 	selected := make([]EncryptedPlaceholder, 0, minInt(maxTxs, len(candidates)))
 	var selectedGas uint64
 	for _, item := range candidates {
@@ -87,12 +89,19 @@ func mergeInclusionLists(slot uint64, lists []InclusionList, blockspace Blockspa
 		SelectedGas:  selectedGas,
 		SkippedItems: len(candidates) - len(selected),
 	}
-	merged.Hash = hashMergedEncryptedSet(merged)
+	merged.Hash = hashMergedSet(merged)
 	return merged
 }
 
-// normalizePlaceholder rejects malformed placeholder metadata and canonicalizes
-// fields that participate in ordering or hashing.
+// EncryptedHashes extracts ciphertext identities for the materialized artifact.
+func EncryptedHashes(items []EncryptedPlaceholder) []string {
+	out := make([]string, len(items))
+	for i, item := range items {
+		out[i] = item.Hash
+	}
+	return out
+}
+
 func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, bool) {
 	if len(item.Ciphertext) == 0 || item.Gas == 0 {
 		return EncryptedPlaceholder{}, false
@@ -119,8 +128,6 @@ func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, bool
 	return item, true
 }
 
-// sortPlaceholders implements the deterministic priority rule used by all
-// correct nodes before blockspace limits are applied.
 func sortPlaceholders(items []EncryptedPlaceholder) {
 	sort.Slice(items, func(i, j int) bool {
 		feeI, _ := parseBigInt(items[i].EffectiveFeePerGasWei)
@@ -138,9 +145,7 @@ func sortPlaceholders(items []EncryptedPlaceholder) {
 	})
 }
 
-// hashMergedEncryptedSet returns the stable identity of the selected encrypted
-// transaction set.
-func hashMergedEncryptedSet(merged MergedEncryptedSet) string {
+func hashMergedSet(merged MergedEncryptedSet) string {
 	type canonical struct {
 		Slot        uint64                 `json:"slot"`
 		Items       []EncryptedPlaceholder `json:"items"`
@@ -150,8 +155,8 @@ func hashMergedEncryptedSet(merged MergedEncryptedSet) string {
 	return hashHex(data)
 }
 
-// effectiveMaxDecryptedTxs resolves a zero or oversized transaction cap to bmax.
-func effectiveMaxDecryptedTxs(blockspace BlockspaceConfig, bmax int) int {
+// EffectiveMaxDecryptedTxs resolves a zero or oversized transaction cap to bmax.
+func EffectiveMaxDecryptedTxs(blockspace BlockspaceConfig, bmax int) int {
 	if bmax <= 0 {
 		return 0
 	}
@@ -161,16 +166,6 @@ func effectiveMaxDecryptedTxs(blockspace BlockspaceConfig, bmax int) int {
 	return blockspace.MaxDecryptedTxs
 }
 
-// encryptedHashes extracts ciphertext identities for the materialized artifact.
-func encryptedHashes(items []EncryptedPlaceholder) []string {
-	out := make([]string, len(items))
-	for i, item := range items {
-		out[i] = item.Hash
-	}
-	return out
-}
-
-// parseBigInt parses non-negative decimal integers used for fee metadata.
 func parseBigInt(raw string) (*big.Int, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -181,6 +176,11 @@ func parseBigInt(raw string) (*big.Int, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+func hashHex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 func minInt(a, b int) int {

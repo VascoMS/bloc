@@ -2,8 +2,46 @@ package app
 
 import (
 	"bytes"
+	"strings"
 	"testing"
+
+	"bloc-node/internal/app/ethdemo"
+	"bloc-node/internal/app/inclusion"
+	"btd/be"
+	"github.com/anthdm/hbbft"
 )
+
+func TestGenerateDemoEthereumTxParsesAndIsDeterministic(t *testing.T) {
+	rawA, summaryA, err := ethdemo.Generate(3, 180, 50000, "12345", 1, 7)
+	if err != nil {
+		t.Fatalf("generate first tx: %v", err)
+	}
+	rawB, summaryB, err := ethdemo.Generate(3, 180, 50000, "12345", 1, 7)
+	if err != nil {
+		t.Fatalf("generate second tx: %v", err)
+	}
+	if !bytes.Equal(rawA, rawB) {
+		t.Fatalf("demo tx generation is not deterministic")
+	}
+	if len(rawA) < 180 {
+		t.Fatalf("raw tx has %d bytes, want at least 180", len(rawA))
+	}
+	if summaryA.Hash != summaryB.Hash {
+		t.Fatalf("hash changed across deterministic generation: %s != %s", summaryA.Hash, summaryB.Hash)
+	}
+	if summaryA.Nonce != 7 || summaryA.Gas != 50000 || summaryA.EffectiveFeePerGasWei != "12345" {
+		t.Fatalf("unexpected summary: %+v", summaryA)
+	}
+	if !strings.HasPrefix(summaryA.From, "0x") || len(summaryA.From) != 42 {
+		t.Fatalf("invalid sender address: %s", summaryA.From)
+	}
+}
+
+func TestParseEthereumTxRejectsMalformedPayload(t *testing.T) {
+	if _, err := ethdemo.Parse([]byte{0x01, 0x02, 0x03}); err == nil {
+		t.Fatalf("expected malformed payload to fail")
+	}
+}
 
 func TestProtoEnvelopeCodecRoundTrip(t *testing.T) {
 	codec := ProtoEnvelopeCodec{}
@@ -30,6 +68,86 @@ func TestProtoEnvelopeCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProtoEnvelopeCodecRoundTripsACSPayloads(t *testing.T) {
+	tests := []*hbbft.SlotMessage{
+		{
+			Slot: 11,
+			Payload: &hbbft.ACSMessage{ProposerID: 2, Payload: &hbbft.AgreementMessage{
+				Epoch:   3,
+				Message: &hbbft.BvalRequest{Value: true},
+			}},
+		},
+		{
+			Slot: 11,
+			Payload: &hbbft.ACSMessage{ProposerID: 2, Payload: &hbbft.AgreementMessage{
+				Epoch:   4,
+				Message: &hbbft.AuxRequest{Value: false},
+			}},
+		},
+		{
+			Slot: 11,
+			Payload: &hbbft.ACSMessage{ProposerID: 2, Payload: &hbbft.BroadcastMessage{Payload: &hbbft.ProofRequest{
+				RootHash: []byte{1, 2, 3},
+				Proof:    [][]byte{{4, 5}, {6, 7}},
+				Index:    1,
+				Leaves:   2,
+			}}},
+		},
+		{
+			Slot: 11,
+			Payload: &hbbft.ACSMessage{ProposerID: 2, Payload: &hbbft.BroadcastMessage{Payload: &hbbft.EchoRequest{ProofRequest: hbbft.ProofRequest{
+				RootHash: []byte{8, 9},
+				Proof:    [][]byte{{10}},
+				Index:    0,
+				Leaves:   1,
+			}}}},
+		},
+		{
+			Slot: 11,
+			Payload: &hbbft.ACSMessage{ProposerID: 2, Payload: &hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{
+				RootHash: []byte{11, 12},
+			}}},
+		},
+	}
+	codec := ProtoEnvelopeCodec{}
+	for _, acs := range tests {
+		in := WireEnvelope{From: 1, To: 3, Direct: true, Kind: "acs", Slot: 11, ACS: acs}
+		data, err := codec.Encode(in)
+		if err != nil {
+			t.Fatalf("encode %T: %v", acs.Payload.Payload, err)
+		}
+		out, err := codec.Decode(data)
+		if err != nil {
+			t.Fatalf("decode %T: %v", acs.Payload.Payload, err)
+		}
+		if out.ACS == nil || out.ACS.Slot != acs.Slot || out.ACS.Payload.ProposerID != acs.Payload.ProposerID {
+			t.Fatalf("decoded acs header mismatch: %+v", out.ACS)
+		}
+		if out.ACS.Payload.Payload == nil {
+			t.Fatalf("decoded nil acs payload for %T", acs.Payload.Payload)
+		}
+	}
+}
+
+func TestInclusionListProtoRoundTrip(t *testing.T) {
+	list := InclusionList{Slot: 9, OperatorID: 2, Items: []EncryptedPlaceholder{
+		testPlaceholder("one", 21000, "100", "0xabc", 0),
+		testPlaceholder("two", 30000, "90", "0xdef", 1),
+	}}
+	list.Hash = inclusion.HashInclusionList(list)
+	data, err := inclusion.EncodeList(list)
+	if err != nil {
+		t.Fatalf("encode inclusion list: %v", err)
+	}
+	out, err := inclusion.DecodeList(data)
+	if err != nil {
+		t.Fatalf("decode inclusion list: %v", err)
+	}
+	if out.Hash != list.Hash || len(out.Items) != len(list.Items) {
+		t.Fatalf("decoded list mismatch: %+v", out)
+	}
+}
+
 func TestMergeInclusionListsDeterministicAcrossListOrder(t *testing.T) {
 	a := testPlaceholder("a", 21000, "10", "0xbbb", 1)
 	b := testPlaceholder("b", 21000, "20", "0xaaa", 0)
@@ -44,8 +162,8 @@ func TestMergeInclusionListsDeterministicAcrossListOrder(t *testing.T) {
 		{Slot: 1, OperatorID: 2, Items: []EncryptedPlaceholder{b, a}},
 	}
 
-	mergedLeft := mergeInclusionLists(1, left, BlockspaceConfig{}, 10)
-	mergedRight := mergeInclusionLists(1, right, BlockspaceConfig{}, 10)
+	mergedLeft := inclusion.Merge(1, left, BlockspaceConfig{}, 10)
+	mergedRight := inclusion.Merge(1, right, BlockspaceConfig{}, 10)
 
 	if mergedLeft.Hash != mergedRight.Hash {
 		t.Fatalf("merge hash differs: %s != %s", mergedLeft.Hash, mergedRight.Hash)
@@ -70,7 +188,7 @@ func TestMergeInclusionListsAppliesGasTxAndBMaxCaps(t *testing.T) {
 	}
 	lists := []InclusionList{{Slot: 7, OperatorID: 0, Items: items}}
 
-	merged := mergeInclusionLists(7, lists, BlockspaceConfig{MaxDecryptedGas: 60000, MaxDecryptedTxs: 3}, 2)
+	merged := inclusion.Merge(7, lists, BlockspaceConfig{MaxDecryptedGas: 60000, MaxDecryptedTxs: 3}, 2)
 
 	if len(merged.Items) != 2 {
 		t.Fatalf("selected %d items, want 2", len(merged.Items))
@@ -90,7 +208,7 @@ func TestMergeInclusionListsDeduplicatesAndSkipsInvalid(t *testing.T) {
 	invalidHash := testPlaceholder("invalid-hash", 21000, "3", "0x3", 0)
 	invalidHash.Hash = "deadbeef"
 
-	merged := mergeInclusionLists(1, []InclusionList{
+	merged := inclusion.Merge(1, []InclusionList{
 		{Slot: 1, OperatorID: 0, Items: []EncryptedPlaceholder{valid, invalidGas}},
 		{Slot: 1, OperatorID: 1, Items: []EncryptedPlaceholder{duplicate, invalidHash}},
 	}, BlockspaceConfig{}, 10)
@@ -106,7 +224,7 @@ func TestMergeInclusionListsDeduplicatesAndSkipsInvalid(t *testing.T) {
 func TestMergeInclusionListsAllowsEmptySelectionUnderGasCap(t *testing.T) {
 	item := testPlaceholder("too-large", 21000, "1", "0x1", 0)
 
-	merged := mergeInclusionLists(1, []InclusionList{
+	merged := inclusion.Merge(1, []InclusionList{
 		{Slot: 1, OperatorID: 0, Items: []EncryptedPlaceholder{item}},
 	}, BlockspaceConfig{MaxDecryptedGas: 1}, 10)
 
@@ -115,6 +233,42 @@ func TestMergeInclusionListsAllowsEmptySelectionUnderGasCap(t *testing.T) {
 	}
 	if merged.SkippedItems != 1 {
 		t.Fatalf("skipped items = %d, want 1", merged.SkippedItems)
+	}
+}
+
+func TestMatchingSharesForPlanIgnoresOtherBatchShares(t *testing.T) {
+	var batchID [32]byte
+	batchID[0] = 1
+	var otherBatchID [32]byte
+	otherBatchID[0] = 2
+	plan := be.BatchPlan{
+		BatchID: batchID,
+		SubBatches: [][]be.BatchItem{
+			{{OriginalPosition: 0}},
+			{{OriginalPosition: 1}},
+		},
+	}
+	shares := []be.DecryptionShare{
+		{OperatorID: 0, BatchID: batchID, SubBatchID: 0},
+		{OperatorID: 1, BatchID: batchID, SubBatchID: 0},
+		{OperatorID: 2, BatchID: batchID, SubBatchID: 0},
+		{OperatorID: 0, BatchID: batchID, SubBatchID: 1},
+		{OperatorID: 1, BatchID: batchID, SubBatchID: 1},
+		{OperatorID: 2, BatchID: batchID, SubBatchID: 1},
+		{OperatorID: 3, BatchID: otherBatchID, SubBatchID: 0},
+		{OperatorID: 3, BatchID: batchID, SubBatchID: 2},
+	}
+
+	matching, rejected := matchingSharesForPlan(shares, plan)
+
+	if rejected != 2 {
+		t.Fatalf("rejected %d shares, want 2", rejected)
+	}
+	if len(matching) != 6 {
+		t.Fatalf("matched %d shares, want 6", len(matching))
+	}
+	if !hasThresholdPerSubBatch(matching, plan, 3) {
+		t.Fatalf("matching shares should satisfy threshold")
 	}
 }
 

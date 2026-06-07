@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"bloc-node/internal/app/ethdemo"
+	"bloc-node/internal/app/inclusion"
 	"btd/be"
 	"btd/curves"
 	"github.com/anthdm/hbbft"
@@ -46,14 +48,6 @@ type ShareConfig struct {
 	ScalarHex  string `json:"scalar_hex"`
 }
 
-// BlockspaceConfig limits how much decrypted transaction material a slot may
-// output. These limits are applied after ACS decides the set of inclusion lists.
-type BlockspaceConfig struct {
-	MaxDecryptedGas uint64 `json:"max_decrypted_gas,omitempty"`
-	MaxDecryptedTxs int    `json:"max_decrypted_txs,omitempty"`
-	DefaultTxGas    uint64 `json:"default_tx_gas,omitempty"`
-}
-
 // ProviderConfig selects where a node gets its local inclusion-list proposal.
 type ProviderConfig struct {
 	Mode       string `json:"mode,omitempty"`
@@ -87,59 +81,31 @@ type WireShare struct {
 	PointHex   string
 }
 
-// EncryptedPlaceholder is one encrypted transaction placeholder plus ordering
-// metadata used by the deterministic merge rule.
-type EncryptedPlaceholder struct {
-	Hash                  string `json:"hash"`
-	Ciphertext            []byte `json:"ciphertext"`
-	Gas                   uint64 `json:"gas"`
-	EffectiveFeePerGasWei string `json:"effective_fee_per_gas_wei"`
-	From                  string `json:"from"`
-	Nonce                 uint64 `json:"nonce"`
-	Kind                  string `json:"kind"`
-}
-
-// InclusionList is one operator's ACS proposal for a slot.
-type InclusionList struct {
-	Slot       uint64                 `json:"slot"`
-	OperatorID uint64                 `json:"operator_id"`
-	Items      []EncryptedPlaceholder `json:"items"`
-	Hash       string                 `json:"hash"`
-}
-
-// AgreedInclusionSet is the canonical set of inclusion lists output by ACS.
-type AgreedInclusionSet struct {
-	Slot       uint64          `json:"slot"`
-	Lists      []InclusionList `json:"lists"`
-	Hash       string          `json:"hash"`
-	TotalItems int             `json:"total_items"`
-}
-
-// MergedEncryptedSet is the deterministic post-ACS encrypted prefix selected
-// under the configured blockspace limits.
-type MergedEncryptedSet struct {
-	Slot         uint64                 `json:"slot"`
-	Items        []EncryptedPlaceholder `json:"items"`
-	Hash         string                 `json:"hash"`
-	SelectedGas  uint64                 `json:"selected_gas"`
-	SkippedItems int                    `json:"skipped_items"`
-}
+type BlockspaceConfig = inclusion.BlockspaceConfig
+type EncryptedPlaceholder = inclusion.EncryptedPlaceholder
+type InclusionList = inclusion.InclusionList
+type AgreedInclusionSet = inclusion.AgreedInclusionSet
+type MergedEncryptedSet = inclusion.MergedEncryptedSet
 
 // MaterializedTransactionSet is the final slot artifact after the selected
 // encrypted placeholders have been decrypted.
 type MaterializedTransactionSet struct {
-	Slot            uint64   `json:"slot"`
-	AgreedSetHash   string   `json:"agreed_set_hash"`
-	MergedSetHash   string   `json:"merged_set_hash"`
-	SelectedGas     uint64   `json:"selected_gas"`
-	EncryptedHashes []string `json:"encrypted_hashes"`
-	PlaintextHashes []string `json:"plaintext_hashes"`
-	PlaintextsHex   []string `json:"plaintexts_hex"`
+	Slot             uint64              `json:"slot"`
+	AgreedSetHash    string              `json:"agreed_set_hash"`
+	MergedSetHash    string              `json:"merged_set_hash"`
+	SelectedGas      uint64              `json:"selected_gas"`
+	EncryptedHashes  []string            `json:"encrypted_hashes"`
+	PlaintextHashes  []string            `json:"plaintext_hashes"`
+	EthereumTxHashes []string            `json:"ethereum_tx_hashes,omitempty"`
+	EthereumTxs      []EthereumTxSummary `json:"ethereum_txs,omitempty"`
+	PlaintextsHex    []string            `json:"plaintexts_hex"`
 }
+
+type EthereumTxSummary = ethdemo.Summary
 
 // SubmitTxRequest is accepted by the prototype HTTP API. The raw transaction
 // may be supplied as hex; the remaining fields are metadata used by the merge
-// rule until real Ethereum transaction parsing is added.
+// rule before the encrypted payload is decrypted and parsed.
 type SubmitTxRequest struct {
 	RawTx                 string `json:"raw_tx"`
 	Gas                   uint64 `json:"gas,omitempty"`

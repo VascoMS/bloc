@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"bloc-node/internal/app/ethdemo"
 )
 
 // EvalRun is one evaluator measurement row before it is expanded into JSON and
@@ -46,10 +47,10 @@ func evalLocal(args []string) error {
 	threshold := fs.Int("threshold", 0, "BTE threshold; defaults to 2f+1")
 	bmax := fs.Int("bmax", 32, "BTE maximum batch size")
 	batchSizesRaw := fs.String("batch-sizes", "8", "comma-separated transaction batch sizes")
-	txSize := fs.Int("tx-size", 256, "raw transaction byte size")
-	txGas := fs.Uint64("tx-gas", 21000, "synthetic transaction gas metadata")
-	feeStart := fs.Uint64("fee-start-wei", 1000, "first synthetic effective fee per gas in wei")
-	feeStep := fs.Uint64("fee-step-wei", 1, "synthetic fee increment per transaction")
+	txSize := fs.Int("tx-size", 256, "minimum signed Ethereum transaction byte size")
+	txGas := fs.Uint64("tx-gas", 21000, "minimum gas limit used in generated Ethereum transactions")
+	feeStart := fs.Uint64("fee-start-wei", 1000, "first generated effective fee per gas in wei")
+	feeStep := fs.Uint64("fee-step-wei", 1, "generated fee increment per transaction")
 	maxDecryptedGas := fs.Uint64("max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	maxDecryptedTxs := fs.Int("max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
 	networkMode := fs.String("network", "tcp", "node-to-node transport: tcp or libp2p")
@@ -57,6 +58,7 @@ func evalLocal(args []string) error {
 	basePort := fs.Int("base-port", 21000, "base port; consensus uses base, HTTP uses base+1000")
 	timeout := fs.Duration("timeout", 20*time.Second, "per-run timeout")
 	faultRaw := fs.String("fault", "", "optional node fault as id:mode, e.g. 3:withhold-share or 0:omit-proposal")
+	printMode := fs.String("print", "json", "stdout format: json or summary")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -87,8 +89,15 @@ func evalLocal(args []string) error {
 	if err := writeEvalOutputs(*outDir, runs); err != nil {
 		return err
 	}
-	encoded, _ := json.MarshalIndent(runs, "", "  ")
-	fmt.Println(string(encoded))
+	switch *printMode {
+	case "summary":
+		printEvalSummary(runs, *outDir)
+	case "json":
+		encoded, _ := json.MarshalIndent(runs, "", "  ")
+		fmt.Println(string(encoded))
+	default:
+		return fmt.Errorf("unknown print mode %q", *printMode)
+	}
 	return nil
 }
 
@@ -156,13 +165,17 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	}
 	for i := 0; i < batchSize; i++ {
 		nodeID := i % nodes
-		rawTx := syntheticTx(i, txSize)
+		feeWei := strconv.FormatUint(feeStart+uint64(i)*feeStep, 10)
+		rawTx, txSummary, err := ethdemo.Generate(i, txSize, txGas, feeWei, nodeID, uint64(i/nodes))
+		if err != nil {
+			return run, fmt.Errorf("generate ethereum tx %d: %w", i, err)
+		}
 		submit := SubmitTxRequest{
-			RawTx:                 "0x" + hex.EncodeToString(rawTx),
-			Gas:                   txGas,
-			EffectiveFeePerGasWei: strconv.FormatUint(feeStart+uint64(i)*feeStep, 10),
-			From:                  fmt.Sprintf("0x%040x", i%nodes),
-			Nonce:                 uint64(i / nodes),
+			RawTx:                 "0x" + fmt.Sprintf("%x", rawTx),
+			Gas:                   txSummary.Gas,
+			EffectiveFeePerGasWei: txSummary.EffectiveFeePerGasWei,
+			From:                  txSummary.From,
+			Nonce:                 txSummary.Nonce,
 			Kind:                  "placeholder",
 		}
 		if err := postJSON(fmt.Sprintf("http://127.0.0.1:%d/tx", basePort+1000+nodeID), submit); err != nil {
@@ -271,17 +284,6 @@ func postJSON(url string, v any) error {
 	return nil
 }
 
-func syntheticTx(i, size int) []byte {
-	if size < 8 {
-		size = 8
-	}
-	out := make([]byte, size)
-	for j := range out {
-		out[j] = byte((i + j) % 251)
-	}
-	return out
-}
-
 func resultsConsistent(results []Result) bool {
 	if len(results) == 0 {
 		return false
@@ -294,6 +296,28 @@ func resultsConsistent(results []Result) bool {
 		}
 	}
 	return true
+}
+
+func printEvalSummary(runs []EvalRun, outDir string) {
+	for _, run := range runs {
+		fmt.Printf("scenario=%s success=%t consistent=%t network=%s nodes=%d batch_size=%d\n", run.RunID, run.Success, run.Consistent, run.Network, run.Nodes, run.BatchSize)
+		if run.Error != "" {
+			fmt.Printf("  error=%s\n", run.Error)
+			fmt.Printf("  output_dir=%s\n", outDir)
+			continue
+		}
+		if len(run.Results) == 0 {
+			fmt.Printf("  output_dir=%s\n", outDir)
+			continue
+		}
+		result := run.Results[0]
+		fmt.Printf("  batch_id=%s\n", result.BatchID)
+		fmt.Printf("  agreed_lists=%d selected_txs=%d selected_gas=%d skipped=%d\n", result.Metrics.AgreedLists, result.Metrics.SelectedCiphertexts, result.Metrics.SelectedGas, result.Metrics.SkippedCiphertexts)
+		fmt.Printf("  merged_set_hash=%s\n", result.Materialized.MergedSetHash)
+		fmt.Printf("  ethereum_tx_hashes=%s\n", strings.Join(result.Materialized.EthereumTxHashes, ","))
+		fmt.Printf("  total_slot_ms=%d acs_ms=%d commit_to_plaintext_ms=%d\n", result.Metrics.TotalSlotMS, result.Metrics.ACSMS, result.Metrics.CommitToPlaintextMS)
+		fmt.Printf("  output_dir=%s\n", outDir)
+	}
 }
 
 func parseEvalFault(raw string) (map[uint64]string, error) {

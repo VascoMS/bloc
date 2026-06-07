@@ -123,6 +123,73 @@ func TestHybridEncryptionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCombineSharesAcceptsAnyValidThresholdSubset(t *testing.T) {
+	cluster := newTestCluster(t, 16, 4, 3)
+	rawTxs := make([][]byte, 8)
+	ciphertexts := make([]Ciphertext, len(rawTxs))
+	for i := range rawTxs {
+		rawTxs[i] = []byte(fmt.Sprintf("raw ethereum tx %d", i))
+		ct, err := cluster.EncryptTx(rawTxs[i], i, "cluster-a", 123)
+		require.NoError(t, err)
+		ciphertexts[i] = ct
+	}
+	plan, err := cluster.PlanBatch(ciphertexts)
+	require.NoError(t, err)
+
+	subsets := [][]int{
+		{0, 1, 2},
+		{0, 1, 3},
+		{0, 2, 3},
+		{1, 2, 3},
+		{3, 1, 2},
+	}
+	for _, subset := range subsets {
+		t.Run(fmt.Sprint(subset), func(t *testing.T) {
+			shares := make([]DecryptionShare, 0, len(subset)*plan.Alpha)
+			for subBatchID := range plan.SubBatches {
+				for _, operatorID := range subset {
+					decShare, err := cluster.MakeShare(cluster.Shares[operatorID], plan, subBatchID)
+					require.NoError(t, err)
+					shares = append(shares, decShare)
+				}
+			}
+			results, err := cluster.CombineShares(plan, shares)
+			require.NoError(t, err)
+			require.Len(t, results, len(rawTxs))
+			for i, result := range results {
+				require.NoError(t, result.Err)
+				require.True(t, result.HashOK)
+				require.Equal(t, rawTxs[i], result.RawTx)
+			}
+		})
+	}
+}
+
+func TestCombineSharesSkipsInvalidExtraShareSubset(t *testing.T) {
+	cluster := newTestCluster(t, 16, 4, 3)
+	rawTx := []byte("raw ethereum tx")
+	ct, err := cluster.EncryptTx(rawTx, 0, "cluster-a", 123)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+
+	shares := make([]DecryptionShare, 0, 4)
+	for _, operatorID := range []int{0, 1, 2, 3} {
+		decShare, err := cluster.MakeShare(cluster.Shares[operatorID], plan, 0)
+		require.NoError(t, err)
+		shares = append(shares, decShare)
+	}
+	shares[0].Share.V = cluster.btd.suite.G1().Point().Add(shares[0].Share.V, cluster.btd.suite.G1().Point().Base())
+
+	results, err := cluster.CombineShares(plan, shares)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Err)
+	require.True(t, results[0].HashOK)
+	require.Equal(t, rawTx, results[0].RawTx)
+}
+
 func TestCiphertextSerializationRoundTrip(t *testing.T) {
 	cluster := newTestCluster(t, 8, 10, 5)
 	ct, err := cluster.EncryptTx([]byte("serialized tx"), 0, "cluster-a", 123)

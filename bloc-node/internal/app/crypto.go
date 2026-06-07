@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -64,6 +65,15 @@ func unmarshalScalarHex(suite curves.Suite, h string) (kyber.Scalar, error) {
 func hashHex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
+}
+
+func validNonNegativeDecimal(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "0"
+	}
+	out, ok := new(big.Int).SetString(raw, 10)
+	return ok && out.Sign() >= 0
 }
 
 // decodeHexMaybe accepts hex strings with or without 0x and falls back to raw

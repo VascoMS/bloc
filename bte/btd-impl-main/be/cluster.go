@@ -261,25 +261,96 @@ func (c *ClusterBTE) CombineShares(plan BatchPlan, shares []DecryptionShare) ([]
 		if len(subShares) < c.btd.T {
 			return nil, fmt.Errorf("sub-batch %d has %d shares, need %d", subBatchID, len(subShares), c.btd.T)
 		}
-		msgs, _, err := c.btd.BatchCombineMessages(capsulesFromItems(items), subShares[:c.btd.T], true)
+		sort.Slice(subShares, func(i, j int) bool { return subShares[i].I < subShares[j].I })
+		subResults, err := c.combineSubBatch(items, subShares)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("sub-batch %d: %w", subBatchID, err)
 		}
-		for i, msg := range msgs {
-			item := items[i]
-			rawTx, err := decryptTx(msg, item.Ciphertext)
-			result := PlaintextResult{OriginalPosition: item.OriginalPosition, Err: err}
-			if err == nil {
-				result.RawTx = rawTx
-				result.HashOK = sha256.Sum256(rawTx) == item.Ciphertext.PlaintextHash
-				if !result.HashOK {
-					result.Err = fmt.Errorf("plaintext hash mismatch")
-				}
-			}
-			results[item.OriginalPosition] = result
+		for _, result := range subResults {
+			results[result.OriginalPosition] = result
 		}
 	}
 	return results, nil
+}
+
+func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare) ([]PlaintextResult, error) {
+	var firstErr error
+	var out []PlaintextResult
+	forEachShareCombination(len(shares), c.btd.T, func(indices []int) bool {
+		candidateShares := make([]*share.PubShare, len(indices))
+		for i, idx := range indices {
+			candidateShares[i] = shares[idx]
+		}
+		msgs, _, err := c.btd.BatchCombineMessages(capsulesFromItems(items), candidateShares, true)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			return false
+		}
+		candidateResults := plaintextResultsFromMessages(items, msgs)
+		for _, result := range candidateResults {
+			if result.Err != nil || !result.HashOK {
+				if firstErr == nil {
+					firstErr = result.Err
+				}
+				return false
+			}
+		}
+		out = candidateResults
+		return true
+	})
+	if out == nil {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		return nil, fmt.Errorf("no valid threshold share subset")
+	}
+	return out, nil
+}
+
+func plaintextResultsFromMessages(items []BatchItem, msgs []kyber.Point) []PlaintextResult {
+	results := make([]PlaintextResult, len(msgs))
+	for i, msg := range msgs {
+		item := items[i]
+		rawTx, err := decryptTx(msg, item.Ciphertext)
+		result := PlaintextResult{OriginalPosition: item.OriginalPosition, Err: err}
+		if err == nil {
+			result.RawTx = rawTx
+			result.HashOK = sha256.Sum256(rawTx) == item.Ciphertext.PlaintextHash
+			if !result.HashOK {
+				result.Err = fmt.Errorf("plaintext hash mismatch")
+			}
+		}
+		results[i] = result
+	}
+	return results
+}
+
+func forEachShareCombination(n, k int, fn func([]int) bool) {
+	if k <= 0 || k > n {
+		return
+	}
+	indices := make([]int, k)
+	for i := range indices {
+		indices[i] = i
+	}
+	for {
+		if fn(append([]int(nil), indices...)) {
+			return
+		}
+		i := k - 1
+		for i >= 0 && indices[i] == i+n-k {
+			i--
+		}
+		if i < 0 {
+			return
+		}
+		indices[i]++
+		for j := i + 1; j < k; j++ {
+			indices[j] = indices[j-1] + 1
+		}
+	}
 }
 
 func (c *ClusterBTE) planSize(plan BatchPlan) int {

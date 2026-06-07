@@ -8,7 +8,8 @@ agreement.
 It follows the prototype sequence from `../papers/BLOC_Final.pdf`:
 
 1. Clients submit raw transaction bytes plus plaintext scheduling metadata to an
-   operator HTTP endpoint.
+   operator HTTP endpoint. The local evaluator generates signed Ethereum
+   transaction bytes for this payload.
 2. The operator encrypts the bytes as a BTE ciphertext placeholder for the
    configured cluster, slot, and index.
 3. Each operator proposes one slot-scoped `InclusionList` to ACS.
@@ -20,10 +21,10 @@ It follows the prototype sequence from `../papers/BLOC_Final.pdf`:
    the same plaintext transaction set.
 
 This is a deployability harness, not a production DVT client. It uses a
-trusted-dealer config generator, raw byte payloads instead of signed Ethereum
-transactions, and a pluggable node-to-node transport. The default transport is
-the original local TCP mode; `--network libp2p` enables a static-peer libp2p
-Gossipsub backend.
+trusted-dealer config generator, syntactically valid signed Ethereum
+transactions in the evaluator, and a pluggable node-to-node transport. The
+default transport is the original local TCP mode; `--network libp2p` enables a
+static-peer libp2p Gossipsub backend.
 
 ## Quick Local Run
 
@@ -78,7 +79,7 @@ cat results/manual/node-0.json
 HoneyBadger ACS guarantees a common subset of at least `N - f` proposals, so in
 a four-node run the agreed set may contain three of the four submitted operator
 lists. All correct operators should report the same `batch_id`, merged-set hash,
-selected gas, and `plaintexts_hex` ordering.
+selected gas, `ethereum_tx_hashes`, and `plaintexts_hex` ordering.
 
 ## Config Notes
 
@@ -95,10 +96,15 @@ selected gas, and `plaintexts_hex` ordering.
 - `network.mode`, currently `tcp` or `libp2p`;
 - libp2p multiaddrs and operator peer IDs for static-peer P2P runs.
 
-Node-to-node messages use a versioned BLOC envelope encoded with protobuf wire
-format. The current ACS payload adapter still serializes HBBFT Go structs with
-`gob`; replacing that payload adapter with generated protobuf messages is the
-next wire-format hardening step.
+In libp2p mode, node-to-node ACS and BTE share messages are serialized with the
+generated Go bindings from `proto/bloc/v1/messages.proto` and
+`internal/pb/blocv1/messages.pb.go`. Regenerate them after schema edits with:
+
+```sh
+protoc --go_out=. --go_opt=module=bloc-node proto/bloc/v1/messages.proto
+```
+
+The TCP transport remains a compatibility path that uses Go `gob`.
 
 The current implementation intentionally has no PBS/builder interaction and no
 prefix-constraint data model. It materializes a PBS-independent decrypted
@@ -123,6 +129,20 @@ go run ./cmd/bloc-node eval-local \
   --base-port 24000 \
   --out-dir results/local
 ```
+
+The evaluator submits deterministic EIP-1559 transactions signed by local test
+keys. These transactions are syntactically valid and recoverable with
+go-ethereum, but the harness does not broadcast them or require funded accounts.
+`--tx-size` is interpreted as a minimum encoded transaction size; deterministic
+calldata padding is added when necessary.
+
+For the professor-facing MVP flow, run:
+
+```sh
+./scripts/demo-local.sh
+```
+
+See `MVP_DEMO.md` for scenario descriptions and expected output.
 
 The harness writes:
 

@@ -29,12 +29,10 @@ type ConfigFile struct {
 	Network      NetworkConfig    `json:"network,omitempty"`
 }
 
-// NodeConfig describes one operator process. ConsensusAddr is used by the
-// compatibility TCP transport, HTTPAddr exposes the local control API, and the
-// P2P fields identify the same operator when libp2p mode is enabled.
+// NodeConfig describes one operator process. HTTPAddr exposes the local control
+// API, while the P2P fields identify the operator on the libp2p network.
 type NodeConfig struct {
 	ID            uint64 `json:"id"`
-	ConsensusAddr string `json:"consensus_addr"`
 	HTTPAddr      string `json:"http_addr"`
 	P2PAddr       string `json:"p2p_addr,omitempty"`
 	P2PPeerID     string `json:"p2p_peer_id,omitempty"`
@@ -54,7 +52,8 @@ type ProviderConfig struct {
 	MempoolURL string `json:"mempool_url,omitempty"`
 }
 
-// NetworkConfig selects the node-to-node transport implementation.
+// NetworkConfig records the node-to-node transport schema. libp2p is the only
+// supported operator transport.
 type NetworkConfig struct {
 	Mode string `json:"mode,omitempty"`
 }
@@ -72,8 +71,8 @@ type WireEnvelope struct {
 }
 
 // WireShare is the transport-safe representation of a BTE decryption share.
-// Batch and curve point fields are hex encoded so the structure can travel
-// through gob, JSON logs, or future protobuf messages without extra framing.
+// Batch and curve point fields are hex encoded for protobuf transport and
+// readable JSON artifacts.
 type WireShare struct {
 	OperatorID int
 	BatchIDHex string
@@ -115,30 +114,71 @@ type SubmitTxRequest struct {
 	Kind                  string `json:"kind,omitempty"`
 }
 
+type slotPhase string
+
+const (
+	slotPrepared  slotPhase = "prepared"
+	slotRunning   slotPhase = "running"
+	slotCompleted slotPhase = "completed"
+)
+
+// slotState contains everything that must be fresh for an independent
+// protocol sample. Node embeds the active state so the protocol path remains
+// compact while the evaluator can atomically replace it between slots.
+type slotState struct {
+	mu                  sync.Mutex
+	inputMu             sync.Mutex
+	acsMu               sync.Mutex
+	id                  uint64
+	phase               slotPhase
+	slot                *hbbft.SlotACS
+	startOnce           sync.Once
+	pending             []EncryptedPlaceholder
+	seenPending         map[string]bool
+	plan                be.BatchPlan
+	material            MaterializedTransactionSet
+	planned             bool
+	shareGenerationDone bool
+	combineInFlight     bool
+	shareVersion        uint64
+	shares              []be.DecryptionShare
+	seenShares          map[string]bool
+	result              *Result
+	metrics             Metrics
+	metricTimes         metricTimes
+}
+
 // Node owns the per-process BLOC state for one operator.
 type Node struct {
 	cfg       ConfigFile
 	self      NodeConfig
 	nodeIDs   []uint64
 	peers     map[uint64]NodeConfig
-	slot      *hbbft.SlotACS
 	cluster   *be.ClusterBTE
 	secret    be.SecretShare
 	suite     curves.Suite
 	transport Transport
-	startOnce sync.Once
 	faults    FaultConfig
 
-	mu          sync.Mutex
-	pending     []EncryptedPlaceholder
-	seenPending map[string]bool
-	plan        be.BatchPlan
-	material    MaterializedTransactionSet
-	planned     bool
-	shares      []be.DecryptionShare
-	seenShares  map[string]bool
-	result      *Result
-	metrics     Metrics
+	lifecycleMu sync.RWMutex
+	lastSlot    uint64
+	*slotState
+}
+
+// metricTimes retains monotonic clock readings inside one node process. The
+// corresponding Unix timestamps in Metrics are evidence fields only; latency
+// calculations must use these values so wall-clock adjustments cannot skew a
+// run.
+type metricTimes struct {
+	slotStart            time.Time
+	proposalReady        time.Time
+	acsDecision          time.Time
+	planDone             time.Time
+	shareGenerationStart time.Time
+	sharesDone           time.Time
+	threshold            time.Time
+	combineDone          time.Time
+	materialized         time.Time
 }
 
 // Result is the stable JSON shape returned by /result and emitted by evaluator
@@ -166,37 +206,51 @@ type FaultConfig struct {
 // are Unix nanoseconds so evaluator output can be post-processed without access
 // to process-local monotonic clocks.
 type Metrics struct {
-	SubmittedTxs        int              `json:"submitted_txs"`
-	SubmittedBytes      int              `json:"submitted_bytes"`
-	ProposalTxs         int              `json:"proposal_txs"`
-	ProposalHash        string           `json:"proposal_hash,omitempty"`
-	AgreedLists         int              `json:"agreed_lists"`
-	AgreedSetHash       string           `json:"agreed_set_hash,omitempty"`
-	AgreedCiphertexts   int              `json:"agreed_ciphertexts"`
-	MergedSetHash       string           `json:"merged_set_hash,omitempty"`
-	SelectedCiphertexts int              `json:"selected_ciphertexts"`
-	SkippedCiphertexts  int              `json:"skipped_ciphertexts"`
-	SelectedGas         uint64           `json:"selected_gas"`
-	MaxDecryptedGas     uint64           `json:"max_decrypted_gas"`
-	MaxDecryptedTxs     int              `json:"max_decrypted_txs"`
-	SubBatches          int              `json:"sub_batches"`
-	SharesGenerated     int              `json:"shares_generated"`
-	SharesAccepted      int              `json:"shares_accepted"`
-	SharesNeededPerSub  int              `json:"shares_needed_per_sub_batch"`
-	OutboundMessages    map[string]int   `json:"outbound_messages"`
-	InboundMessages     map[string]int   `json:"inbound_messages"`
-	OutboundBytes       map[string]int64 `json:"outbound_bytes"`
-	InboundBytes        map[string]int64 `json:"inbound_bytes"`
-	SlotStartUnixNano   int64            `json:"slot_start_unix_nano"`
-	ACSDecisionUnixNano int64            `json:"acs_decision_unix_nano"`
-	PlanDoneUnixNano    int64            `json:"plan_done_unix_nano"`
-	SharesDoneUnixNano  int64            `json:"shares_done_unix_nano"`
-	FirstShareUnixNano  int64            `json:"first_share_unix_nano"`
-	ThresholdUnixNano   int64            `json:"threshold_unix_nano"`
-	CombineDoneUnixNano int64            `json:"combine_done_unix_nano"`
-	ACSMS               int64            `json:"acs_ms"`
-	PlanMS              int64            `json:"plan_ms"`
-	ShareGenerationMS   int64            `json:"share_generation_ms"`
-	CommitToPlaintextMS int64            `json:"commit_to_plaintext_ms"`
-	TotalSlotMS         int64            `json:"total_slot_ms"`
+	SubmittedTxs                 int              `json:"submitted_txs"`
+	SubmittedBytes               int              `json:"submitted_bytes"`
+	ProposalTxs                  int              `json:"proposal_txs"`
+	ProposalHash                 string           `json:"proposal_hash,omitempty"`
+	AgreedLists                  int              `json:"agreed_lists"`
+	AgreedSetHash                string           `json:"agreed_set_hash,omitempty"`
+	AgreedCiphertexts            int              `json:"agreed_ciphertexts"`
+	MergedSetHash                string           `json:"merged_set_hash,omitempty"`
+	SelectedCiphertexts          int              `json:"selected_ciphertexts"`
+	SkippedCiphertexts           int              `json:"skipped_ciphertexts"`
+	SelectedGas                  uint64           `json:"selected_gas"`
+	MaxDecryptedGas              uint64           `json:"max_decrypted_gas"`
+	MaxDecryptedTxs              int              `json:"max_decrypted_txs"`
+	SubBatches                   int              `json:"sub_batches"`
+	SharesGenerated              int              `json:"shares_generated"`
+	SharesAccepted               int              `json:"shares_accepted"`
+	CombineAttempts              int              `json:"combine_attempts"`
+	SharesNeededPerSub           int              `json:"shares_needed_per_sub_batch"`
+	OutboundMessages             map[string]int   `json:"outbound_messages"`
+	InboundMessages              map[string]int   `json:"inbound_messages"`
+	OutboundBytes                map[string]int64 `json:"outbound_bytes"`
+	InboundBytes                 map[string]int64 `json:"inbound_bytes"`
+	SlotStartUnixNano            int64            `json:"slot_start_unix_nano"`
+	ProposalReadyUnixNano        int64            `json:"proposal_ready_unix_nano"`
+	ACSDecisionUnixNano          int64            `json:"acs_decision_unix_nano"`
+	PlanDoneUnixNano             int64            `json:"plan_done_unix_nano"`
+	ShareGenerationStartUnixNano int64            `json:"share_generation_start_unix_nano"`
+	SharesDoneUnixNano           int64            `json:"shares_done_unix_nano"`
+	FirstShareUnixNano           int64            `json:"first_share_unix_nano"`
+	ThresholdUnixNano            int64            `json:"threshold_unix_nano"`
+	CombineDoneUnixNano          int64            `json:"combine_done_unix_nano"`
+	MaterializedUnixNano         int64            `json:"materialized_unix_nano"`
+	ProposalPreparationUS        int64            `json:"proposal_preparation_us"`
+	ACSUS                        int64            `json:"acs_us"`
+	MergePlanUS                  int64            `json:"merge_plan_us"`
+	ShareGenerationUS            int64            `json:"share_generation_us"`
+	ThresholdWaitUS              int64            `json:"threshold_wait_us"`
+	CombineUS                    int64            `json:"combine_us"`
+	MaterializationUS            int64            `json:"materialization_us"`
+	CommitToPlaintextUS          int64            `json:"commit_to_plaintext_us"`
+	TotalSlotUS                  int64            `json:"total_slot_us"`
+	MetricsFinalized             bool             `json:"metrics_finalized"`
+	ACSMS                        int64            `json:"acs_ms"`
+	PlanMS                       int64            `json:"plan_ms"`
+	ShareGenerationMS            int64            `json:"share_generation_ms"`
+	CommitToPlaintextMS          int64            `json:"commit_to_plaintext_ms"`
+	TotalSlotMS                  int64            `json:"total_slot_ms"`
 }

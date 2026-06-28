@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,23 +23,34 @@ import (
 // EvalRun is one evaluator measurement row before it is expanded into JSON and
 // CSV artifacts. It records both experiment inputs and every node result.
 type EvalRun struct {
-	RunID           string            `json:"run_id"`
-	Nodes           int               `json:"nodes"`
-	Threshold       int               `json:"threshold"`
-	BMax            int               `json:"bmax"`
-	BatchSize       int               `json:"batch_size"`
-	TxSize          int               `json:"tx_size"`
-	TxGas           uint64            `json:"tx_gas"`
-	MaxDecryptedGas uint64            `json:"max_decrypted_gas"`
-	MaxDecryptedTxs int               `json:"max_decrypted_txs"`
-	Network         string            `json:"network"`
-	Faults          map[uint64]string `json:"faults,omitempty"`
-	Success         bool              `json:"success"`
-	Consistent      bool              `json:"consistent"`
-	Error           string            `json:"error,omitempty"`
-	StartedAt       time.Time         `json:"started_at"`
-	FinishedAt      time.Time         `json:"finished_at"`
-	Results         []Result          `json:"results"`
+	RunID             string            `json:"run_id"`
+	ScenarioID        string            `json:"scenario_id,omitempty"`
+	Phase             string            `json:"phase,omitempty"`
+	Iteration         int               `json:"iteration,omitempty"`
+	OrderIndex        int               `json:"order_index,omitempty"`
+	Slot              uint64            `json:"slot,omitempty"`
+	ClusterGeneration int               `json:"cluster_generation,omitempty"`
+	Nodes             int               `json:"nodes"`
+	Threshold         int               `json:"threshold"`
+	BMax              int               `json:"bmax"`
+	BatchSize         int               `json:"batch_size"`
+	TxSize            int               `json:"tx_size"`
+	TxGas             uint64            `json:"tx_gas"`
+	MaxDecryptedGas   uint64            `json:"max_decrypted_gas"`
+	MaxDecryptedTxs   int               `json:"max_decrypted_txs"`
+	Network           string            `json:"network"`
+	Faults            map[uint64]string `json:"faults,omitempty"`
+	Success           bool              `json:"success"`
+	Consistent        bool              `json:"consistent"`
+	Error             string            `json:"error,omitempty"`
+	StartedAt         time.Time         `json:"started_at"`
+	FinishedAt        time.Time         `json:"finished_at"`
+	HarnessWallUS     int64             `json:"harness_wall_us,omitempty"`
+	PrepareUS         int64             `json:"prepare_us,omitempty"`
+	SubmissionUS      int64             `json:"submission_us,omitempty"`
+	StartSkewUS       int64             `json:"start_skew_us,omitempty"`
+	CriticalNodeID    uint64            `json:"critical_node_id,omitempty"`
+	Results           []Result          `json:"results"`
 }
 
 func evalLocal(args []string) error {
@@ -53,9 +65,8 @@ func evalLocal(args []string) error {
 	feeStep := fs.Uint64("fee-step-wei", 1, "generated fee increment per transaction")
 	maxDecryptedGas := fs.Uint64("max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	maxDecryptedTxs := fs.Int("max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
-	networkMode := fs.String("network", "tcp", "node-to-node transport: tcp or libp2p")
 	outDir := fs.String("out-dir", "results", "directory for run artifacts")
-	basePort := fs.Int("base-port", 21000, "base port; consensus uses base, HTTP uses base+1000")
+	basePort := fs.Int("base-port", 21000, "base port; HTTP uses base+1000 and libp2p uses base+2000")
 	timeout := fs.Duration("timeout", 20*time.Second, "per-run timeout")
 	faultRaw := fs.String("fault", "", "optional node fault as id:mode, e.g. 3:withhold-share or 0:omit-proposal")
 	printMode := fs.String("print", "json", "stdout format: json or summary")
@@ -80,7 +91,7 @@ func evalLocal(args []string) error {
 		if err := os.MkdirAll(runDir, 0755); err != nil {
 			return err
 		}
-		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *networkMode, *basePort+(idx*2000), *timeout, *faultRaw)
+		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *basePort+(idx*2000), *timeout, *faultRaw)
 		if err != nil {
 			run.Error = err.Error()
 		}
@@ -101,7 +112,7 @@ func evalLocal(args []string) error {
 	return nil
 }
 
-func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs int, networkMode string, basePort int, timeout time.Duration, faultRaw string) (EvalRun, error) {
+func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs int, basePort int, timeout time.Duration, faultRaw string) (EvalRun, error) {
 	run := EvalRun{
 		RunID:           runID,
 		Nodes:           nodes,
@@ -112,9 +123,12 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 		TxGas:           txGas,
 		MaxDecryptedGas: maxDecryptedGas,
 		MaxDecryptedTxs: maxDecryptedTxs,
-		Network:         networkMode,
+		Network:         "libp2p",
 		Faults:          make(map[uint64]string),
 		StartedAt:       time.Now(),
+	}
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return run, err
 	}
 	if threshold == 0 {
 		f := (nodes - 1) / 3
@@ -126,7 +140,7 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	}
 	run.Faults = faults
 	configPath := filepath.Join(runDir, "cluster.json")
-	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-consensus-port", strconv.Itoa(basePort), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--network", networkMode, "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--out", configPath}
+	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--out", configPath}
 	if out, err := exec.Command(self, args...).CombinedOutput(); err != nil {
 		return run, fmt.Errorf("gen-config: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -157,11 +171,14 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 			_ = cmd.Wait()
 		}
 	}()
-	if err := waitForHTTP(nodes, basePort+1000, 5*time.Second); err != nil {
-		return run, err
+	client, clientTransport := newEvalHTTPClient()
+	defer clientTransport.CloseIdleConnections()
+	readinessTimeout := timeout
+	if readinessTimeout < 15*time.Second {
+		readinessTimeout = 15 * time.Second
 	}
-	if networkMode == "libp2p" {
-		time.Sleep(2 * time.Second)
+	if err := waitForHTTP(client, nodes, basePort+1000, readinessTimeout); err != nil {
+		return run, err
 	}
 	for i := 0; i < batchSize; i++ {
 		nodeID := i % nodes
@@ -178,18 +195,20 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 			Nonce:                 txSummary.Nonce,
 			Kind:                  "placeholder",
 		}
-		if err := postJSON(fmt.Sprintf("http://127.0.0.1:%d/tx", basePort+1000+nodeID), submit); err != nil {
+		if err := postJSON(client, fmt.Sprintf("http://127.0.0.1:%d/tx", basePort+1000+nodeID), submit); err != nil {
 			return run, fmt.Errorf("submit tx %d to node %d: %w", i, nodeID, err)
 		}
 	}
-	for id := 0; id < nodes; id++ {
-		if err := postBytes(fmt.Sprintf("http://127.0.0.1:%d/start", basePort+1000+id), nil); err != nil {
-			return run, fmt.Errorf("start node %d: %w", id, err)
-		}
+	harnessStart := time.Now()
+	if err := startNodes(client, nodes, basePort+1000); err != nil {
+		return run, err
 	}
-	results, err := pollResults(nodes, basePort+1000, timeout)
+	results, err := pollResults(client, nodes, basePort+1000, timeout)
 	run.FinishedAt = time.Now()
+	run.HarnessWallUS = time.Since(harnessStart).Microseconds()
 	run.Results = results
+	run.StartSkewUS = resultStartSkewUS(results)
+	run.CriticalNodeID = criticalNodeID(results)
 	run.Consistent = resultsConsistent(results)
 	run.Success = err == nil && run.Consistent
 	if err != nil {
@@ -198,17 +217,42 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	return run, nil
 }
 
-func waitForHTTP(nodes, baseHTTP int, timeout time.Duration) error {
+func startNodes(client *http.Client, nodes, baseHTTP int) error {
+	type startResult struct {
+		id  int
+		err error
+	}
+	results := make(chan startResult, nodes)
+	for id := 0; id < nodes; id++ {
+		go func(id int) {
+			results <- startResult{id: id, err: postBytes(client, fmt.Sprintf("http://127.0.0.1:%d/start", baseHTTP+id), nil)}
+		}(id)
+	}
+	var failures []string
+	for range nodes {
+		result := <-results
+		if result.err != nil {
+			failures = append(failures, fmt.Sprintf("node %d: %v", result.id, result.err))
+		}
+	}
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		return fmt.Errorf("start nodes: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func waitForHTTP(client *http.Client, nodes, baseHTTP int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		ok := true
 		for id := 0; id < nodes; id++ {
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", baseHTTP+id))
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", baseHTTP+id))
 			if err != nil {
 				ok = false
 				break
 			}
-			_ = resp.Body.Close()
+			drainAndClose(resp.Body)
 			if resp.StatusCode != http.StatusOK {
 				ok = false
 				break
@@ -224,12 +268,12 @@ func waitForHTTP(nodes, baseHTTP int, timeout time.Duration) error {
 	}
 }
 
-func pollResults(nodes, baseHTTP int, timeout time.Duration) ([]Result, error) {
+func pollResults(client *http.Client, nodes, baseHTTP int, timeout time.Duration) ([]Result, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		results := make([]Result, 0, nodes)
 		for id := 0; id < nodes; id++ {
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/result", baseHTTP+id))
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/result", baseHTTP+id))
 			if err != nil {
 				break
 			}
@@ -241,6 +285,9 @@ func pollResults(nodes, baseHTTP int, timeout time.Duration) ([]Result, error) {
 			var result Result
 			if err := json.Unmarshal(body, &result); err != nil {
 				return results, err
+			}
+			if !result.Metrics.MetricsFinalized {
+				break
 			}
 			results = append(results, result)
 		}
@@ -254,12 +301,41 @@ func pollResults(nodes, baseHTTP int, timeout time.Duration) ([]Result, error) {
 	}
 }
 
-func postBytes(url string, body []byte) error {
-	resp, err := http.Post(url, "application/octet-stream", bytes.NewReader(body))
+func resultStartSkewUS(results []Result) int64 {
+	if len(results) < 2 {
+		return 0
+	}
+	min, max := results[0].Metrics.SlotStartUnixNano, results[0].Metrics.SlotStartUnixNano
+	for _, result := range results[1:] {
+		stamp := result.Metrics.SlotStartUnixNano
+		if stamp < min {
+			min = stamp
+		}
+		if stamp > max {
+			max = stamp
+		}
+	}
+	return (max - min) / 1000
+}
+
+func criticalNodeID(results []Result) uint64 {
+	var id uint64
+	var max int64 = -1
+	for _, result := range results {
+		if result.Metrics.TotalSlotUS > max || (result.Metrics.TotalSlotUS == max && result.NodeID < id) {
+			id = result.NodeID
+			max = result.Metrics.TotalSlotUS
+		}
+	}
+	return id
+}
+
+func postBytes(client *http.Client, url string, body []byte) error {
+	resp, err := client.Post(url, "application/octet-stream", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(data)))
@@ -267,31 +343,57 @@ func postBytes(url string, body []byte) error {
 	return nil
 }
 
-func postJSON(url string, v any) error {
+func postJSON(client *http.Client, url string, v any) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	return nil
+}
+
+func newEvalHTTPClient() (*http.Client, *http.Transport) {
+	transport := &http.Transport{
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     10 * time.Second,
+	}
+	return &http.Client{Transport: transport, Timeout: 10 * time.Second}, transport
+}
+
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, body)
+	_ = body.Close()
 }
 
 func resultsConsistent(results []Result) bool {
 	if len(results) == 0 {
 		return false
 	}
-	batchID := results[0].BatchID
-	joined := strings.Join(results[0].Plaintexts, "\n")
+	first := results[0]
+	batchID := first.BatchID
+	joined := strings.Join(first.Plaintexts, "\n")
+	agreedSetHash := first.Materialized.AgreedSetHash
+	mergedSetHash := first.Materialized.MergedSetHash
+	selectedGas := first.Materialized.SelectedGas
+	plainHashes := strings.Join(first.Materialized.PlaintextHashes, "\n")
+	ethHashes := strings.Join(first.Materialized.EthereumTxHashes, "\n")
 	for _, result := range results[1:] {
-		if result.BatchID != batchID || strings.Join(result.Plaintexts, "\n") != joined {
+		if result.BatchID != batchID ||
+			strings.Join(result.Plaintexts, "\n") != joined ||
+			result.Materialized.AgreedSetHash != agreedSetHash ||
+			result.Materialized.MergedSetHash != mergedSetHash ||
+			result.Materialized.SelectedGas != selectedGas ||
+			strings.Join(result.Materialized.PlaintextHashes, "\n") != plainHashes ||
+			strings.Join(result.Materialized.EthereumTxHashes, "\n") != ethHashes {
 			return false
 		}
 	}
@@ -315,7 +417,7 @@ func printEvalSummary(runs []EvalRun, outDir string) {
 		fmt.Printf("  agreed_lists=%d selected_txs=%d selected_gas=%d skipped=%d\n", result.Metrics.AgreedLists, result.Metrics.SelectedCiphertexts, result.Metrics.SelectedGas, result.Metrics.SkippedCiphertexts)
 		fmt.Printf("  merged_set_hash=%s\n", result.Materialized.MergedSetHash)
 		fmt.Printf("  ethereum_tx_hashes=%s\n", strings.Join(result.Materialized.EthereumTxHashes, ","))
-		fmt.Printf("  total_slot_ms=%d acs_ms=%d commit_to_plaintext_ms=%d\n", result.Metrics.TotalSlotMS, result.Metrics.ACSMS, result.Metrics.CommitToPlaintextMS)
+		fmt.Printf("  total_slot_us=%d acs_us=%d merge_plan_us=%d share_generation_us=%d commit_to_plaintext_us=%d\n", result.Metrics.TotalSlotUS, result.Metrics.ACSUS, result.Metrics.MergePlanUS, result.Metrics.ShareGenerationUS, result.Metrics.CommitToPlaintextUS)
 		fmt.Printf("  output_dir=%s\n", outDir)
 	}
 }
@@ -354,7 +456,7 @@ func writeEvalOutputs(outDir string, runs []EvalRun) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "success", "consistent", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
+	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "success", "consistent", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
 		return err
 	}
 	for _, run := range runs {
@@ -382,6 +484,17 @@ func writeEvalOutputs(outDir string, runs []EvalRun) error {
 				strconv.FormatInt(result.Metrics.TotalSlotMS, 10),
 				strconv.FormatInt(result.Metrics.ACSMS, 10),
 				strconv.FormatInt(result.Metrics.CommitToPlaintextMS, 10),
+				strconv.FormatInt(result.Metrics.TotalSlotUS, 10),
+				strconv.FormatInt(result.Metrics.ProposalPreparationUS, 10),
+				strconv.FormatInt(result.Metrics.ACSUS, 10),
+				strconv.FormatInt(result.Metrics.MergePlanUS, 10),
+				strconv.FormatInt(result.Metrics.ShareGenerationUS, 10),
+				strconv.FormatInt(result.Metrics.ThresholdWaitUS, 10),
+				strconv.FormatInt(result.Metrics.CombineUS, 10),
+				strconv.Itoa(result.Metrics.CombineAttempts),
+				strconv.FormatInt(result.Metrics.MaterializationUS, 10),
+				strconv.FormatInt(result.Metrics.CommitToPlaintextUS, 10),
+				strconv.FormatBool(result.Metrics.MetricsFinalized),
 				strconv.FormatInt(result.Metrics.OutboundBytes["acs"], 10),
 				strconv.FormatInt(result.Metrics.OutboundBytes["share"], 10),
 			}

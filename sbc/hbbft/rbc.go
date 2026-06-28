@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/NebulousLabs/merkletree"
 	"github.com/klauspost/reedsolomon"
@@ -71,6 +72,7 @@ type RBC struct {
 	closeCh   chan struct{}
 	inputCh   chan rbcInputTuple
 	messageCh chan rbcMessageTuple
+	closeOnce sync.Once
 }
 
 type (
@@ -150,7 +152,7 @@ func (r *RBC) HandleMessage(senderID uint64, msg *BroadcastMessage) error {
 }
 
 func (r *RBC) stop() {
-	close(r.closeCh)
+	r.closeOnce.Do(func() { close(r.closeCh) })
 }
 
 func (r *RBC) run() {
@@ -220,6 +222,20 @@ func (r *RBC) Output() []byte {
 		return out
 	}
 	return nil
+}
+
+func (r *RBC) progress() RBCProgress {
+	if r == nil {
+		return RBCProgress{}
+	}
+	return RBCProgress{
+		Echos:         len(r.recvEchos),
+		Readys:        len(r.recvReadys),
+		EchoSent:      r.echoSent,
+		ReadySent:     r.readySent,
+		OutputDecoded: r.outputDecoded,
+		OutputStored:  r.output != nil,
+	}
 }
 
 // When a node receives a Proof from a proposer it broadcasts the proof as an

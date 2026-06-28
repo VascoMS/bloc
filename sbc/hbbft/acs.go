@@ -2,6 +2,7 @@ package hbbft
 
 import (
 	"fmt"
+	"sync"
 )
 
 // ACSMessage represents a message sent between nodes in the ACS protocol.
@@ -49,9 +50,11 @@ type ACS struct {
 	decided bool
 
 	// control flow tuples for internal channel communication.
-	closeCh   chan struct{}
-	inputCh   chan acsInputTuple
-	messageCh chan acsMessageTuple
+	closeCh    chan struct{}
+	inputCh    chan acsInputTuple
+	messageCh  chan acsMessageTuple
+	progressCh chan acsProgressTuple
+	closeOnce  sync.Once
 }
 
 // Control flow structure for internal channel communication. Allowing us to
@@ -73,7 +76,47 @@ type (
 		value    []byte
 		response chan acsInputResponse
 	}
+
+	acsProgressTuple struct {
+		response chan ACSProgress
+	}
 )
+
+// ACSProgress is a read-only diagnostic snapshot of ACS/RBC/BBA state.
+type ACSProgress struct {
+	Decided          bool                   `json:"decided"`
+	QueuedMessages   int                    `json:"queued_messages"`
+	RBCOutputs       int                    `json:"rbc_outputs"`
+	BBAResults       int                    `json:"bba_results"`
+	TruthyBBAResults int                    `json:"truthy_bba_results"`
+	RBC              map[uint64]RBCProgress `json:"rbc,omitempty"`
+	BBA              map[uint64]BBAProgress `json:"bba,omitempty"`
+}
+
+// RBCProgress is a compact diagnostic snapshot for one reliable-broadcast
+// instance inside ACS.
+type RBCProgress struct {
+	Echos         int  `json:"echos"`
+	Readys        int  `json:"readys"`
+	EchoSent      bool `json:"echo_sent"`
+	ReadySent     bool `json:"ready_sent"`
+	OutputDecoded bool `json:"output_decoded"`
+	OutputStored  bool `json:"output_stored"`
+}
+
+// BBAProgress is a compact diagnostic snapshot for one binary-agreement
+// instance inside ACS.
+type BBAProgress struct {
+	Epoch           uint32 `json:"epoch"`
+	BinValues       int    `json:"bin_values"`
+	SentBvals       int    `json:"sent_bvals"`
+	ReceivedBvals   int    `json:"received_bvals"`
+	ReceivedAux     int    `json:"received_aux"`
+	DelayedMessages int    `json:"delayed_messages"`
+	Done            bool   `json:"done"`
+	HasOutput       bool   `json:"has_output"`
+	HasDecision     bool   `json:"has_decision"`
+}
 
 // NewACS returns a new ACS instance configured with the given Config and node
 // ids.
@@ -91,6 +134,7 @@ func NewACS(cfg Config) *ACS {
 		closeCh:      make(chan struct{}),
 		inputCh:      make(chan acsInputTuple),
 		messageCh:    make(chan acsMessageTuple),
+		progressCh:   make(chan acsProgressTuple),
 	}
 	// Create all the instances for the participating nodes
 	for _, id := range cfg.Nodes {
@@ -150,6 +194,20 @@ func (a *ACS) Output() map[uint64][]byte {
 	return nil
 }
 
+// Progress returns a read-only snapshot from the ACS event loop.
+func (a *ACS) Progress() ACSProgress {
+	if a == nil {
+		return ACSProgress{}
+	}
+	t := acsProgressTuple{response: make(chan ACSProgress, 1)}
+	select {
+	case a.progressCh <- t:
+		return <-t.response
+	case <-a.closeCh:
+		return ACSProgress{}
+	}
+}
+
 // Done returns true whether ACS has completed its agreements and cleared its
 // messageQue.
 func (a *ACS) Done() bool {
@@ -195,7 +253,15 @@ func (a *ACS) inputValue(data []byte) error {
 }
 
 func (a *ACS) stop() {
-	close(a.closeCh)
+	a.closeOnce.Do(func() {
+		close(a.closeCh)
+		for _, rbc := range a.rbcInstances {
+			rbc.stop()
+		}
+		for _, bba := range a.bbaInstances {
+			bba.stop()
+		}
+	})
 }
 
 func (a *ACS) run() {
@@ -208,8 +274,34 @@ func (a *ACS) run() {
 			t.response <- acsInputResponse{err: err}
 		case t := <-a.messageCh:
 			t.err <- a.handleMessage(t.senderID, t.msg)
+		case t := <-a.progressCh:
+			t.response <- a.progress()
 		}
 	}
+}
+
+func (a *ACS) progress() ACSProgress {
+	p := ACSProgress{
+		Decided:          a.decided,
+		QueuedMessages:   a.messageQue.len(),
+		RBCOutputs:       len(a.rbcResults),
+		BBAResults:       len(a.bbaResults),
+		TruthyBBAResults: a.countTruthyAgreements(),
+		RBC:              make(map[uint64]RBCProgress, len(a.rbcInstances)),
+		BBA:              make(map[uint64]BBAProgress, len(a.bbaInstances)),
+	}
+	for id, rbc := range a.rbcInstances {
+		p.RBC[id] = rbc.progress()
+		if _, ok := a.rbcResults[id]; ok {
+			entry := p.RBC[id]
+			entry.OutputStored = true
+			p.RBC[id] = entry
+		}
+	}
+	for id, bba := range a.bbaInstances {
+		p.BBA[id] = bba.progress()
+	}
+	return p
 }
 
 // handleAgreement processes the received AgreementMessage from sender (sid)
@@ -240,12 +332,16 @@ func (a *ACS) processBroadcast(pid uint64, fun func(rbc *RBC) error) error {
 	}
 	if output := rbc.Output(); output != nil {
 		a.rbcResults[pid] = output
-		return a.processAgreement(pid, func(bba *BBA) error {
+		err := a.processAgreement(pid, func(bba *BBA) error {
 			if bba.AcceptInput() {
 				return bba.InputValue(true)
 			}
 			return nil
 		})
+		if err != nil {
+			return err
+		}
+		a.tryCompleteAgreement()
 	}
 	return nil
 }
@@ -296,6 +392,15 @@ func (a *ACS) tryCompleteAgreement() {
 	if a.decided || a.countTruthyAgreements() < a.N-a.F {
 		return
 	}
+	if len(a.rbcResults) == a.N {
+		bcResults := make(map[uint64][]byte, len(a.rbcResults))
+		for id, val := range a.rbcResults {
+			bcResults[id] = val
+		}
+		a.output = bcResults
+		a.decided = true
+		return
+	}
 	if len(a.bbaResults) < a.N {
 		return
 	}
@@ -308,13 +413,14 @@ func (a *ACS) tryCompleteAgreement() {
 	}
 	bcResults := make(map[uint64][]byte)
 	for _, id := range nodesThatProvidedTrue {
-		val, _ := a.rbcResults[id]
+		val, ok := a.rbcResults[id]
+		if !ok {
+			return
+		}
 		bcResults[id] = val
 	}
-	if len(nodesThatProvidedTrue) == len(bcResults) {
-		a.output = bcResults
-		a.decided = true
-	}
+	a.output = bcResults
+	a.decided = true
 }
 
 func (a *ACS) addMessage(from uint64, msg interface{}) {

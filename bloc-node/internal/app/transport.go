@@ -14,16 +14,3 @@ type Transport interface {
 	Send(context.Context, uint64, WireEnvelope) (int, error)
 	Close() error
 }
-
-// newTransport selects the configured network backend. Unknown modes fall back
-// to TCP so older configs remain runnable during local experiments.
-func newTransport(node *Node) Transport {
-	switch node.cfg.Network.Mode {
-	case "libp2p":
-		return newLibP2PTransport(node, ProtoEnvelopeCodec{})
-	case "", "tcp":
-		return newTCPTransport(node, GobEnvelopeCodec{})
-	default:
-		return newTCPTransport(node, GobEnvelopeCodec{})
-	}
-}

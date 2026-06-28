@@ -8,6 +8,13 @@ dist/
 coverage.out
 *.test
 
+# Python environments and caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+
 # Local experiment outputs
 results/
 pic-node/results/

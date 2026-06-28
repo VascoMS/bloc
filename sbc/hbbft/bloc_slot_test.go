@@ -89,6 +89,12 @@ func TestSlotACSCommonSubset(t *testing.T) {
 	}
 }
 
+func TestSlotACSCloseIsIdempotent(t *testing.T) {
+	slot := NewSlotACS(SlotConfig{Config: Config{N: 4, ID: 0, Nodes: makeids(4)}, Slot: 1})
+	slot.Close()
+	slot.Close()
+}
+
 func TestSlotACSRejectsWrongSlotMessage(t *testing.T) {
 	engine := NewSlotACS(SlotConfig{
 		Config: Config{
@@ -105,6 +111,25 @@ func TestSlotACSRejectsWrongSlotMessage(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected 9")
+}
+
+func TestSlotACSProgressReportsInputState(t *testing.T) {
+	engine := NewSlotACS(SlotConfig{
+		Config: Config{
+			N:     4,
+			ID:    0,
+			Nodes: makeids(4),
+		},
+		Slot: 11,
+	})
+	require.NoError(t, engine.InputBatch([]byte("batch")))
+	progress := engine.Progress()
+	assert.Equal(t, uint64(11), progress.Slot)
+	assert.False(t, progress.ACS.Decided)
+	if progress.ACS.QueuedMessages <= 0 {
+		t.Fatalf("queued messages = %d, want > 0", progress.ACS.QueuedMessages)
+	}
+	assert.True(t, progress.ACS.RBC[0].EchoSent)
 }
 
 func TestSlotACSPostAgreementHook(t *testing.T) {

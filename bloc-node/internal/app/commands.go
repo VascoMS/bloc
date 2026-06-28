@@ -22,7 +22,6 @@ func genConfig(args []string) error {
 	nodes := fs.Int("nodes", 4, "number of operators")
 	threshold := fs.Int("threshold", 0, "BTE threshold; defaults to 2f+1")
 	bmax := fs.Int("bmax", 128, "BTE PRF domain and maximum encrypted batch size")
-	baseConsensus := fs.Int("base-consensus-port", 9000, "first TCP consensus port")
 	baseHTTP := fs.Int("base-http-port", 8000, "first HTTP port")
 	clusterID := fs.String("cluster-id", "bloc-local", "cluster identifier")
 	slot := fs.Uint64("slot", 1, "default slot")
@@ -31,7 +30,6 @@ func genConfig(args []string) error {
 	defaultTxGas := fs.Uint64("default-tx-gas", 21000, "default gas assigned to raw/synthetic submissions")
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
 	mempoolURL := fs.String("mempool-url", "", "mempool-il base URL for provider=mempool-http")
-	networkMode := fs.String("network", "tcp", "node-to-node transport: tcp or libp2p")
 	baseP2P := fs.Int("base-p2p-port", 10000, "first libp2p listen port")
 	out := fs.String("out", "cluster.json", "output config")
 	if err := fs.Parse(args); err != nil {
@@ -72,7 +70,7 @@ func genConfig(args []string) error {
 			DefaultTxGas:    *defaultTxGas,
 		},
 		Provider: ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL},
-		Network:  NetworkConfig{Mode: *networkMode},
+		Network:  NetworkConfig{Mode: "libp2p"},
 	}
 	for i := 0; i < *nodes; i++ {
 		p2pPrivHex, p2pPeerID, err := generateLibP2PIdentity()
@@ -81,7 +79,6 @@ func genConfig(args []string) error {
 		}
 		cfg.Nodes = append(cfg.Nodes, NodeConfig{
 			ID:            uint64(i),
-			ConsensusAddr: fmt.Sprintf("127.0.0.1:%d", *baseConsensus+i),
 			HTTPAddr:      fmt.Sprintf("127.0.0.1:%d", *baseHTTP+i),
 			P2PAddr:       fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", *baseP2P+i),
 			P2PPeerID:     p2pPeerID,

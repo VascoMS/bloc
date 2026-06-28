@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 	normalizeConfig(&cfg)
 	var self NodeConfig
+	foundSelf := false
 	peers := make(map[uint64]NodeConfig)
 	var ids []uint64
 	for _, n := range cfg.Nodes {
@@ -35,10 +37,14 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 		peers[n.ID] = n
 		if n.ID == id {
 			self = n
+			foundSelf = true
 		}
 	}
-	if self.ConsensusAddr == "" {
+	if !foundSelf {
 		return nil, fmt.Errorf("node id %d not found in config", id)
+	}
+	if cfg.Network.Mode != "libp2p" {
+		return nil, fmt.Errorf("unsupported network mode %q: only libp2p is supported", cfg.Network.Mode)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	suite := newSuite()
@@ -69,32 +75,41 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 	}
 	cluster := be.NewNode(btd, pk, secret, cfg.N, cfg.Threshold)
 	node := &Node{
-		cfg:         cfg,
-		self:        self,
-		nodeIDs:     ids,
-		peers:       peers,
-		cluster:     cluster,
-		secret:      secret,
-		suite:       suite,
-		faults:      faults,
+		cfg:      cfg,
+		self:     self,
+		nodeIDs:  ids,
+		peers:    peers,
+		cluster:  cluster,
+		secret:   secret,
+		suite:    suite,
+		faults:   faults,
+		lastSlot: cfg.Slot,
+	}
+	node.slotState = node.newSlotState(cfg.Slot)
+	node.transport = newLibP2PTransport(node, ProtoEnvelopeCodec{})
+	return node, nil
+}
+
+func (n *Node) newSlotState(slotID uint64) *slotState {
+	return &slotState{
+		id:          slotID,
+		phase:       slotPrepared,
 		seenPending: make(map[string]bool),
 		seenShares:  make(map[string]bool),
 		metrics: Metrics{
-			SharesNeededPerSub: cfg.Threshold,
-			MaxDecryptedGas:    cfg.Blockspace.MaxDecryptedGas,
-			MaxDecryptedTxs:    inclusion.EffectiveMaxDecryptedTxs(cfg.Blockspace, cfg.BMax),
+			SharesNeededPerSub: n.cfg.Threshold,
+			MaxDecryptedGas:    n.cfg.Blockspace.MaxDecryptedGas,
+			MaxDecryptedTxs:    inclusion.EffectiveMaxDecryptedTxs(n.cfg.Blockspace, n.cfg.BMax),
 			OutboundMessages:   make(map[string]int),
 			InboundMessages:    make(map[string]int),
 			OutboundBytes:      make(map[string]int64),
 			InboundBytes:       make(map[string]int64),
 		},
+		slot: hbbft.NewSlotACS(hbbft.SlotConfig{
+			Config: hbbft.Config{N: n.cfg.N, F: (n.cfg.N - 1) / 3, ID: n.self.ID, Nodes: n.nodeIDs, BatchSize: n.cfg.BMax},
+			Slot:   slotID,
+		}),
 	}
-	node.slot = hbbft.NewSlotACS(hbbft.SlotConfig{
-		Config: hbbft.Config{N: cfg.N, F: (cfg.N - 1) / 3, ID: id, Nodes: ids, BatchSize: cfg.BMax},
-		Slot:   cfg.Slot,
-	})
-	node.transport = newTransport(node)
-	return node, nil
 }
 
 // parseFaults converts evaluator fault names into runtime fault switches.
@@ -126,17 +141,37 @@ func (n *Node) startTransport() error {
 func (n *Node) listenHTTP(outPath string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "id": n.self.ID})
+		ready := true
+		if transport, ok := n.transport.(interface{ Ready() bool }); ok {
+			ready = transport.Ready()
+		}
+		if !ready {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "starting", "id": n.self.ID})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "id": n.self.ID})
 	})
 	mux.HandleFunc("/tx", n.handleSubmitTx)
-	mux.HandleFunc("/start", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/slot/prepare", n.handlePrepareSlot)
+	mux.HandleFunc("/slot/status", n.handleSlotStatus)
+	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		if err := n.validateRequestedSlot(r); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 		if err := n.startConsensus(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 	})
-	mux.HandleFunc("/result", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+		n.lifecycleMu.RLock()
+		defer n.lifecycleMu.RUnlock()
+		if err := n.validateRequestedSlotLocked(r); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		if n.result == nil {
@@ -158,9 +193,105 @@ func (n *Node) listenHTTP(outPath string) error {
 	return nil
 }
 
+type prepareSlotRequest struct {
+	Slot uint64 `json:"slot"`
+}
+
+// handlePrepareSlot replaces a completed slot while retaining the process,
+// cryptographic material, HTTP server, and libp2p mesh.
+func (n *Node) handlePrepareSlot(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var req prepareSlotRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := n.prepareSlot(req.Slot); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": slotPrepared, "slot": req.Slot})
+}
+
+func (n *Node) prepareSlot(slotID uint64) error {
+	n.lifecycleMu.Lock()
+	defer n.lifecycleMu.Unlock()
+	if slotID <= n.lastSlot {
+		return fmt.Errorf("slot %d must be greater than previous slot %d", slotID, n.lastSlot)
+	}
+	n.mu.Lock()
+	phase := n.phase
+	n.mu.Unlock()
+	if phase != slotCompleted {
+		return fmt.Errorf("slot %d is %s and cannot be replaced", n.id, phase)
+	}
+	n.slot.Close()
+	n.cfg.Slot = slotID
+	n.slotState = n.newSlotState(slotID)
+	n.lastSlot = slotID
+	return nil
+}
+
+func (n *Node) handleSlotStatus(w http.ResponseWriter, r *http.Request) {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
+	if err := n.validateRequestedSlotLocked(r); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	n.mu.Lock()
+	status := map[string]any{
+		"slot": n.id, "phase": n.phase, "node_id": n.self.ID,
+		"pending": len(n.pending), "planned": n.planned,
+		"shares": len(n.shares), "combine_in_flight": n.combineInFlight,
+		"complete": n.result != nil,
+	}
+	n.mu.Unlock()
+	if n.slot != nil {
+		status["acs"] = n.slot.Progress()
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (n *Node) validateRequestedSlot(r *http.Request) error {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
+	return n.validateRequestedSlotLocked(r)
+}
+
+func (n *Node) validateRequestedSlotLocked(r *http.Request) error {
+	raw := r.URL.Query().Get("slot")
+	if raw == "" {
+		return nil
+	}
+	slotID, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid slot %q", raw)
+	}
+	if slotID != n.id {
+		return fmt.Errorf("requested slot %d, active slot is %d", slotID, n.id)
+	}
+	return nil
+}
+
 // handleSubmitTx encrypts a submitted raw transaction into a placeholder and
 // stores it in the node-local pending proposal buffer.
 func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
+	n.inputMu.Lock()
+	defer n.inputMu.Unlock()
+	if err := n.validateRequestedSlotLocked(r); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	n.mu.Lock()
+	phase := n.phase
+	n.mu.Unlock()
+	if phase != slotPrepared {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("slot %d is %s and no longer accepts transactions", n.id, phase)})
+		return
+	}
 	defer r.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil {
@@ -199,7 +330,7 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	n.mu.Lock()
 	index := len(n.pending) % n.cfg.BMax
 	n.mu.Unlock()
-	ct, err := n.cluster.EncryptTx(raw, index, n.cfg.ClusterID, n.cfg.Slot)
+	ct, err := n.cluster.EncryptTx(raw, index, n.cfg.ClusterID, n.id)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -232,9 +363,16 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 // startConsensus builds this node's inclusion-list proposal, inputs it into the
 // slot ACS instance, and drains any initial ACS messages.
 func (n *Node) startConsensus() error {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
 	var err error
 	n.startOnce.Do(func() {
+		n.inputMu.Lock()
+		defer n.inputMu.Unlock()
 		start := time.Now()
+		n.mu.Lock()
+		n.phase = slotRunning
+		n.mu.Unlock()
 		list, buildErr := n.buildInclusionList()
 		if buildErr != nil {
 			err = buildErr
@@ -244,30 +382,43 @@ func (n *Node) startConsensus() error {
 			list.Items = nil
 			list.Hash = inclusion.HashInclusionList(list)
 		}
-		n.mu.Lock()
-		n.metrics.SlotStartUnixNano = start.UnixNano()
-		n.metrics.ProposalTxs = len(list.Items)
-		n.metrics.ProposalHash = list.Hash
-		n.mu.Unlock()
 		encodedList, encodeErr := inclusion.EncodeList(list)
 		err = encodeErr
 		if err != nil {
 			return
 		}
-		log.Printf("node %d starting slot %d with inclusion list %s (%d items)", n.self.ID, n.cfg.Slot, list.Hash, len(list.Items))
-		err = n.slot.InputBatch(encodedList)
-		if err != nil {
+		proposalReady := time.Now()
+		n.mu.Lock()
+		n.metricTimes.slotStart = start
+		n.metricTimes.proposalReady = proposalReady
+		n.metrics.SlotStartUnixNano = start.UnixNano()
+		n.metrics.ProposalReadyUnixNano = proposalReady.UnixNano()
+		n.metrics.ProposalTxs = len(list.Items)
+		n.metrics.ProposalHash = list.Hash
+		n.refreshMetricsLocked()
+		n.mu.Unlock()
+		log.Printf("node %d starting slot %d with inclusion list %s (%d items)", n.self.ID, n.id, list.Hash, len(list.Items))
+		output, stepErr := n.stepACS(func() error {
+			return n.slot.InputBatch(encodedList)
+		})
+		if stepErr != nil {
+			err = stepErr
 			return
 		}
-		n.drainACSMessages()
-		n.tryOutput()
+		n.handleACSOutput(output)
 	})
 	return err
 }
 
 // handleEnvelope is the common inbound message path for every transport.
 func (n *Node) handleEnvelope(env WireEnvelope, size int) {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
 	if env.Direct && env.To != n.self.ID {
+		return
+	}
+	if env.Slot != n.id {
+		log.Printf("ignoring %s envelope for stale slot %d; active slot is %d", env.Kind, env.Slot, n.id)
 		return
 	}
 	n.recordInbound(env.Kind, size)
@@ -277,15 +428,17 @@ func (n *Node) handleEnvelope(env WireEnvelope, size int) {
 			log.Printf("nil acs message from %d", env.From)
 			return
 		}
-		if err := n.slot.HandleMessage(env.From, env.ACS); err != nil {
+		output, err := n.stepACS(func() error {
+			return n.slot.HandleMessage(env.From, env.ACS)
+		})
+		if err != nil {
 			if isBenignDuplicate(err) {
 				return
 			}
 			log.Printf("handle acs from %d: %v", env.From, err)
 			return
 		}
-		n.drainACSMessages()
-		n.tryOutput()
+		n.handleACSOutput(output)
 	case "share":
 		if env.Share == nil {
 			log.Printf("nil share from %d", env.From)
@@ -306,27 +459,56 @@ func (n *Node) handleEnvelope(env WireEnvelope, size int) {
 func isBenignDuplicate(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "received multiple readys") ||
-		strings.Contains(msg, "received multiple echos")
+		strings.Contains(msg, "received multiple echos") ||
+		strings.Contains(msg, "received proof from") && strings.Contains(msg, "more the once")
 }
 
-// drainACSMessages forwards all pending HoneyBadger ACS messages emitted by the
-// local ACS state machine.
-func (n *Node) drainACSMessages() {
+// stepACS serializes the non-thread-safe slot ACS state machine. libp2p may
+// deliver streams concurrently, but each node must drive ACS as a single local
+// event loop: mutate protocol state, drain emitted messages, and consume output
+// as one ordered transition.
+func (n *Node) stepACS(step func() error) (*hbbft.SlotOutput, error) {
+	n.acsMu.Lock()
+	if err := step(); err != nil {
+		n.acsMu.Unlock()
+		return nil, err
+	}
+	messages := n.collectACSMessages()
+	output := n.slot.Output()
+	n.acsMu.Unlock()
+	for _, env := range messages {
+		n.sendEnvelope(env.to, env.envelope)
+	}
+	return output, nil
+}
+
+type pendingEnvelope struct {
+	to       uint64
+	envelope WireEnvelope
+}
+
+// collectACSMessages drains pending HoneyBadger ACS messages emitted by the
+// local ACS state machine. Callers must hold acsMu.
+func (n *Node) collectACSMessages() []pendingEnvelope {
+	var out []pendingEnvelope
 	for _, msg := range n.slot.Messages() {
 		slotMsg, ok := msg.Payload.(*hbbft.SlotMessage)
 		if !ok {
 			log.Printf("unexpected slot payload %T", msg.Payload)
 			continue
 		}
-		n.sendEnvelope(msg.To, WireEnvelope{From: n.self.ID, Kind: "acs", Slot: n.cfg.Slot, ACS: slotMsg})
+		out = append(out, pendingEnvelope{
+			to:       msg.To,
+			envelope: WireEnvelope{From: n.self.ID, Kind: "acs", Slot: n.id, ACS: slotMsg},
+		})
 	}
+	return out
 }
 
-// tryOutput checks whether ACS has decided. Once it has, every correct node
+// handleACSOutput processes an ACS decision. Once ACS has decided, every correct node
 // canonicalizes the decided inclusion lists, applies the deterministic merge
 // rule, plans BTE sub-batches, and gossips decryption shares.
-func (n *Node) tryOutput() {
-	out := n.slot.Output()
+func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	if out == nil {
 		return
 	}
@@ -341,8 +523,8 @@ func (n *Node) tryOutput() {
 		list.Hash = inclusion.HashInclusionList(list)
 		lists = append(lists, list)
 	}
-	agreed := inclusion.NewAgreedSet(n.cfg.Slot, lists)
-	merged := inclusion.Merge(n.cfg.Slot, lists, n.cfg.Blockspace, n.cfg.BMax)
+	agreed := inclusion.NewAgreedSet(n.id, lists)
+	merged := inclusion.Merge(n.id, lists, n.cfg.Blockspace, n.cfg.BMax)
 	var encrypted []be.Ciphertext
 	for _, item := range merged.Items {
 		ct, err := n.cluster.UnmarshalCiphertext(item.Ciphertext)
@@ -368,8 +550,11 @@ func (n *Node) tryOutput() {
 		return
 	}
 	n.plan = plan
+	n.metricTimes.acsDecision = decisionAt
+	n.metricTimes.planDone = planAt
+	n.metricTimes.shareGenerationStart = planAt
 	n.material = MaterializedTransactionSet{
-		Slot:            n.cfg.Slot,
+		Slot:            n.id,
 		AgreedSetHash:   agreed.Hash,
 		MergedSetHash:   merged.Hash,
 		SelectedGas:     merged.SelectedGas,
@@ -378,6 +563,7 @@ func (n *Node) tryOutput() {
 	n.planned = true
 	n.metrics.ACSDecisionUnixNano = decisionAt.UnixNano()
 	n.metrics.PlanDoneUnixNano = planAt.UnixNano()
+	n.metrics.ShareGenerationStartUnixNano = planAt.UnixNano()
 	n.metrics.AgreedLists = len(agreed.Lists)
 	n.metrics.AgreedSetHash = agreed.Hash
 	n.metrics.AgreedCiphertexts = agreed.TotalItems
@@ -386,13 +572,9 @@ func (n *Node) tryOutput() {
 	n.metrics.SkippedCiphertexts = merged.SkippedItems
 	n.metrics.SelectedGas = merged.SelectedGas
 	n.metrics.SubBatches = len(plan.SubBatches)
-	if n.metrics.SlotStartUnixNano != 0 {
-		n.metrics.ACSMS = decisionAt.Sub(time.Unix(0, n.metrics.SlotStartUnixNano)).Milliseconds()
-	}
-	n.metrics.PlanMS = planAt.Sub(decisionAt).Milliseconds()
+	n.refreshMetricsLocked()
 	n.mu.Unlock()
 	log.Printf("node %d ACS decided %d lists/%d candidates; selected %d txs (%d gas); batch %s has %d sub-batches", n.self.ID, len(agreed.Lists), agreed.TotalItems, len(encrypted), merged.SelectedGas, hex.EncodeToString(plan.BatchID[:]), len(plan.SubBatches))
-	shareStart := time.Now()
 	for subBatchID := range plan.SubBatches {
 		if n.faults.WithholdShare {
 			continue
@@ -416,13 +598,19 @@ func (n *Node) tryOutput() {
 		}
 		for _, peer := range n.nodeIDs {
 			if peer != n.self.ID {
-				n.sendEnvelope(peer, WireEnvelope{From: n.self.ID, Kind: "share", Slot: n.cfg.Slot, Share: &wire})
+				n.sendEnvelope(peer, WireEnvelope{From: n.self.ID, Kind: "share", Slot: n.id, Share: &wire})
 			}
 		}
 	}
 	n.mu.Lock()
-	n.metrics.SharesDoneUnixNano = time.Now().UnixNano()
-	n.metrics.ShareGenerationMS = time.Since(shareStart).Milliseconds()
+	sharesDone := time.Now()
+	n.shareGenerationDone = true
+	n.metricTimes.sharesDone = sharesDone
+	n.metrics.SharesDoneUnixNano = sharesDone.UnixNano()
+	n.refreshMetricsLocked()
+	if n.result != nil {
+		n.result.Metrics = n.metrics.snapshot()
+	}
 	n.mu.Unlock()
 	n.tryCombine()
 }
@@ -437,8 +625,15 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 		return
 	}
 	n.planned = true
+	n.metricTimes.acsDecision = decisionAt
+	n.metricTimes.planDone = now
+	n.metricTimes.shareGenerationStart = now
+	n.metricTimes.sharesDone = now
+	n.metricTimes.threshold = now
+	n.metricTimes.combineDone = now
+	n.metricTimes.materialized = now
 	n.material = MaterializedTransactionSet{
-		Slot:            n.cfg.Slot,
+		Slot:            n.id,
 		AgreedSetHash:   agreed.Hash,
 		MergedSetHash:   merged.Hash,
 		SelectedGas:     merged.SelectedGas,
@@ -448,7 +643,11 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 	}
 	n.metrics.ACSDecisionUnixNano = decisionAt.UnixNano()
 	n.metrics.PlanDoneUnixNano = now.UnixNano()
+	n.metrics.ShareGenerationStartUnixNano = now.UnixNano()
+	n.metrics.SharesDoneUnixNano = now.UnixNano()
+	n.metrics.ThresholdUnixNano = now.UnixNano()
 	n.metrics.CombineDoneUnixNano = now.UnixNano()
+	n.metrics.MaterializedUnixNano = now.UnixNano()
 	n.metrics.AgreedLists = len(agreed.Lists)
 	n.metrics.AgreedSetHash = agreed.Hash
 	n.metrics.AgreedCiphertexts = agreed.TotalItems
@@ -456,14 +655,9 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 	n.metrics.SelectedCiphertexts = 0
 	n.metrics.SkippedCiphertexts = merged.SkippedItems
 	n.metrics.SelectedGas = merged.SelectedGas
-	if n.metrics.SlotStartUnixNano != 0 {
-		slotStart := time.Unix(0, n.metrics.SlotStartUnixNano)
-		n.metrics.ACSMS = decisionAt.Sub(slotStart).Milliseconds()
-		n.metrics.TotalSlotMS = now.Sub(slotStart).Milliseconds()
-	}
-	n.metrics.PlanMS = now.Sub(decisionAt).Milliseconds()
+	n.refreshMetricsLocked()
 	n.result = &Result{
-		Slot:         n.cfg.Slot,
+		Slot:         n.id,
 		NodeID:       n.self.ID,
 		BatchID:      "",
 		Ciphertexts:  0,
@@ -472,32 +666,28 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 		LatencyMS:    n.metrics.TotalSlotMS,
 		Metrics:      n.metrics.snapshot(),
 	}
+	n.phase = slotCompleted
 	log.Printf("node %d materialized empty transaction set after ACS (%d lists/%d candidates)", n.self.ID, len(agreed.Lists), agreed.TotalItems)
 }
 
 // tryCombine attempts BTE reconstruction once the node has threshold shares for
 // every planned sub-batch.
 func (n *Node) tryCombine() {
-	n.mu.Lock()
-	if n.result != nil || !n.planned {
-		n.mu.Unlock()
+	attempt, ok := n.claimCombine()
+	if !ok {
 		return
 	}
-	plan := n.plan
-	material := n.material
-	shares := append([]be.DecryptionShare(nil), n.shares...)
-	n.mu.Unlock()
-	shares, rejected := matchingSharesForPlan(shares, plan)
+	shares, rejected := matchingSharesForPlan(attempt.shares, attempt.plan)
 	if rejected > 0 {
-		log.Printf("ignored %d shares for other batches or sub-batches while waiting for batch %s", rejected, hex.EncodeToString(plan.BatchID[:]))
-	}
-	if !hasThresholdPerSubBatch(shares, plan, n.cfg.Threshold) {
-		return
+		log.Printf("ignored %d shares for other batches or sub-batches while waiting for batch %s", rejected, hex.EncodeToString(attempt.plan.BatchID[:]))
 	}
 	thresholdAt := time.Now()
-	results, err := n.cluster.CombineShares(plan, shares)
+	results, err := n.cluster.CombineShares(attempt.plan, shares)
 	if err != nil {
 		log.Printf("combine shares: %v", err)
+		if n.finishFailedCombine(attempt.shareVersion) {
+			n.tryCombine()
+		}
 		return
 	}
 	combineAt := time.Now()
@@ -521,34 +711,76 @@ func (n *Node) tryCombine() {
 		ethereumTxHashes[i] = txSummary.Hash
 		ethereumTxs[i] = txSummary
 	}
-	material.PlaintextsHex = plaintexts
-	material.PlaintextHashes = plaintextHashes
-	material.EthereumTxHashes = ethereumTxHashes
-	material.EthereumTxs = ethereumTxs
+	attempt.material.PlaintextsHex = plaintexts
+	attempt.material.PlaintextHashes = plaintextHashes
+	attempt.material.EthereumTxHashes = ethereumTxHashes
+	attempt.material.EthereumTxs = ethereumTxs
+	materializedAt := time.Now()
 	result := &Result{
-		Slot:         n.cfg.Slot,
+		Slot:         n.id,
 		NodeID:       n.self.ID,
-		BatchID:      hex.EncodeToString(plan.BatchID[:]),
+		BatchID:      hex.EncodeToString(attempt.plan.BatchID[:]),
 		Ciphertexts:  len(results),
 		Plaintexts:   plaintexts,
-		Materialized: material,
+		Materialized: attempt.material,
 	}
 	n.mu.Lock()
+	n.combineInFlight = false
 	if n.result == nil {
+		n.metricTimes.threshold = thresholdAt
+		n.metricTimes.combineDone = combineAt
+		n.metricTimes.materialized = materializedAt
 		n.metrics.ThresholdUnixNano = thresholdAt.UnixNano()
 		n.metrics.CombineDoneUnixNano = combineAt.UnixNano()
-		if n.metrics.ACSDecisionUnixNano != 0 {
-			n.metrics.CommitToPlaintextMS = combineAt.Sub(time.Unix(0, n.metrics.ACSDecisionUnixNano)).Milliseconds()
-		}
-		if n.metrics.SlotStartUnixNano != 0 {
-			n.metrics.TotalSlotMS = combineAt.Sub(time.Unix(0, n.metrics.SlotStartUnixNano)).Milliseconds()
-		}
+		n.metrics.MaterializedUnixNano = materializedAt.UnixNano()
+		n.refreshMetricsLocked()
 		result.LatencyMS = n.metrics.TotalSlotMS
 		result.Metrics = n.metrics.snapshot()
 		n.result = result
+		n.phase = slotCompleted
 		log.Printf("node %d decrypted batch %s with %d plaintext txs", n.self.ID, result.BatchID, len(result.Plaintexts))
 	}
 	n.mu.Unlock()
+}
+
+type combineAttempt struct {
+	plan         be.BatchPlan
+	material     MaterializedTransactionSet
+	shares       []be.DecryptionShare
+	shareVersion uint64
+}
+
+// claimCombine admits at most one expensive reconstruction per node. Share
+// receipt remains independent, and a snapshot version allows a failed attempt
+// to retry only when it can include newly accepted shares.
+func (n *Node) claimCombine() (combineAttempt, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.result != nil || !n.planned || !n.shareGenerationDone || n.combineInFlight {
+		return combineAttempt{}, false
+	}
+	shares := append([]be.DecryptionShare(nil), n.shares...)
+	matching, _ := matchingSharesForPlan(shares, n.plan)
+	if !hasThresholdPerSubBatch(matching, n.plan, n.cfg.Threshold) {
+		return combineAttempt{}, false
+	}
+	n.combineInFlight = true
+	n.metrics.CombineAttempts++
+	return combineAttempt{
+		plan:         n.plan,
+		material:     n.material,
+		shares:       shares,
+		shareVersion: n.shareVersion,
+	}, true
+}
+
+// finishFailedCombine releases the single-flight claim and reports whether a
+// newer share set makes exactly one immediate retry useful.
+func (n *Node) finishFailedCombine(attemptVersion uint64) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.combineInFlight = false
+	return n.result == nil && n.shareVersion > attemptVersion
 }
 
 // addWireShare validates and converts a transport share into the BTE library
@@ -585,6 +817,7 @@ func (n *Node) addShare(d be.DecryptionShare) error {
 	}
 	n.seenShares[key] = true
 	n.shares = append(n.shares, d)
+	n.shareVersion++
 	n.metrics.SharesAccepted++
 	if d.OperatorID == int(n.self.ID) {
 		n.metrics.SharesGenerated++
@@ -613,6 +846,11 @@ func (n *Node) marshalShare(d be.DecryptionShare) (WireShare, error) {
 // goroutine so ACS state-machine progress is not blocked by network I/O.
 func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
 	go func() {
+		n.lifecycleMu.RLock()
+		defer n.lifecycleMu.RUnlock()
+		if env.Slot != n.id {
+			return
+		}
 		if n.faults.Delay > 0 {
 			time.Sleep(n.faults.Delay)
 		}
@@ -640,6 +878,36 @@ func (n *Node) recordOutbound(kind string, size int) {
 	defer n.mu.Unlock()
 	n.metrics.OutboundMessages[kind]++
 	n.metrics.OutboundBytes[kind] += int64(size)
+}
+
+// refreshMetricsLocked derives durations from monotonic readings. Several
+// stages overlap (notably local share generation and threshold waiting), so
+// these fields describe event intervals rather than additive accounting.
+func (n *Node) refreshMetricsLocked() {
+	t := n.metricTimes
+	n.metrics.ProposalPreparationUS = durationUS(t.slotStart, t.proposalReady)
+	n.metrics.ACSUS = durationUS(t.proposalReady, t.acsDecision)
+	n.metrics.MergePlanUS = durationUS(t.acsDecision, t.planDone)
+	n.metrics.ShareGenerationUS = durationUS(t.shareGenerationStart, t.sharesDone)
+	n.metrics.ThresholdWaitUS = durationUS(t.planDone, t.threshold)
+	n.metrics.CombineUS = durationUS(t.threshold, t.combineDone)
+	n.metrics.MaterializationUS = durationUS(t.combineDone, t.materialized)
+	n.metrics.CommitToPlaintextUS = durationUS(t.acsDecision, t.materialized)
+	n.metrics.TotalSlotUS = durationUS(t.slotStart, t.materialized)
+	n.metrics.MetricsFinalized = !t.materialized.IsZero() && !t.sharesDone.IsZero()
+
+	n.metrics.ACSMS = n.metrics.ACSUS / 1000
+	n.metrics.PlanMS = n.metrics.MergePlanUS / 1000
+	n.metrics.ShareGenerationMS = n.metrics.ShareGenerationUS / 1000
+	n.metrics.CommitToPlaintextMS = n.metrics.CommitToPlaintextUS / 1000
+	n.metrics.TotalSlotMS = n.metrics.TotalSlotUS / 1000
+}
+
+func durationUS(start, end time.Time) int64 {
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return 0
+	}
+	return end.Sub(start).Microseconds()
 }
 
 func (m Metrics) snapshot() Metrics {
@@ -681,9 +949,11 @@ func (n *Node) writeResultWhenReady(path string) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
+		n.lifecycleMu.RLock()
 		n.mu.Lock()
 		result := n.result
 		n.mu.Unlock()
+		n.lifecycleMu.RUnlock()
 		if result == nil {
 			continue
 		}

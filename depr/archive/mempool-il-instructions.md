@@ -1,5 +1,7 @@
 # Mempool + Inclusion List Module MVP
 
+Historical note. The active architectural summary now lives in [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md) and the current module entry point is [mempool-il/README.md](/bloc/mempool-il/README.md).
+
 ## Purpose
 
 Build a standalone Go module/service that:

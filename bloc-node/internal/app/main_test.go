@@ -43,6 +43,24 @@ func TestParseEthereumTxRejectsMalformedPayload(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigDefaultsToLibP2P(t *testing.T) {
+	cfg := ConfigFile{}
+	normalizeConfig(&cfg)
+	if cfg.Network.Mode != "libp2p" {
+		t.Fatalf("network mode = %q, want libp2p", cfg.Network.Mode)
+	}
+}
+
+func TestNewNodeRejectsLegacyTCPMode(t *testing.T) {
+	_, err := newNode(ConfigFile{
+		Network: NetworkConfig{Mode: "tcp"},
+		Nodes:   []NodeConfig{{ID: 0, HTTPAddr: "127.0.0.1:1"}},
+	}, 0, FaultConfig{})
+	if err == nil || !strings.Contains(err.Error(), "only libp2p is supported") {
+		t.Fatalf("newNode error = %v, want unsupported network mode", err)
+	}
+}
+
 func TestProtoEnvelopeCodecRoundTrip(t *testing.T) {
 	codec := ProtoEnvelopeCodec{}
 	in := WireEnvelope{From: 1, To: 2, Direct: true, Kind: "share", Slot: 9, Share: &WireShare{

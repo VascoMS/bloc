@@ -36,16 +36,9 @@ run_scenario() {
       "$@"
 }
 
-run_scenario normal-tcp "$BASE_PORT" --network tcp
-run_scenario blockspace-cap "$((BASE_PORT + 2000))" --network tcp --max-decrypted-txs 4
-run_scenario withhold-share "$((BASE_PORT + 4000))" --network tcp --fault 3:withhold-share
-
-if [[ "${BLOC_SKIP_LIBP2P:-0}" != "1" ]]; then
-  run_scenario libp2p-smoke "$((BASE_PORT + 6000))" --network libp2p
-else
-  echo
-  echo "== libp2p-smoke skipped via BLOC_SKIP_LIBP2P=1 =="
-fi
+run_scenario normal "$BASE_PORT"
+run_scenario blockspace-cap "$((BASE_PORT + 2000))" --max-decrypted-txs 4
+run_scenario withhold-share "$((BASE_PORT + 4000))" --fault 3:withhold-share
 
 GOCACHE="$DEMO_GOCACHE" \
   go run ./cmd/bloc-node report \

@@ -32,6 +32,6 @@ func normalizeConfig(cfg *ConfigFile) {
 		cfg.Provider.Mode = "direct"
 	}
 	if cfg.Network.Mode == "" {
-		cfg.Network.Mode = "tcp"
+		cfg.Network.Mode = "libp2p"
 	}
 }

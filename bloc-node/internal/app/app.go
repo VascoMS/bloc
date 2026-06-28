@@ -7,8 +7,8 @@ import (
 )
 
 // Run dispatches the bloc-node CLI. It also registers gob protocol types before
-// any command starts because both the compatibility TCP transport and current
-// ACS payload adapter depend on gob's concrete type registry.
+// any command starts because the ACS payload adapter uses gob for deterministic
+// candidate and block-body encoding.
 func Run(args []string) {
 	registerGobTypes()
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -33,6 +33,10 @@ func Run(args []string) {
 		if err := evalLocal(args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "eval-suite":
+		if err := evalSuite(args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "report":
 		if err := reportDemo(args[2:]); err != nil {
 			log.Fatal(err)
@@ -49,6 +53,7 @@ func usage() {
   bloc-node run --config cluster.json --id 0 --slot 1 --start-after 3s
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results
+  bloc-node eval-suite --profile m1-baseline --experiment-id m1-baseline --out-dir results/m1-local/baseline-persistent
   bloc-node report --dir results/mvp-demo/latest --out results/mvp-demo/latest/DEMO_REPORT.md
 `)
 }

@@ -43,6 +43,14 @@ type SlotOutput struct {
 	DecryptionResult interface{}
 }
 
+// SlotProgress is a read-only diagnostic snapshot of the slot-scoped ACS
+// state. It is intended for local evaluator status endpoints and must not be
+// used to drive protocol decisions.
+type SlotProgress struct {
+	Slot uint64
+	ACS  ACSProgress
+}
+
 // BlockBuilder deterministically materializes a block body from the agreed
 // common subset.
 type BlockBuilder func(slot uint64, batches []AcceptedBatch) ([]byte, error)
@@ -67,6 +75,15 @@ type SlotACS struct {
 	blockBuilder  BlockBuilder
 	postAgreement PostAgreementHook
 	output        *SlotOutput
+}
+
+// Close terminates the slot ACS and all of its child protocol goroutines.
+// Callers must stop routing messages to the slot before closing it.
+func (s *SlotACS) Close() {
+	if s == nil || s.acs == nil {
+		return
+	}
+	s.acs.stop()
 }
 
 // NewSlotACS returns a slot-scoped adapter that reuses the existing ACS
@@ -137,6 +154,14 @@ func (s *SlotACS) Messages() []MessageTuple {
 		}
 	}
 	return out
+}
+
+// Progress returns a read-only diagnostic snapshot for the active slot.
+func (s *SlotACS) Progress() SlotProgress {
+	if s == nil || s.acs == nil {
+		return SlotProgress{}
+	}
+	return SlotProgress{Slot: s.slot, ACS: s.acs.Progress()}
 }
 
 // Output returns the slot result once. Subsequent calls return nil.

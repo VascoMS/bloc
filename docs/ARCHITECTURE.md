@@ -1,0 +1,118 @@
+# Architecture
+
+## Purpose
+
+BLOC is a thesis prototype that explores a pipeline where operators agree on encrypted transaction placeholders, then deterministically decrypt and materialize a shared transaction set after agreement.
+
+## Module Boundaries
+
+- `bloc-node/`
+  - Integrates slot-scoped ACS, inclusion-list handling, batched threshold decryption, local evaluation, and transport.
+  - Owns the main CLI, local cluster config generation, node runtime, evaluator, and report generation.
+- `mempool-il/`
+  - Builds deterministic bounded inclusion lists from a live Ethereum mempool view.
+  - Stays independent from consensus and threshold cryptography.
+- `bte/btd-impl-main/`
+  - Provides the cluster-facing batched threshold encryption library.
+  - Owns ciphertext encoding, batch planning, share generation, and share combination.
+- `sbc/hbbft/`
+  - Provides Reliable Broadcast, Binary Byzantine Agreement, and Asynchronous Common Subset.
+  - Includes the BLOC-specific slot adapter that bypasses the original recurring HoneyBadger driver.
+
+## End-to-End Flow
+
+1. A transaction source provides raw transaction bytes and scheduling metadata.
+2. `bloc-node` encrypts payloads into placeholder ciphertexts using the BTE library.
+3. Each operator proposes one slot-scoped inclusion list into ACS.
+4. ACS outputs a common subset of proposer batches.
+5. `bloc-node` deterministically merges the accepted lists and computes a shared `BatchPlan`.
+6. Operators publish one decryption share per sub-batch.
+7. Once threshold shares exist for every sub-batch, the BTE library combines them and recovers the agreed plaintexts in consensus order.
+8. `bloc-node` emits a materialized transaction set and evaluation artifacts.
+
+## Cross-Module Invariants
+
+- The accepted encrypted set must be deterministic across honest operators.
+- Batch planning must be deterministic for a fixed ordered ciphertext list.
+- Decryption shares must be scoped to the agreed `BatchID` and sub-batch.
+- Module-local artifacts such as demo outputs and benchmark results are not canonical documentation.
+- `mempool-il` is a source of candidate data, not a consensus participant.
+
+## ACS Adaptation
+
+The BLOC path intentionally does not use the original `HoneyBadger` epoch driver as the top-level integration boundary. Instead, `sbc/hbbft` exposes a slot-scoped adapter that:
+
+- runs one ACS instance per slot,
+- accepts externally prepared candidate batch bytes,
+- wraps traffic in slot-bound messages,
+- orders accepted proposer batches deterministically,
+- leaves post-agreement decryption/materialization outside the ACS core.
+
+This keeps mempool logic, ordering, and decryption concerns separated.
+
+## Repeated Slot Lifecycle
+
+An operator process owns long-lived membership, BTE key material, HTTP state,
+and its libp2p mesh. Its active `slotState` owns the ACS instance, pending
+transactions, decryption shares, result, and measurements for exactly one slot.
+Only one slot may be active at a time. Replacing a completed slot drains current
+handlers and sends, closes ACS/RBC/BBA goroutines, and installs a clean state
+with a strictly increasing slot identifier. Envelopes for older slots are
+discarded before they can affect active-slot metrics.
+
+The M1 evaluator exploits this boundary to measure many steady-state slots per
+cluster without rebuilding cryptographic and network setup around every sample.
+The isolated evaluator remains available for lifecycle smoke testing.
+
+## Operator Transport
+
+Operators exchange addressed ACS and decryption-share protobuf envelopes over
+direct libp2p streams. Local configurations use TCP multiaddresses underneath,
+while libp2p supplies peer identity, authenticated connections, and stream
+multiplexing. gRPC and the former raw socket-per-envelope TCP transport are not
+part of the active prototype.
+
+## Cluster BTE Design
+
+The BTE module exposes a cluster-facing API for raw transaction bytes:
+
+- `EncryptTx` produces a public ciphertext that carries:
+  - BTE capsule metadata,
+  - AEAD-encrypted raw transaction bytes,
+  - committed plaintext hash,
+  - cluster and slot context.
+- `PlanBatch` computes a deterministic `BatchPlan` over the agreed ciphertext order.
+- `MakeShare` emits one threshold share per sub-batch.
+- `CombineShares` recovers plaintexts once threshold shares are available.
+
+`PlanBatch` uses the BEAT-MEV sub-batching optimization by default. For a
+batch with `B` ciphertexts, it chooses `alpha = ceil(2*sqrt(B))`, corresponding
+to the paper's `Opt-2` setting, then raises `alpha` if repeated puncture indices
+require more sub-batches. This deterministic layout is part of the integrated
+`bloc-node` path, including M1 evaluator runs.
+
+The integrated prototype does not currently expose runtime switches for the
+paper's normal/unoptimized combine path, `Opt-1` (`alpha = sqrt(B)`), or
+parallel sub-batch combination. Those remain benchmark or future M2 comparison
+dimensions, not M1 profile dimensions.
+
+The current implementation is prototype-grade:
+
+- trusted-dealer key generation is still used,
+- public share-verifiability is not implemented,
+- Ethereum execution and proposer signing are still out of scope.
+
+## Mempool Inclusion-List Service
+
+`mempool-il` is designed as a separate service with two internal responsibilities:
+
+- mempool ingestion and classification,
+- deterministic inclusion-list construction.
+
+It reads pending transactions from configured RPC-backed sources, normalizes them into an in-memory indexed store, and exposes deterministic snapshots and bounded inclusion lists over HTTP.
+
+## Canonical References
+
+- Local developer workflow: [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- Validation matrix: [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+- Major design history: [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)

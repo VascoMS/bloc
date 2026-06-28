@@ -1,5 +1,7 @@
 # Cluster BTE Integration
 
+Supplemental module note. The canonical cross-module architecture summary now lives in [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+
 This document explains how this repository now exposes the BEAT-MEV batched threshold encryption primitive as a Go library that a DVT-style proposer cluster can use after consensus has fixed an encrypted transaction batch.
 
 The implementation is still prototype-safe, not production hardened. It removes the most important benchmarking shortcuts from the original proof of concept and adds a cluster-facing API, but it does not yet implement DKG, public share-verifiability, verifiable aggregation, slashing, or Ethereum transaction semantic validation.
@@ -110,6 +112,13 @@ plan, err := cluster.PlanBatch(ciphertexts)
 - Rejects any sub-batch with duplicate indices.
 
 This handles the BEAT-MEV index-collision constraint by ensuring each sub-batch has distinct puncture indices.
+
+The default `alpha = ceil(2*sqrt(B))` is the paper's `Opt-2` sub-batching
+choice. The integrated `bloc-node` evaluator uses this path, including the M1
+profile. The cluster API does not currently expose knobs for the paper's
+normal/unoptimized mode, `Opt-1` (`alpha = sqrt(B)`), or parallel sub-batch
+combination. Those comparisons belong in the benchmark harness or a future M2
+experiment profile.
 
 ### 5. Operator Share Generation
 

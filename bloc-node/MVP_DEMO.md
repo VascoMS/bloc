@@ -1,5 +1,7 @@
 # BLOC MVP Demo
 
+Supplemental module note. The canonical workflow summary now lives in [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md), and the validation role of this demo is tracked in [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+
 This demo shows four local BLOC operator processes agreeing on encrypted
 inclusion-list proposals, deterministically selecting a decrypted transaction
 set, exchanging BTE decryption shares, and materializing the same signed
@@ -31,23 +33,21 @@ The script also writes a Markdown summary:
 results/mvp-demo/<timestamp>/DEMO_REPORT.md
 ```
 
-To choose a different base port or skip libp2p:
+To choose a different base port:
 
 ```sh
 BLOC_DEMO_BASE_PORT=35000 ./scripts/demo-local.sh
-BLOC_SKIP_LIBP2P=1 ./scripts/demo-local.sh
 ```
 
 ## Scenarios
 
 The script runs:
 
-- `normal-tcp`: 4 nodes, signed Ethereum tx payloads, TCP transport.
+- `normal`: 4 nodes with signed Ethereum transaction payloads over libp2p.
 - `blockspace-cap`: 4 nodes, `--max-decrypted-txs 4`, proves only the capped
   set is decrypted.
 - `withhold-share`: one node withholds BTE shares; the remaining threshold
   should still complete.
-- `libp2p-smoke`: optional static-peer libp2p run using protobuf BLOC messages.
 
 Each scenario prints a compact summary:
 

@@ -106,6 +106,49 @@ func TestACSOutputIsNilAfterConsuming(t *testing.T) {
 	assert.Nil(t, acs.Output())
 }
 
+func TestACSWaitsForEveryTruthyRBCResult(t *testing.T) {
+	acs := &ACS{
+		Config:     Config{N: 4, F: 1},
+		bbaResults: map[uint64]bool{0: true, 1: true, 2: true, 3: false},
+		rbcResults: map[uint64][]byte{0: []byte("zero"), 1: []byte("one")},
+	}
+
+	acs.tryCompleteAgreement()
+	if acs.decided || acs.output != nil {
+		t.Fatal("ACS decided before every truthy RBC result was available")
+	}
+
+	acs.rbcResults[2] = []byte("two")
+	acs.tryCompleteAgreement()
+	if !acs.decided {
+		t.Fatal("ACS did not decide after every truthy RBC result became available")
+	}
+	assert.Equal(t, map[uint64][]byte{
+		0: []byte("zero"),
+		1: []byte("one"),
+		2: []byte("two"),
+	}, acs.output)
+}
+
+func TestACSCompletesWhenAllReliableBroadcastsOutput(t *testing.T) {
+	acs := &ACS{
+		Config:     Config{N: 4, F: 1},
+		bbaResults: map[uint64]bool{0: true, 1: true, 2: true},
+		rbcResults: map[uint64][]byte{
+			0: []byte("zero"),
+			1: []byte("one"),
+			2: []byte("two"),
+			3: []byte("three"),
+		},
+	}
+
+	acs.tryCompleteAgreement()
+	if !acs.decided {
+		t.Fatal("ACS did not decide after every RBC instance output")
+	}
+	assert.Equal(t, acs.rbcResults, acs.output)
+}
+
 type testMsg struct {
 	from uint64
 	msg  MessageTuple

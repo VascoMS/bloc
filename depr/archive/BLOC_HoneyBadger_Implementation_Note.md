@@ -1,5 +1,7 @@
 # BLOC HoneyBadger Adaptation Note
 
+Historical note. The active architectural summary now lives in [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md) and the durable rationale is summarized in [docs/DECISIONS.md](/bloc/docs/DECISIONS.md).
+
 This note documents two things:
 
 1. how the current open-source `hbbft` implementation in this workspace works,

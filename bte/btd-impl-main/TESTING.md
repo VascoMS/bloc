@@ -1,5 +1,7 @@
 # Testing Coverage
 
+Supplemental module note. The cross-repo validation matrix now lives in [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+
 This document explains what the current test and benchmark suite checks after the cluster-facing BTE integration.
 
 Run all tests from the module root:
@@ -245,6 +247,10 @@ Measures parallel sub-batch combine behavior for `B=128` and `B=512`, with:
 - `alpha = sqrt(B)`
 - `alpha = 2*sqrt(B)`
 
+These inherited benchmarks are the correct surface for comparing the paper's
+optimization variants. They are not the same thing as the integrated M1
+`bloc-node` evaluator.
+
 ## Cluster Full-Path Benchmarks
 
 These benchmarks live in `be/cluster_test.go`. They measure the new cluster-facing full path.
@@ -263,6 +269,13 @@ Each benchmark performs the full prototype path:
 3. Generate threshold shares for every sub-batch.
 4. Combine shares with `CombineShares`.
 5. Check the number of returned plaintext results.
+
+`PlanBatch` uses deterministic BEAT-MEV `Opt-2` sub-batching by default:
+`alpha = ceil(2*sqrt(B))`, raised only if repeated indices require more
+sub-batches. This is the same cluster-facing planning behavior used by
+`bloc-node` and the M1 evaluator. These full-path benchmarks therefore measure
+the optimized integrated path, not the normal/unoptimized combine path and not a
+variant comparison.
 
 Run one benchmark:
 

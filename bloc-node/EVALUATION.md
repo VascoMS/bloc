@@ -1,5 +1,7 @@
 # BLOC Evaluation Plan and Current Gaps
 
+Supplemental module note. The canonical validation matrix now lives in [docs/VALIDATION.md](/bloc/docs/VALIDATION.md), and the forward-looking gaps are summarized in [docs/ROADMAP.md](/bloc/docs/ROADMAP.md).
+
 This document maps the research questions from `../papers/BLOC_Final.pdf` to
 the current prototype and identifies what is still missing before the results
 can support stronger deployment claims.
@@ -15,7 +17,6 @@ go run ./cmd/bloc-node eval-local \
   --tx-size 256 \
   --bmax 128 \
   --tx-gas 21000 \
-  --network tcp \
   --out-dir results/rq1-local
 ```
 
@@ -57,7 +58,6 @@ go run ./cmd/bloc-node eval-local \
   --tx-size 512 \
   --bmax 128 \
   --max-decrypted-gas 1344000 \
-  --network libp2p \
   --out-dir results/rq2-local
 
 cd ../bte/btd-impl-main
@@ -185,8 +185,8 @@ cd bloc-node
 ./scripts/demo-local.sh
 ```
 
-The script saves normal TCP, blockspace cap, withheld-share, and optional
-libp2p smoke outputs under `results/mvp-demo/<timestamp>/`.
+The script saves normal, blockspace-cap, and withheld-share libp2p outputs
+under `results/mvp-demo/<timestamp>/`.
 
 ## DVT/Ethereum Track
 

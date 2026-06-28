@@ -1,64 +1,151 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
+## Purpose
 
-This repository contains several Go modules that work together as the BLOC prototype:
+This is the primary entry point for Codex and other LLM agents working in the BLOC thesis prototype. Start here, then read only the smallest set of canonical docs needed for the task.
 
-- `bloc-node/`: deployable prototype node, local evaluator, transport code, and result artifacts.
-- `mempool-il/`: standalone mempool inclusion-list service.
-- `bte/btd-impl-main/`: BEAT-MEV batched threshold encryption library and benchmarks.
-- `sbc/hbbft/`: HoneyBadger ACS implementation used by `bloc-node`.
-- `papers/`: research PDFs and protocol references.
+## Read Order
+
+1. This file
+2. [docs/STATUS.md](/bloc/docs/STATUS.md)
+3. [docs/CODEX_GUIDE.md](/bloc/docs/CODEX_GUIDE.md)
+4. The task-specific canonical docs listed below
+
+## Repository Map
+
+- `bloc-node/`: integrated prototype node, local evaluator, transport layers, and reports
+- `mempool-il/`: deterministic mempool inclusion-list service
+- `bte/btd-impl-main/`: BEAT-MEV batched threshold encryption library and benchmarks
+- `sbc/hbbft/`: HoneyBadger ACS implementation plus the BLOC slot adapter
+- `latency-charts/`: Python chart generation for `eval-suite` latency outputs
+- `papers/`: research PDFs and reference material
 
 Most source code lives under `cmd/` and `internal/` inside each module. Tests are colocated as `*_test.go`.
 
-## Build, Test, and Development Commands
+## Canonical Docs
 
-Run commands from the relevant module directory:
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [docs/DEVELOPMENT.md](/bloc/docs/DEVELOPMENT.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+- [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
+- [docs/CHANGELOG.md](/bloc/docs/CHANGELOG.md)
+- [docs/ROADMAP.md](/bloc/docs/ROADMAP.md)
+- [docs/GLOSSARY.md](/bloc/docs/GLOSSARY.md)
+- [docs/CODEX_GUIDE.md](/bloc/docs/CODEX_GUIDE.md)
+
+## Task Routing
+
+### Architecture or protocol changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+
+### `bloc-node` changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [bloc-node/README.md](/bloc/bloc-node/README.md)
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+
+### `mempool-il` changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [mempool-il/README.md](/bloc/mempool-il/README.md)
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+
+### BTE changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [bte/btd-impl-main/README.md](/bloc/bte/btd-impl-main/README.md)
+- [bte/btd-impl-main/TESTING.md](/bloc/bte/btd-impl-main/TESTING.md)
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+
+### ACS or `hbbft` changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [sbc/hbbft/README.md](/bloc/sbc/hbbft/README.md)
+- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+
+### Documentation-only changes
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [docs/DEVELOPMENT.md](/bloc/docs/DEVELOPMENT.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- this file
+
+### Validation or debugging work
+
+Read:
+
+- [docs/STATUS.md](/bloc/docs/STATUS.md)
+- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
+- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+- the relevant module README
+- any matching archived historical note only if the failure mode is the same
+
+## Repo Rules
+
+- Keep durable cross-cutting documentation in root `docs/`.
+- Treat [docs/STATUS.md](/bloc/docs/STATUS.md) as the live source of truth for current milestone state and next actions.
+- Keep module READMEs focused on module-local usage and entry points.
+- Do not create duplicate design or workflow docs when a canonical file already exists.
+- No new standalone `.md` notes unless they are:
+  - a temporary scratchpad,
+  - a task artifact,
+  - or a historical note intended for `docs/archive/`.
+- Record major design choices in [docs/DECISIONS.md](/bloc/docs/DECISIONS.md).
+- Record implementation-level changes in [docs/CHANGELOG.md](/bloc/docs/CHANGELOG.md).
+
+## Development and Validation Shortcuts
+
+Run module tests from the relevant module directory:
 
 ```sh
 cd bloc-node && go test ./...
 cd mempool-il && go test ./...
 cd bte/btd-impl-main && go test ./...
 cd sbc/hbbft && go test ./...
+cd latency-charts && python -m pytest
 ```
 
-Useful local runs:
+Useful local prototype runs:
 
 ```sh
 cd bloc-node
-go run ./cmd/bloc-node eval-local --nodes 4 --batch-sizes 8 --network tcp
-go run ./cmd/bloc-node eval-local --nodes 4 --batch-sizes 8 --network libp2p
+go run ./cmd/bloc-node eval-local --nodes 4 --batch-sizes 8
+./scripts/demo-local.sh
 ```
 
-BTE benchmarks:
+BTE benchmark entry point:
 
 ```sh
 cd bte/btd-impl-main
 go test ./be -run '^$' -bench '^BenchmarkHybridFullPath'
 ```
 
-## Coding Style & Naming Conventions
+## Security Reminder
 
-Use standard Go formatting: run `gofmt` on edited Go files. Keep package names short and lowercase. Prefer explicit protocol/data names such as `InclusionList`, `WireShare`, and `MaterializedTransactionSet`. Add Go doc comments for exported identifiers and protocol-critical internals.
-
-Do not introduce generated or temporary artifacts into source directories. Keep evaluator outputs under ignored `results/` directories.
-
-## Testing Guidelines
-
-Use Go’s built-in `testing` package. Name tests `TestBehaviorUnderCondition`, and keep deterministic protocol tests focused on hashes, ordering, consistency, and failure modes. For node changes, run `bloc-node` unit tests and at least one `eval-local` smoke test. For BTE or ACS changes, also run the corresponding module tests.
-
-## Commit & Pull Request Guidelines
-
-Recent history uses short conventional prefixes such as `feat:` and `fix:`. Use concise commit subjects, for example:
-
-```text
-feat: add signed ethereum tx demo payloads
-fix: preserve deterministic inclusion merge order
-```
-
-Pull requests should include a short summary, affected modules, commands run, and known limitations. For protocol changes, mention compatibility impacts and update relevant docs.
-
-## Security & Configuration Tips
-
-Current configs may contain prototype trusted-dealer BTE shares and libp2p private keys. Treat them as local demo material only. Do not claim production readiness without DKG, stronger share verification, real protobuf schemas, and hardened P2P identity handling.
+Current configs may contain prototype trusted-dealer BTE shares and libp2p private keys. Treat them as local demo material only. Do not claim production readiness without DKG, stronger share verification, hardened identity handling, and a real execution or signing boundary.

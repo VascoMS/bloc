@@ -1,5 +1,7 @@
 # Threshold Share Combination Issue
 
+Historical note. The durable design takeaway now lives in [docs/DECISIONS.md](/bloc/docs/DECISIONS.md) and [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+
 This note documents the threshold-decryption issue observed while integrating
 HoneyBadger ACS with the BEAT-MEV batched threshold encryption implementation.
 It is intended as future debugging context for `bloc-node` and

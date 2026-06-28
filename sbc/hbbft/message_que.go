@@ -35,13 +35,7 @@ func (q *messageQue) addMessages(msgs ...MessageTuple) {
 }
 
 func (q *messageQue) addQue(que *messageQue) {
-	newQue := make([]MessageTuple, len(q.que)+que.len())
-	copy(newQue, q.messages())
-	copy(newQue, que.messages())
-
-	q.lock.Lock()
-	defer q.lock.Unlock()
-	q.que = newQue
+	q.addMessages(que.messages()...)
 }
 
 func (q *messageQue) len() int {
@@ -51,12 +45,9 @@ func (q *messageQue) len() int {
 }
 
 func (q *messageQue) messages() []MessageTuple {
-	q.lock.RLock()
-	msgs := q.que
-	q.lock.RUnlock()
-
 	q.lock.Lock()
 	defer q.lock.Unlock()
-	q.que = []MessageTuple{}
+	msgs := q.que
+	q.que = nil
 	return msgs
 }

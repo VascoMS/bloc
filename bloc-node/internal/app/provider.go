@@ -17,7 +17,7 @@ func (n *Node) buildInclusionList() (InclusionList, error) {
 		n.mu.Lock()
 		items := append([]EncryptedPlaceholder(nil), n.pending...)
 		n.mu.Unlock()
-		list := InclusionList{Slot: n.cfg.Slot, OperatorID: n.self.ID, Items: items}
+		list := InclusionList{Slot: n.id, OperatorID: n.self.ID, Items: items}
 		list.Hash = inclusion.HashInclusionList(list)
 		return list, nil
 	case "mempool-http":
@@ -92,7 +92,7 @@ func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 			Kind:                  in.Kind,
 		})
 	}
-	list := InclusionList{Slot: n.cfg.Slot, OperatorID: n.self.ID, Items: items}
+	list := InclusionList{Slot: n.id, OperatorID: n.self.ID, Items: items}
 	list.Hash = inclusion.HashInclusionList(list)
 	return list, nil
 }

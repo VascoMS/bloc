@@ -1,34 +1,20 @@
-# BLOC Node Prototype
+# bloc-node
 
-This module wires the local HoneyBadger ACS implementation to the BEAT-MEV
-batched threshold encryption code so separate operator processes can agree on
-encrypted inclusion lists and decrypt a deterministic transaction set only after
-agreement.
+`bloc-node` is the integrated BLOC prototype node and local evaluator. It combines:
 
-It follows the prototype sequence from `../papers/BLOC_Final.pdf`:
+- slot-scoped ACS from `sbc/hbbft`,
+- cluster-facing batched threshold encryption from `bte/btd-impl-main`,
+- deterministic inclusion-list merging and materialization,
+- protobuf operator messaging over libp2p streams,
+- evaluation and reporting commands.
 
-1. Clients submit raw transaction bytes plus plaintext scheduling metadata to an
-   operator HTTP endpoint. The local evaluator generates signed Ethereum
-   transaction bytes for this payload.
-2. The operator encrypts the bytes as a BTE ciphertext placeholder for the
-   configured cluster, slot, and index.
-3. Each operator proposes one slot-scoped `InclusionList` to ACS.
-4. After ACS outputs the common subset, every operator deterministically merges
-   the agreed lists, applies the configured decrypted blockspace cap, and builds
-   the same BTE `BatchPlan`.
-5. Operators gossip threshold decryption shares for the selected set.
-6. Once each sub-batch has `t` shares, every operator combines shares and emits
-   the same plaintext transaction set.
+For the cross-module system design, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For the validation matrix, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md). For the standard demo and experiment flow, read [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
 
-This is a deployability harness, not a production DVT client. It uses a
-trusted-dealer config generator, syntactically valid signed Ethereum
-transactions in the evaluator, and a pluggable node-to-node transport. The
-default transport is the original local TCP mode; `--network libp2p` enables a
-static-peer libp2p Gossipsub backend.
+This module is a prototype harness, not a production DVT client. It still uses trusted-dealer configs and a local evaluation environment.
 
 ## Quick Local Run
 
-From this directory:
+Generate a local cluster config:
 
 ```sh
 go run ./cmd/bloc-node gen-config \
@@ -36,13 +22,12 @@ go run ./cmd/bloc-node gen-config \
   --threshold 3 \
   --bmax 16 \
   --max-decrypted-gas 63000 \
-  --network tcp \
-  --base-consensus-port 19300 \
   --base-http-port 18300 \
+  --base-p2p-port 19300 \
   --out bloc-cluster.local.json
 ```
 
-Start four operators in separate terminals:
+Start four operators:
 
 ```sh
 go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 0 --out results/manual/node-0.json
@@ -60,62 +45,42 @@ go run ./cmd/bloc-node submit --url http://127.0.0.1:18302 --tx 0x070809 --gas 2
 go run ./cmd/bloc-node submit --url http://127.0.0.1:18303 --tx 0x0a0b0c --gas 21000 --fee-wei 10 --from 0x04 --nonce 0
 ```
 
-Trigger the slot:
+Trigger the slot and inspect results:
 
 ```sh
 curl -s -X POST http://127.0.0.1:18300/start
-curl -s -X POST http://127.0.0.1:18301/start
-curl -s -X POST http://127.0.0.1:18302/start
-curl -s -X POST http://127.0.0.1:18303/start
-```
-
-Read results:
-
-```sh
 curl -s http://127.0.0.1:18300/result
 cat results/manual/node-0.json
 ```
 
-HoneyBadger ACS guarantees a common subset of at least `N - f` proposals, so in
-a four-node run the agreed set may contain three of the four submitted operator
-lists. All correct operators should report the same `batch_id`, merged-set hash,
-selected gas, `ethereum_tx_hashes`, and `plaintexts_hex` ordering.
+All correct operators should report the same `batch_id`, merged-set hash, selected gas, `ethereum_tx_hashes`, and `plaintexts_hex` ordering.
 
 ## Config Notes
 
 `gen-config` writes:
 
-- operator TCP and HTTP addresses;
-- the BTE public key;
-- one trusted-dealer secret share per operator;
-- a shared `crs_seed_hex`, so each process derives the same BEAT-MEV PRF/CRS;
-- `blockspace.max_decrypted_gas`, where `0` preserves uncapped behavior;
-- `blockspace.max_decrypted_txs`, where `0` means `bmax`;
-- `blockspace.default_tx_gas`, used for raw submissions without metadata;
-- `provider.mode`, currently `direct` or `mempool-http`.
-- `network.mode`, currently `tcp` or `libp2p`;
-- libp2p multiaddrs and operator peer IDs for static-peer P2P runs.
+- operator HTTP and libp2p addresses,
+- the BTE public key,
+- one trusted-dealer secret share per operator,
+- a shared `crs_seed_hex`,
+- blockspace caps and defaults,
+- provider mode,
+- libp2p peer identity details.
 
-In libp2p mode, node-to-node ACS and BTE share messages are serialized with the
-generated Go bindings from `proto/bloc/v1/messages.proto` and
-`internal/pb/blocv1/messages.pb.go`. Regenerate them after schema edits with:
+ACS and BTE share messages use protobuf envelopes over authenticated,
+multiplexed libp2p streams. The generated bindings live in
+`proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
+local multiaddresses use TCP underneath; libp2p is not gRPC.
+
+Regenerate the protobuf bindings after schema edits with:
 
 ```sh
 protoc --go_out=. --go_opt=module=bloc-node proto/bloc/v1/messages.proto
 ```
 
-The TCP transport remains a compatibility path that uses Go `gob`.
-
-The current implementation intentionally has no PBS/builder interaction and no
-prefix-constraint data model. It materializes a PBS-independent decrypted
-transaction set.
-
-The CRS seed is prototype plumbing. A hardened version should replace this with
-a stable public CRS artifact and DKG-generated key shares.
-
 ## Local Evaluation Harness
 
-Run a reproducible local experiment without manually opening four terminals:
+Run a reproducible local experiment:
 
 ```sh
 go run ./cmd/bloc-node eval-local \
@@ -125,64 +90,44 @@ go run ./cmd/bloc-node eval-local \
   --bmax 64 \
   --max-decrypted-gas 252000 \
   --tx-gas 21000 \
-  --network tcp \
   --base-port 24000 \
   --out-dir results/local
 ```
 
-The evaluator submits deterministic EIP-1559 transactions signed by local test
-keys. These transactions are syntactically valid and recoverable with
-go-ethereum, but the harness does not broadcast them or require funded accounts.
-`--tx-size` is interpreted as a minimum encoded transaction size; deterministic
-calldata padding is added when necessary.
-
-For the professor-facing MVP flow, run:
+Run the professor-facing demo flow:
 
 ```sh
 ./scripts/demo-local.sh
 ```
 
-See `MVP_DEMO.md` for scenario descriptions and expected output.
-
-The harness writes:
-
-- `summary.json`: full per-run and per-node results.
-- `summary.csv`: compact rows for plotting latency and bandwidth.
-- one run directory per configuration, including generated config, node logs,
-  and per-node result JSON.
-
-Blockspace sweep example:
-
-```sh
-go run ./cmd/bloc-node eval-local \
-  --nodes 4 \
-  --batch-sizes 32 \
-  --tx-size 256 \
-  --bmax 64 \
-  --tx-gas 21000 \
-  --max-decrypted-gas 168000 \
-  --out-dir results/blockspace-8tx
-```
-
-Static-peer libp2p smoke run:
-
-```sh
-go run ./cmd/bloc-node eval-local \
-  --nodes 4 \
-  --batch-sizes 8 \
-  --tx-size 256 \
-  --bmax 16 \
-  --network libp2p \
-  --base-port 26000 \
-  --out-dir results/libp2p-local
-```
-
 Useful fault-injection examples:
 
 ```sh
-# One node proposes an empty batch but still participates otherwise.
 go run ./cmd/bloc-node eval-local --fault 3:omit-proposal
-
-# One node withholds BTE decryption shares.
 go run ./cmd/bloc-node eval-local --fault 3:withhold-share
 ```
+
+The harness writes `summary.json`, `summary.csv`, per-run configs, per-node logs, and per-node result artifacts under the chosen `results/` directory.
+
+## Repeated Latency Suite
+
+Use `eval-suite` for M1 latency statistics across a configuration matrix:
+
+```sh
+go run ./cmd/bloc-node eval-suite \
+  --profile m1-baseline \
+  --experiment-id m1-baseline \
+  --out-dir results/m1-local/baseline-persistent
+```
+
+The profile runs 4/7/10 operators and 8/32/128 transactions over libp2p with
+5 warmups plus 30 measurements per scenario: 9 scenarios and 315 runs. It uses
+one persistent cluster per operator count, but constructs a fresh ACS and clean
+protocol state for every slot. Cluster startup, slot preparation, and transaction
+submission are recorded separately from protocol latency. The suite keeps raw
+per-node results, uses the slowest correct node as the run-level latency, and produces p50/p95 summaries. See
+[docs/VALIDATION.md](/bloc/docs/VALIDATION.md) for metric boundaries and the
+short smoke command.
+
+Use `--execution-mode isolated` when validating process startup and teardown on
+every sample. Custom suites remain isolated unless persistent mode is requested.

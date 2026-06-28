@@ -1,8 +1,6 @@
 package app
 
 import (
-	"bytes"
-	"encoding/gob"
 	"fmt"
 	"io"
 
@@ -15,32 +13,10 @@ const (
 	envelopeVersion = 1
 )
 
-// EnvelopeCodec converts WireEnvelope values to transport bytes. Keeping this
-// separate from transports lets TCP use legacy gob while libp2p uses protobuf.
+// EnvelopeCodec converts WireEnvelope values to transport bytes.
 type EnvelopeCodec interface {
 	Encode(WireEnvelope) ([]byte, error)
 	Decode([]byte) (WireEnvelope, error)
-}
-
-// GobEnvelopeCodec is the compatibility codec used by the TCP transport.
-type GobEnvelopeCodec struct{}
-
-// Encode serializes an envelope using Go gob.
-func (GobEnvelopeCodec) Encode(env WireEnvelope) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(env); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// Decode deserializes a gob-encoded envelope.
-func (GobEnvelopeCodec) Decode(data []byte) (WireEnvelope, error) {
-	var env WireEnvelope
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&env); err != nil {
-		return WireEnvelope{}, err
-	}
-	return env, nil
 }
 
 // ProtoEnvelopeCodec serializes libp2p messages with generated protobuf

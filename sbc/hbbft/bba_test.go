@@ -44,7 +44,7 @@ func TestBBAStepByStep(t *testing.T) {
 	assert.Nil(t, bba.InputValue(true))
 	assert.Equal(t, 1, len(bba.sentBvals))
 	assert.True(t, bba.sentBvals[0])
-	assert.True(t, bba.recvBval[0]) // we are id (0)
+	assert.True(t, bba.recvBval[true][0]) // we are id (0)
 	msgs := bba.Messages()
 	assert.Equal(t, 1, len(msgs))
 	assert.IsType(t, &BvalRequest{}, msgs[0].Message)
@@ -52,13 +52,13 @@ func TestBBAStepByStep(t *testing.T) {
 
 	// Sent input from node 1
 	bba.handleBvalRequest(uint64(1), true)
-	assert.True(t, bba.recvBval[1])
+	assert.True(t, bba.recvBval[true][1])
 
 	// Sent input from node 2
 	// The algorithm decribes that after receiving (N - f) bval messages we
 	// broadcast AUX(b)
 	bba.handleBvalRequest(uint64(2), true)
-	assert.True(t, bba.recvBval[2])
+	assert.True(t, bba.recvBval[true][2])
 	msg := bba.Messages()
 	assert.Equal(t, 1, len(msg))
 	assert.IsType(t, &AuxRequest{}, msg[0].Message)
@@ -76,18 +76,32 @@ func TestBBAStepByStep(t *testing.T) {
 	assert.Equal(t, true, bba.output.(bool))
 	assert.Equal(t, true, bba.decision.(bool))
 	assert.Equal(t, uint32(1), bba.epoch)
+	assert.Equal(t, 1, bba.countBvals(true))
 }
 
 func TestNewBBA(t *testing.T) {
 	cfg := Config{N: 4}
 	bba := NewBBA(cfg)
 	assert.Equal(t, 0, len(bba.binValues))
-	assert.Equal(t, 0, len(bba.recvBval))
+	assert.Equal(t, 0, bba.countAllBvals())
 	assert.Equal(t, 0, len(bba.recvAux))
 	assert.Equal(t, 0, len(bba.sentBvals))
 	assert.Equal(t, uint32(0), bba.epoch)
 	assert.Equal(t, false, bba.done)
 	assert.Nil(t, bba.output)
+}
+
+func TestBBAKeepsBothBvalValuesFromSameSender(t *testing.T) {
+	bba := NewBBA(Config{N: 4, F: 1, ID: 0})
+	assert.Nil(t, bba.handleBvalRequest(1, true))
+	assert.Nil(t, bba.handleBvalRequest(2, true))
+	assert.Nil(t, bba.handleBvalRequest(3, true))
+	assert.Equal(t, 4, bba.countBvals(true)) // includes the node's relayed true BVAL.
+
+	assert.Nil(t, bba.handleBvalRequest(1, false))
+	assert.Nil(t, bba.handleBvalRequest(2, false))
+	assert.Equal(t, 4, bba.countBvals(true))
+	assert.Equal(t, 3, bba.countBvals(false)) // includes the node's relayed false BVAL.
 }
 
 func TestAdvanceEpochInBBA(t *testing.T) {

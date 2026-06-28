@@ -43,8 +43,9 @@ type BBA struct {
 	binValues []bool
 	// sentBvals are the binary values this instance sent.
 	sentBvals []bool
-	// recvBval is a mapping of the sender and the receveived binary value.
-	recvBval map[uint64]bool
+	// recvBval tracks BVAL messages by value and sender. A sender may relay both
+	// values in the same epoch, so this cannot be represented as sender -> value.
+	recvBval map[bool]map[uint64]bool
 	// recvAux is a mapping of the sender and the receveived Aux value.
 	recvAux map[uint64]bool
 	// Whether this bba is terminated or not.
@@ -66,6 +67,7 @@ type BBA struct {
 	inputCh   chan bbaInputTuple
 	messageCh chan bbaMessageTuple
 	msgCount  int
+	closeOnce sync.Once
 }
 
 // NewBBA returns a new instance of the Binary Byzantine Agreement.
@@ -75,7 +77,7 @@ func NewBBA(cfg Config) *BBA {
 	}
 	bba := &BBA{
 		Config:          cfg,
-		recvBval:        make(map[uint64]bool),
+		recvBval:        newBvalSet(),
 		recvAux:         make(map[uint64]bool),
 		sentBvals:       []bool{},
 		binValues:       []bool{},
@@ -165,6 +167,23 @@ func (b *BBA) Messages() []*AgreementMessage {
 	return msgs
 }
 
+func (b *BBA) progress() BBAProgress {
+	if b == nil {
+		return BBAProgress{}
+	}
+	return BBAProgress{
+		Epoch:           b.epoch,
+		BinValues:       len(b.binValues),
+		SentBvals:       len(b.sentBvals),
+		ReceivedBvals:   b.countAllBvals(),
+		ReceivedAux:     len(b.recvAux),
+		DelayedMessages: len(b.delayedMessages),
+		Done:            b.done,
+		HasOutput:       b.output != nil,
+		HasDecision:     b.decision != nil,
+	}
+}
+
 func (b *BBA) addMessage(msg *AgreementMessage) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
@@ -172,7 +191,7 @@ func (b *BBA) addMessage(msg *AgreementMessage) {
 }
 
 func (b *BBA) stop() {
-	close(b.closeCh)
+	b.closeOnce.Do(func() { close(b.closeCh) })
 }
 
 // run makes sure we only process 1 message at the same time, avoiding mutexes
@@ -237,7 +256,7 @@ func (b *BBA) handleMessage(senderID uint64, msg *AgreementMessage) error {
 // message que if there are any messages that need to be broadcasted.
 func (b *BBA) handleBvalRequest(senderID uint64, val bool) error {
 	b.lock.Lock()
-	b.recvBval[senderID] = val
+	b.recvBval[val][senderID] = true
 	b.lock.Unlock()
 	lenBval := b.countBvals(val)
 
@@ -319,6 +338,9 @@ func (b *BBA) tryOutputAgreement() {
 	estimated := b.estimated.(bool)
 	b.sentBvals = append(b.sentBvals, estimated)
 	b.addMessage(NewAgreementMessage(int(b.epoch), &BvalRequest{estimated}))
+	if err := b.handleBvalRequest(b.ID, estimated); err != nil {
+		log.Warn(err)
+	}
 
 	// handle the delayed messages.
 	for _, que := range b.delayedMessages {
@@ -336,7 +358,7 @@ func (b *BBA) advanceEpoch() {
 	b.binValues = []bool{}
 	b.sentBvals = []bool{}
 	b.recvAux = make(map[uint64]bool)
-	b.recvBval = make(map[uint64]bool)
+	b.recvBval = newBvalSet()
 	b.epoch++
 }
 
@@ -360,13 +382,20 @@ func (b *BBA) countOutputs() (int, []bool) {
 func (b *BBA) countBvals(ok bool) int {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
-	n := 0
-	for _, val := range b.recvBval {
-		if val == ok {
-			n++
-		}
+	return len(b.recvBval[ok])
+}
+
+func (b *BBA) countAllBvals() int {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+	return len(b.recvBval[false]) + len(b.recvBval[true])
+}
+
+func newBvalSet() map[bool]map[uint64]bool {
+	return map[bool]map[uint64]bool{
+		false: make(map[uint64]bool),
+		true:  make(map[uint64]bool),
 	}
-	return n
 }
 
 // hasSentBval return true if we already sent out the given value.

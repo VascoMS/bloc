@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 2s
+
+scrape_configs:
+  - job_name: bloc-sidecars
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - bloc-node-0:8000
+          - bloc-node-1:8001
+          - bloc-node-2:8002
+          - bloc-node-3:8003

@@ -1,6 +1,7 @@
 package mempool
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -19,6 +20,14 @@ func ClassifyAndParse(tx *Transaction) {
 	}
 	tx.Kind = TxKindPlaceholder
 	tx.Placeholder = p
+	tx.TargetTxHash = p.CommitmentHex
+	tx.EncryptedPayloadHex = p.EncryptedPayloadHex
+	tx.EncryptedPayloadHash = p.EncryptedPayloadHash
+	tx.PlaceholderTxHash = tx.Hash
+	tx.PlaceholderCalldataBytes = p.CalldataBytes
+	if p.RequestedGas > 0 {
+		tx.Gas = p.RequestedGas
+	}
 }
 
 func ParsePlaceholderCalldata(input string) (*PlaceholderData, error) {
@@ -30,7 +39,7 @@ func ParsePlaceholderCalldata(input string) (*PlaceholderData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid calldata hex: %w", err)
 	}
-	if len(b) < 68 {
+	if len(b) <= 68 {
 		return nil, fmt.Errorf("calldata too short")
 	}
 	if !bytesEqual(b[:4], placeholderSelector) {
@@ -45,9 +54,17 @@ func ParsePlaceholderCalldata(input string) (*PlaceholderData, error) {
 	}
 
 	return &PlaceholderData{
-		CommitmentHex: "0x" + hex.EncodeToString(commitment),
-		RequestedGas:  gas.Uint64(),
+		CommitmentHex:        "0x" + hex.EncodeToString(commitment),
+		RequestedGas:         gas.Uint64(),
+		EncryptedPayloadHex:  "0x" + hex.EncodeToString(b[68:]),
+		EncryptedPayloadHash: "0x" + hashHex(b[68:]),
+		CalldataBytes:        len(b),
 	}, nil
+}
+
+func hashHex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 func bytesEqual(a, b []byte) bool {

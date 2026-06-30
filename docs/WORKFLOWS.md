@@ -85,6 +85,26 @@ Use a separate M2 benchmark or evaluator sweep when the question is normal vs
 `sqrt(B)` vs `2*sqrt(B)` vs parallel combine, or when testing batch sizes beyond
 the M1 `BMax=128` profile.
 
+## Distributed Sidecar Workflow
+
+Use Docker Compose as the local bridge before cloud/Kubernetes work:
+
+```sh
+cd deploy/docker-compose
+docker compose up --build
+```
+
+Then run the remote evaluator from `bloc-node`:
+
+```sh
+go run ./cmd/bloc-node eval-remote --config ../deploy/docker-compose/remote-eval.compose.json --experiment-id compose-smoke --batch-size 8 --repetitions 1 --out-dir results/distributed/compose-smoke
+```
+
+For Kubernetes, generate `cluster.json` with `--address-mode kubernetes`, create
+the `bloc-cluster-config` ConfigMap from that generated file, apply the
+manifests in `deploy/k8s/`, and use `eval-remote` with endpoint URLs that are
+reachable from where the evaluator is running.
+
 ## Scratchpads vs Durable Docs
 
 - Scratchpads are temporary and task-scoped.

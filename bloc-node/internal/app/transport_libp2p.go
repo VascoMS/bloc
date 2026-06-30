@@ -38,7 +38,7 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 	if err != nil {
 		return err
 	}
-	opts := []libp2p.Option{libp2p.ListenAddrStrings(t.node.self.P2PAddr)}
+	opts := []libp2p.Option{libp2p.ListenAddrStrings(t.node.self.p2pListenAddr())}
 	if priv != nil {
 		opts = append(opts, libp2p.Identity(priv))
 	}
@@ -67,7 +67,7 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 		}
 		handler(env, len(data))
 	})
-	log.Printf("node %d libp2p peer %s listening on %v", t.node.self.ID, h.ID(), h.Addrs())
+	log.Printf("event=libp2p_listen node_id=%d peer_id=%s listen_addrs=%v advertise_addr=%s", t.node.self.ID, h.ID(), h.Addrs(), t.node.self.p2pAdvertiseAddr())
 	t.connectStaticPeers(ctx)
 	return nil
 }
@@ -151,7 +151,7 @@ func (t *LibP2PTransport) Close() error {
 
 func (t *LibP2PTransport) connectStaticPeers(ctx context.Context) {
 	for _, cfg := range t.node.peers {
-		if cfg.ID <= t.node.self.ID || cfg.P2PAddr == "" || cfg.P2PPeerID == "" {
+		if cfg.ID <= t.node.self.ID || cfg.p2pAdvertiseAddr() == "" || cfg.P2PPeerID == "" {
 			continue
 		}
 		go t.connectPeerWithRetry(ctx, cfg)
@@ -159,7 +159,7 @@ func (t *LibP2PTransport) connectStaticPeers(ctx context.Context) {
 }
 
 func (t *LibP2PTransport) connectPeerWithRetry(ctx context.Context, cfg NodeConfig) {
-	fullAddr := cfg.P2PAddr + "/p2p/" + cfg.P2PPeerID
+	fullAddr := cfg.p2pAdvertiseAddr() + "/p2p/" + cfg.P2PPeerID
 	addr, err := ma.NewMultiaddr(fullAddr)
 	if err != nil {
 		log.Printf("parse peer %d multiaddr %q: %v", cfg.ID, fullAddr, err)

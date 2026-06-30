@@ -308,6 +308,11 @@ func TestResultsConsistentChecksMaterializedHashes(t *testing.T) {
 		AgreedSetHash: "agreed", MergedSetHash: "merged", SelectedGas: 21000,
 		PlaintextHashes: []string{"plain"}, EthereumTxHashes: []string{"eth"},
 	}}
+	equivalent := base
+	equivalent.Materialized.AgreedSetHash = "different-agreed-subset"
+	if !resultsConsistent([]Result{base, equivalent}) {
+		t.Fatal("different ACS accepted-list hashes rejected despite identical materialized output")
+	}
 	other := base
 	other.Materialized.MergedSetHash = "different"
 	if resultsConsistent([]Result{base, other}) {

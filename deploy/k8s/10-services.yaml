@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bloc-node-headless
+  namespace: bloc
+  labels:
+    app: bloc-node
+spec:
+  clusterIP: None
+  selector:
+    app: bloc-node
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+    - name: p2p
+      port: 9000
+      targetPort: p2p
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bloc-node-http
+  namespace: bloc
+  labels:
+    app: bloc-node
+spec:
+  selector:
+    app: bloc-node
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

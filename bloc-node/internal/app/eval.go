@@ -381,7 +381,6 @@ func resultsConsistent(results []Result) bool {
 	first := results[0]
 	batchID := first.BatchID
 	joined := strings.Join(first.Plaintexts, "\n")
-	agreedSetHash := first.Materialized.AgreedSetHash
 	mergedSetHash := first.Materialized.MergedSetHash
 	selectedGas := first.Materialized.SelectedGas
 	plainHashes := strings.Join(first.Materialized.PlaintextHashes, "\n")
@@ -389,7 +388,6 @@ func resultsConsistent(results []Result) bool {
 	for _, result := range results[1:] {
 		if result.BatchID != batchID ||
 			strings.Join(result.Plaintexts, "\n") != joined ||
-			result.Materialized.AgreedSetHash != agreedSetHash ||
 			result.Materialized.MergedSetHash != mergedSetHash ||
 			result.Materialized.SelectedGas != selectedGas ||
 			strings.Join(result.Materialized.PlaintextHashes, "\n") != plainHashes ||

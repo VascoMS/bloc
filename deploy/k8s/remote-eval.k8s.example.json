@@ -1,0 +1,18 @@
+{
+  "node_count": 4,
+  "threshold": 3,
+  "bmax": 128,
+  "network": "libp2p",
+  "initial_slot": 1,
+  "deployment": {
+    "environment": "kubernetes",
+    "namespace": "bloc",
+    "statefulset": "bloc-node"
+  },
+  "nodes": [
+    { "id": 0, "url": "http://bloc-node-0.bloc-node-headless.bloc.svc.cluster.local:8000", "label": "bloc-node-0" },
+    { "id": 1, "url": "http://bloc-node-1.bloc-node-headless.bloc.svc.cluster.local:8000", "label": "bloc-node-1" },
+    { "id": 2, "url": "http://bloc-node-2.bloc-node-headless.bloc.svc.cluster.local:8000", "label": "bloc-node-2" },
+    { "id": 3, "url": "http://bloc-node-3.bloc-node-headless.bloc.svc.cluster.local:8000", "label": "bloc-node-3" }
+  ]
+}

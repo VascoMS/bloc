@@ -1,143 +1,118 @@
 # Roadmap
 
-This roadmap is organized as a linear sequence of milestones tagged to the thesis research questions. It distinguishes between:
+This roadmap is now ordered around the thesis path from local protocol evidence to distributed sidecar evidence, then to later Builder API and DVT integration work.
 
-- the current implemented prototype baseline,
-- the near-term evaluation roadmap,
-- the deferred target architecture.
-
-PBS prefix enforcement remains a deferred target architecture item and is not part of the current active milestone sequence.
+Builder API compatibility, production mev-boost behavior, real proposer signing, and PBS prefix enforcement are explicitly deferred until the sidecar can first be deployed, observed, and evaluated as a distributed cluster.
 
 ## M0. Current Prototype Baseline
 
 - RQs advanced: `RQ1`, `RQ2`, `RQ3`
-- Objective: define exactly what the current repo already proves today.
-- Why it matters: every later milestone depends on an honest baseline for implemented capabilities versus deferred target capabilities.
+- Objective: define exactly what the repo proves today.
 - Deliverables:
-  - documented local prototype path from encrypted inclusion lists to deterministic materialized plaintexts,
+  - documented local path from encrypted inclusion lists to deterministic materialized plaintexts,
   - documented validation commands for the current local baseline,
-  - explicit statement that PBS and full DVT signing are not yet in scope.
+  - explicit statements for deferred DKG, share verification, Builder API, PBS, and DVT signing capabilities.
 - Done criteria:
-  - the current implemented prototype is summarized consistently in `docs/STATUS.md`, `docs/ARCHITECTURE.md`, and `docs/VALIDATION.md`,
-  - the baseline validation commands are documented and reproducible,
-  - deferred capabilities are clearly labeled as deferred.
-- Validation evidence expected:
-  - module tests,
-  - `bloc-node` demo smoke flow,
-  - current evaluator command paths described in `docs/VALIDATION.md`.
-- Dependencies: none.
+  - baseline behavior is summarized consistently in `docs/STATUS.md`, `docs/ARCHITECTURE.md`, and `docs/VALIDATION.md`,
+  - reproducible local validation commands exist.
 
 ## M1. Slot Timing and Baseline Latency Evidence
 
 - RQs advanced: `RQ1`
-- Objective: produce reproducible local evidence that the current latency-critical BLOC path can be measured stage by stage within the current prototype boundary.
-- Why it matters: slot timing is the first thesis-critical question and anchors the rest of the evaluation sequence.
+- Objective: produce reproducible local timing evidence for the current latency-critical BLOC path.
 - Deliverables:
   - end-to-end slot latency measurements,
-  - per-stage latency measurements for ACS, deterministic merge/planning, share generation, and commit-to-plaintext,
-  - output structure ready for later p50/p95/p99 aggregation.
+  - per-stage timing for ACS, merge/planning, share generation, threshold wait, combine, and materialization,
+  - chart-compatible p50/p95 output structure.
 - Done criteria:
-  - a documented local experiment produces reproducible timing output,
-  - per-stage timing coverage is explicit,
-  - the baseline can later be aggregated across repeated runs.
-- Validation evidence expected:
-  - `bloc-node` `eval-local` runs,
-  - demo smoke path where relevant,
-  - documented timing fields referenced from `docs/VALIDATION.md`.
-- Dependencies: `M0`.
+  - the corrected local M1 campaign completes without failed or inconsistent measured runs,
+  - generated charts and scenario summaries are suitable for professor/thesis review.
 
-## M2. Coordination and Cryptographic Overhead Characterization
+## M2. Distributed Deployment-Ready BLOC Sidecar
 
-- RQs advanced: `RQ2`
-- Objective: isolate the cost of ACS coordination and BTE cryptography in the current prototype.
-- Why it matters: the project needs evidence about the cost of multi-proposer coordination and threshold decryption relative to a simpler path.
+- RQs advanced: `RQ1`, `RQ2`
+- Objective: make `bloc-node` deployable as a DVT-adjacent sidecar cluster with first-class visibility.
 - Deliverables:
-  - ACS and dissemination message/byte counts,
-  - deterministic merge/planning cost,
-  - BTE share-generation, aggregation, and reconstruction cost,
-  - user-side encryption or submission overhead where feasible.
+  - multi-stage `bloc-node` Docker image,
+  - local/container/Kubernetes listen-vs-advertise config support,
+  - Docker Compose 4-node cluster with Prometheus and Grafana,
+  - Kubernetes StatefulSet/headless Service/HTTP Service manifests,
+  - Prometheus-native `/metrics` with counters, gauges, seconds-based histograms, and bounded labels,
+  - remote evaluator for already-running sidecar clusters.
 - Done criteria:
-  - coordination and cryptographic overhead are broken out instead of reported only as one end-to-end number,
-  - at least one repeatable benchmark path exists for each major cost category,
-  - output format is suitable for later comparison tables.
-- Validation evidence expected:
-  - `bloc-node` evaluator metrics,
-  - BTE full-path benchmarks,
-  - any added timing or resource instrumentation documented in `docs/VALIDATION.md`.
-- Dependencies: `M1`.
+  - Compose can run a 4-node BLOC sidecar cluster,
+  - Prometheus can scrape every sidecar,
+  - Grafana can display latency, phase, message/byte, and selected tx/gas panels,
+  - `eval-remote` writes manifest/CSV outputs compatible with the existing chart module.
 
-## M3. Fault and Adversarial Robustness Validation
+## M3. Distributed Sidecar Metrics Collection
 
-- RQs advanced: `RQ3`
-- Objective: validate safety and liveness properties under omission, withholding, malformed data, and near-threshold faulty behavior.
-- Why it matters: the protocol claims Byzantine resilience, so the thesis needs explicit evidence of correct behavior under faulty operators.
+- RQs advanced: `RQ1`, `RQ2`, `RQ4`
+- Objective: collect repeated distributed latency/performance evidence from the deployment-ready sidecar, using both synthetic transaction submissions and mock-placeholder mempool inputs.
 - Deliverables:
-  - formalized omission and withholding scenarios,
-  - malformed-share or invalid-input scenarios,
-  - explicit ACS-property checks in the BLOC setting,
-  - documented failure and rejection behavior.
+  - Compose smoke evidence,
+  - corpus-backed mock placeholder mempool evidence,
+  - Kubernetes or cloud deployment evidence,
+  - remote-evaluator campaigns over 4/7/10-node clusters where infrastructure allows,
+  - charts/tables for p50/p95 latency, per-stage timing, message volume, and resource observations.
 - Done criteria:
-  - all correct operators still agree on the same accepted encrypted set under the tested fault scenarios,
-  - liveness failure conditions are identified rather than left implicit,
-  - robustness evidence is mapped to metrics such as agreement time, decrypt time, and failure rate.
-- Validation evidence expected:
-  - `bloc-node` fault-injection runs,
-  - targeted tests for malformed share handling and wrong-batch rejection,
-  - documented result expectations in `docs/VALIDATION.md`.
-- Dependencies: `M1`, `M2`.
+  - sidecar runs are reproducible from documented deployment commands,
+  - distributed results are clearly separated from local M1 results,
+  - thesis figures identify environment, image tag, git commit, node count, threshold, batch size, and region/zone labels when available.
 
-## M4. Economic and Resource Cost Characterization
+## M4. Coordination, Cryptographic, and Resource Overhead Characterization
 
 - RQs advanced: `RQ2`, `RQ4`
-- Objective: estimate the user-side and operator-side cost of the current prototype path.
-- Why it matters: the protocol must be not only correct but also economically and operationally credible.
+- Objective: isolate the cost of ACS coordination, BTE cryptography, and sidecar resource usage.
 - Deliverables:
-  - ciphertext and proof overhead estimates,
-  - operator CPU, memory, and bandwidth cost characterization per slot,
-  - cost scaling notes by batch size and cluster size,
-  - a clear statement of what cannot yet be economically validated because PBS and full proposer signing remain deferred.
+  - ACS/share message and byte counts,
+  - BTE share-generation, combine, and optimization sweeps,
+  - CPU/memory/bandwidth characterization for sidecar deployments.
 - Done criteria:
-  - user-side and operator-side cost framing is documented,
-  - cost outputs can be tied back to measurable prototype artifacts,
-  - remaining blind spots are explicit instead of implied away.
-- Validation evidence expected:
-  - evaluator byte and message counters,
-  - BTE benchmark outputs,
-  - any added resource measurement methodology captured in `docs/VALIDATION.md`.
-- Dependencies: `M2`.
+  - overhead evidence is separated from orchestration/setup overhead,
+  - results can support comparison tables in the thesis.
 
-## M5. Distributed Evaluation and Dissertation-Ready Evidence
+## M5. Fault and Adversarial Robustness Validation
 
-- RQs advanced: `RQ1`, `RQ2`, `RQ3`, `RQ4`
-- Objective: turn the local evidence into a more dissertation-ready evaluation package with repeated runs, distributions, and reproducible outputs.
-- Why it matters: thesis claims need more than one-off local runs.
+- RQs advanced: `RQ3`
+- Objective: validate safety and liveness behavior under omission, withholding, malformed data, and near-threshold faults.
 - Deliverables:
-  - local plus geo-distributed or latency-emulated runs,
-  - metrics tables and dissertation-ready plots,
-  - reproducible output structure for repeated experiments,
-  - explicit p50/p95/p99 reporting where relevant.
+  - documented fault scenarios,
+  - targeted correctness tests,
+  - remote or local evaluator runs showing expected success/failure behavior.
 - Done criteria:
-  - experiments are repeatable,
-  - output organization supports plotting and comparison,
-  - thesis-ready evidence spans latency, overhead, robustness, and cost dimensions within the active scope.
-- Validation evidence expected:
-  - repeated `eval-local` runs or distributed equivalents,
-  - aggregated metrics outputs,
-  - plotting or report-generation artifacts tracked outside canonical docs.
-- Dependencies: `M1`, `M2`, `M3`, `M4`.
+  - correct operators agree on the same accepted encrypted set under tested faults,
+  - liveness failure conditions are explicit.
+
+## M6. Builder API Boundary
+
+- RQs advanced: future `RQ1`, `RQ4`
+- Objective: expose BLOC-agreed transaction sets through a Builder-facing development boundary.
+- Deliverables:
+  - stable BLOC candidate artifact,
+  - Builder-API-shaped development adapter,
+  - clear labeling that the adapter is not yet production Ethereum block building.
+- Done criteria:
+  - the adapter serves the real BLOC-agreed ordered transaction set,
+  - real execution payload construction remains clearly separated unless implemented later.
+
+## M7. SSV/DVT Signing Integration
+
+- RQs advanced: future `RQ1`, `RQ3`, `RQ4`
+- Objective: integrate the BLOC sidecar with a real DVT workflow after deployment and Builder-boundary evidence exists.
+- Deliverables:
+  - pre-sign verification design,
+  - signing-boundary tests,
+  - explicit SSV integration notes or adapter implementation.
+- Done criteria:
+  - integration claims are backed by a real signing or pre-sign verification path, not by architectural intent alone.
 
 ## Deferred Target: PBS Prefix Enforcement
 
-- RQs advanced: future `RQ1`, `RQ3`, `RQ4`
 - Objective: extend the architecture so the materialized plaintext prefix is enforced through PBS builder constraints or proofs.
-- Why it matters: this is the longer-term target architecture described by the broader BLOC thesis framing.
 - Deliverables:
   - prefix-enforcement mechanism design,
   - builder-side constraint or proof validation path,
-  - robustness and economic validation for prefix-preserving bids.
+  - robustness/economic validation for prefix-preserving bids.
 - Done criteria:
-  - the feature is designed and implemented as a real extension, not implied by the current prototype,
-  - validation paths cover invalid bids, missing prefixes, reordered prefixes, and proof failure modes where applicable.
-- Validation evidence expected:
-  - future PBS-specific integration tests and evaluation runs.
-- Dependencies: not part of the active milestone ladder.
+  - the feature is implemented and validated as a real extension, not implied by the current prototype.

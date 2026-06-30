@@ -1,0 +1,54 @@
+services:
+  bloc-config:
+    command:
+      - gen-config
+      - --nodes
+      - "4"
+      - --threshold
+      - "3"
+      - --bmax
+      - "128"
+      - --slot
+      - "1"
+      - --address-mode
+      - container
+      - --base-http-port
+      - "8000"
+      - --base-p2p-port
+      - "9000"
+      - --cluster-id
+      - bloc-compose
+      - --provider
+      - mempool-http
+      - --mempool-url
+      - http://mempool-il:8080
+      - --out
+      - /config/cluster.json
+
+  bloc-node-0:
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+      mempool-il:
+        condition: service_started
+
+  bloc-node-1:
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+      mempool-il:
+        condition: service_started
+
+  bloc-node-2:
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+      mempool-il:
+        condition: service_started
+
+  bloc-node-3:
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+      mempool-il:
+        condition: service_started

@@ -1,0 +1,122 @@
+services:
+  bloc-config:
+    build:
+      context: ../..
+      dockerfile: bloc-node/Dockerfile
+    image: bloc-node:local
+    user: "0:0"
+    command:
+      - gen-config
+      - --nodes
+      - "4"
+      - --threshold
+      - "3"
+      - --bmax
+      - "128"
+      - --slot
+      - "1"
+      - --address-mode
+      - container
+      - --base-http-port
+      - "8000"
+      - --base-p2p-port
+      - "9000"
+      - --cluster-id
+      - bloc-compose
+      - --out
+      - /config/cluster.json
+    volumes:
+      - bloc-config:/config
+
+  bloc-node-0: &bloc-node
+    image: bloc-node:local
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+    environment:
+      NODE_ID: "0"
+    command: ["run", "--config", "/config/cluster.json"]
+    volumes:
+      - bloc-config:/config:ro
+    ports:
+      - "18000:8000"
+
+  bloc-node-1:
+    <<: *bloc-node
+    environment:
+      NODE_ID: "1"
+    ports:
+      - "18001:8001"
+
+  bloc-node-2:
+    <<: *bloc-node
+    environment:
+      NODE_ID: "2"
+    ports:
+      - "18002:8002"
+
+  bloc-node-3:
+    <<: *bloc-node
+    environment:
+      NODE_ID: "3"
+    ports:
+      - "18003:8003"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    depends_on:
+      - bloc-node-0
+      - bloc-node-1
+      - bloc-node-2
+      - bloc-node-3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "19090:9090"
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: bloc
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "13000:3000"
+
+  mempool-il:
+    build:
+      context: ../..
+      dockerfile: mempool-il/Dockerfile
+    image: mempool-il:local
+    depends_on:
+      bloc-config:
+        condition: service_completed_successfully
+    command:
+      - -source
+      - replay-placeholder
+      - -cluster-config
+      - /config/cluster.json
+      - -corpus
+      - /corpus/mock-targets.jsonl
+      - -replay-slot
+      - "1"
+      - -listen
+      - :8080
+      - -max-items
+      - "128"
+    volumes:
+      - bloc-config:/config:ro
+      - ./corpus:/corpus:ro
+    ports:
+      - "18080:8080"
+
+volumes:
+  bloc-config:

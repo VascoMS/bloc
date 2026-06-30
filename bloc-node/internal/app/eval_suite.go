@@ -26,31 +26,37 @@ type evalScenario struct {
 }
 
 type suiteManifest struct {
-	SchemaVersion   string         `json:"schema_version"`
-	ExperimentID    string         `json:"experiment_id"`
-	Profile         string         `json:"profile,omitempty"`
-	Status          string         `json:"status"`
-	Valid           bool           `json:"valid"`
-	InvalidReason   string         `json:"invalid_reason,omitempty"`
-	StartedAt       time.Time      `json:"started_at"`
-	FinishedAt      time.Time      `json:"finished_at,omitempty"`
-	Command         []string       `json:"command"`
-	Seed            int64          `json:"seed"`
-	Warmups         int            `json:"warmups"`
-	Repetitions     int            `json:"repetitions"`
-	PlannedRuns     int            `json:"planned_runs"`
-	BMax            int            `json:"bmax"`
-	TxSize          int            `json:"tx_size"`
-	TxGas           uint64         `json:"tx_gas"`
-	FeeStartWei     uint64         `json:"fee_start_wei"`
-	FeeStepWei      uint64         `json:"fee_step_wei"`
-	Timeout         string         `json:"timeout"`
-	Scenarios       []evalScenario `json:"scenarios"`
-	RunOrder        []string       `json:"run_order"`
-	ExecutionMode   string         `json:"execution_mode"`
-	Schedule        string         `json:"schedule"`
-	ClusterStartups int            `json:"cluster_startups"`
-	RecoveryRuns    int            `json:"recovery_runs"`
+	SchemaVersion   string            `json:"schema_version"`
+	ExperimentID    string            `json:"experiment_id"`
+	Profile         string            `json:"profile,omitempty"`
+	Status          string            `json:"status"`
+	Valid           bool              `json:"valid"`
+	InvalidReason   string            `json:"invalid_reason,omitempty"`
+	StartedAt       time.Time         `json:"started_at"`
+	FinishedAt      time.Time         `json:"finished_at,omitempty"`
+	Command         []string          `json:"command"`
+	Seed            int64             `json:"seed"`
+	Warmups         int               `json:"warmups"`
+	Repetitions     int               `json:"repetitions"`
+	PlannedRuns     int               `json:"planned_runs"`
+	BMax            int               `json:"bmax"`
+	TxSize          int               `json:"tx_size"`
+	TxGas           uint64            `json:"tx_gas"`
+	TxSource        string            `json:"tx_source"`
+	TxSourceMeta    map[string]any    `json:"tx_source_metadata,omitempty"`
+	FeeStartWei     uint64            `json:"fee_start_wei"`
+	FeeStepWei      uint64            `json:"fee_step_wei"`
+	Timeout         string            `json:"timeout"`
+	Scenarios       []evalScenario    `json:"scenarios"`
+	RunOrder        []string          `json:"run_order"`
+	ExecutionMode   string            `json:"execution_mode"`
+	Schedule        string            `json:"schedule"`
+	ClusterStartups int               `json:"cluster_startups"`
+	RecoveryRuns    int               `json:"recovery_runs"`
+	Deployment      map[string]string `json:"deployment,omitempty"`
+	RemoteEndpoints []remoteEvalNode  `json:"remote_endpoints,omitempty"`
+	ImageTag        string            `json:"image_tag,omitempty"`
+	GitCommit       string            `json:"git_commit,omitempty"`
 }
 
 type suiteOptions struct {
@@ -60,6 +66,8 @@ type suiteOptions struct {
 	BMax          int
 	TxSize        int
 	TxGas         uint64
+	TxSource      string
+	MempoolURL    string
 	FeeStart      uint64
 	FeeStep       uint64
 	Warmups       int
@@ -131,6 +139,9 @@ func evalSuite(args []string) error {
 	if options.BMax < 1 || options.TxSize < 1 {
 		return fmt.Errorf("bmax and tx-size must be positive")
 	}
+	if err := validateTxSource(options.TxSource, options.MempoolURL); err != nil {
+		return err
+	}
 	nodeCounts, err := parseIntList(options.NodeCountsRaw)
 	if err != nil {
 		return fmt.Errorf("node-counts: %w", err)
@@ -173,6 +184,8 @@ func evalSuite(args []string) error {
 		BMax:          options.BMax,
 		TxSize:        options.TxSize,
 		TxGas:         options.TxGas,
+		TxSource:      options.TxSource,
+		TxSourceMeta:  txSourceManifestMeta(options.TxSource, options.MempoolURL),
 		FeeStartWei:   options.FeeStart,
 		FeeStepWei:    options.FeeStep,
 		Timeout:       options.Timeout.String(),
@@ -288,6 +301,8 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.IntVar(&options.BMax, "bmax", 128, "BTE maximum batch size")
 	fs.IntVar(&options.TxSize, "tx-size", 256, "minimum signed Ethereum transaction byte size")
 	fs.Uint64Var(&options.TxGas, "tx-gas", 21000, "minimum gas limit used in generated transactions")
+	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic or mock-placeholder")
+	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for tx-source=mock-placeholder")
 	fs.Uint64Var(&options.FeeStart, "fee-start-wei", 1000, "first generated effective fee per gas")
 	fs.Uint64Var(&options.FeeStep, "fee-step-wei", 1, "generated fee increment")
 	fs.IntVar(&options.Warmups, "warmups", 5, "warmup runs per scenario")

@@ -10,6 +10,7 @@ For the cross-module architecture, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHIT
   - `txpool`
   - `public-pending`
   - `alchemy-pending`
+  - `replay-placeholder`
 - Classifies transactions as `plaintext` or `placeholder`
 - Maintains an in-memory indexed mempool view
 - Exposes deterministic snapshot and inclusion list over HTTP
@@ -78,6 +79,28 @@ curl -s http://127.0.0.1:8080/inclusion-list | jq
 - `txpool`: closest to a real node mempool
 - `public-pending`: pending-block candidate only
 - `alchemy-pending`: approximate mempool view reconstructed from provider events and backfill
+- `replay-placeholder`: deterministic thesis/mock mode; reads real signed target
+  transactions from a corpus, encrypts them once using BLOC public cluster
+  material, and exposes mock placeholder candidates with `encrypted_payload_hex`
+
+### Replay Placeholder Mode
+
+```sh
+go run ./cmd/service \
+  -source replay-placeholder \
+  -cluster-config ../bloc-node/cluster.json \
+  -corpus ../deploy/docker-compose/corpus/mock-targets.jsonl \
+  -replay-slot 1
+```
+
+The corpus is JSONL with one object per target transaction:
+
+```json
+{"raw_tx":"0x..."}
+```
+
+The inclusion-list API exposes placeholder metadata and encrypted payloads. It
+does not expose raw target transaction bytes to sidecar proposals.
 
 ## Test
 

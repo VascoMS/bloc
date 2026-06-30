@@ -92,6 +92,17 @@ func decodeHexMaybe(s string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
 
+func decodeHexStrict(s string) ([]byte, error) {
+	s = strings.TrimSpace(strings.TrimPrefix(s, "0x"))
+	if s == "" {
+		return nil, fmt.Errorf("empty hex payload")
+	}
+	if len(s)%2 == 1 {
+		s = "0" + s
+	}
+	return hex.DecodeString(s)
+}
+
 // generateLibP2PIdentity creates the static Ed25519 identity stored in local
 // cluster configs for libp2p experiments.
 func generateLibP2PIdentity() (string, string, error) {

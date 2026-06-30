@@ -82,3 +82,36 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: This removes unrelated setup from campaign wall time without mixing consensus, share, transaction, result, or metric state between observations, and avoids contention from 21 simultaneously active node processes.
 - Consequences: M1 ordering is seeded within each operator-count group; cluster startup, preparation, and submission are reported separately; a failed slot is retained and its cluster is restarted before further measurements.
 - Related files: `bloc-node/internal/app/node.go`, `bloc-node/internal/app/eval_persistent.go`, `sbc/hbbft/bloc_slot.go`
+
+## 0007. Prioritize distributed sidecar deployment before Builder API compatibility
+
+- Date: 2026-06-28
+- Status: Accepted
+- Context: The next thesis milestone needs cloud/distributed latency and performance evidence for the BLOC sidecar. The proposed SSV-BLOC architecture eventually reaches a Builder API boundary, but production block-building would require execution-payload construction, beacon-client compatibility, and signing-boundary work that should not be implied by deployment evidence.
+- Options considered: implement Builder API compatibility first; implement a Builder-shaped mock before deployment; defer Builder API work and first make the sidecar containerized, observable, and remotely evaluable.
+- Decision: Defer Builder API compatibility and focus the active milestone on a containerized `bloc-node` sidecar, listen-vs-advertise config, Prometheus/Grafana visibility, Docker Compose/Kubernetes deployment artifacts, and a remote evaluator for already-running clusters.
+- Rationale: Distributed deployment and observability are prerequisites for thesis-grade sidecar latency/performance evidence, while Builder API compatibility is a separate integration boundary that can be added once the runtime is measurable.
+- Consequences: `bloc-node` now exposes deployment-oriented config fields and `/metrics`; deployment artifacts live under `deploy/`; `eval-remote` is the canonical path for measuring non-local sidecar clusters; Builder/PBS/SSV signing claims remain deferred.
+- Related files: `bloc-node/internal/app/commands.go`, `bloc-node/internal/app/metrics.go`, `bloc-node/internal/app/eval_remote.go`, `deploy/`, `docs/STATUS.md`, `docs/VALIDATION.md`, `docs/ROADMAP.md`
+
+## 0008. Use Prometheus-native metrics for live sidecar visibility
+
+- Date: 2026-06-28
+- Status: Accepted
+- Context: The deployment milestone needs Grafana/Prometheus visibility that behaves like operational monitoring, not just local evaluator fields rendered as scrape text.
+- Options considered: keep hand-rendered latest-slot gauges; mirror every evaluator CSV field as a Prometheus metric; use official Prometheus collectors with counters, gauges, histograms, base units, and bounded labels.
+- Decision: Use the official Go Prometheus client for `/metrics`. Slot and HTTP latencies are seconds-based histograms; events and byte/message totals are counters; current state is exposed as gauges. Evaluator CSV/JSON remains the offline artifact format.
+- Rationale: Prometheus/Grafana dashboards need stable metric names, low-cardinality labels, and histogram-safe p50/p95 queries, while thesis charts still benefit from existing per-run CSV outputs.
+- Consequences: Grafana panels must use `histogram_quantile()` over `_bucket` series for live p50/p95 latency. Prometheus labels must not include slot IDs, batch IDs, transaction hashes, URLs, peer IDs, or free-form errors.
+- Related files: `bloc-node/internal/app/metrics.go`, `deploy/docker-compose/grafana/dashboards/bloc-sidecar.json`, `deploy/k8s/40-grafana-dashboard-configmap.yaml`, `docs/VALIDATION.md`
+
+## 0009. Use mock placeholders for realistic transaction-source tests
+
+- Date: 2026-06-28
+- Status: Accepted
+- Context: Real public mempool transactions are ordinary Ethereum transactions, not BLOC placeholder transactions whose calldata already carries encrypted target payloads. Treating fetched public transactions as placeholders would misrepresent the architecture.
+- Options considered: submit public transactions directly to sidecars; have every sidecar independently encrypt the same fetched transaction; introduce a mock external placeholder producer.
+- Decision: Use `mempool-il` replay-placeholder mode as a mock external submitter/searcher. It validates real signed target transactions from a corpus, encrypts each target once with BLOC public cluster material, signs mock placeholder transactions, parses their calldata, and exposes normalized candidates whose `encrypted_payload_hex` is derived from that calldata.
+- Rationale: The model preserves the separation between target transaction, placeholder transaction, and BTE encrypted payload, while keeping thesis runs deterministic.
+- Consequences: Sidecars consume encrypted payloads parsed from placeholder transactions and do not independently re-encrypt the same public transaction. Live public mempool ingestion and Builder/execution validation remain later work.
+- Related files: `mempool-il/internal/mempool/replay_placeholder.go`, `bloc-node/internal/app/provider.go`, `deploy/docker-compose/compose.mock-placeholder.yaml`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md`

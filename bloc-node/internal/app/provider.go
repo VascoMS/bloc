@@ -33,7 +33,7 @@ func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 	if n.cfg.Provider.MempoolURL == "" {
 		return InclusionList{}, fmt.Errorf("provider mempool-http requires mempool_url")
 	}
-	resp, err := http.Get(strings.TrimRight(n.cfg.Provider.MempoolURL, "/") + "/inclusion-list")
+	resp, err := http.Get(fmt.Sprintf("%s/inclusion-list?slot=%d", strings.TrimRight(n.cfg.Provider.MempoolURL, "/"), n.id))
 	if err != nil {
 		return InclusionList{}, err
 	}
@@ -48,6 +48,7 @@ func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 	var remote struct {
 		Items []struct {
 			Hash                   string `json:"hash"`
+			EncryptedPayloadHex    string `json:"encrypted_payload_hex"`
 			CiphertextHex          string `json:"ciphertext_hex"`
 			PlaceholderEnvelopeHex string `json:"placeholder_envelope_hex"`
 			Gas                    uint64 `json:"gas"`
@@ -65,14 +66,25 @@ func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
 		if in.Kind != "" && in.Kind != "placeholder" {
 			continue
 		}
-		hexPayload := in.CiphertextHex
+		hexPayload := in.EncryptedPayloadHex
+		strictHex := hexPayload != ""
+		if hexPayload == "" {
+			hexPayload = in.CiphertextHex
+			strictHex = hexPayload != ""
+		}
 		if hexPayload == "" {
 			hexPayload = in.PlaceholderEnvelopeHex
 		}
 		if hexPayload == "" {
 			continue
 		}
-		payload, err := decodeHexMaybe(hexPayload)
+		var payload []byte
+		var err error
+		if strictHex {
+			payload, err = decodeHexStrict(hexPayload)
+		} else {
+			payload, err = decodeHexMaybe(hexPayload)
+		}
 		if err != nil {
 			return InclusionList{}, fmt.Errorf("decode mempool item %s: %w", in.Hash, err)
 		}

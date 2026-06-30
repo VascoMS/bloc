@@ -37,6 +37,10 @@ func Run(args []string) {
 		if err := evalSuite(args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "eval-remote":
+		if err := evalRemote(args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "report":
 		if err := reportDemo(args[2:]); err != nil {
 			log.Fatal(err)
@@ -54,6 +58,7 @@ func usage() {
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results
   bloc-node eval-suite --profile m1-baseline --experiment-id m1-baseline --out-dir results/m1-local/baseline-persistent
+  bloc-node eval-remote --config remote-eval.json --batch-size 8 --repetitions 3 --out-dir results/distributed/smoke
   bloc-node report --dir results/mvp-demo/latest --out results/mvp-demo/latest/DEMO_REPORT.md
 `)
 }

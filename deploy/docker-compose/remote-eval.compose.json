@@ -1,0 +1,18 @@
+{
+  "node_count": 4,
+  "threshold": 3,
+  "bmax": 128,
+  "network": "libp2p",
+  "initial_slot": 1,
+  "deployment": {
+    "environment": "docker-compose",
+    "prometheus": "http://127.0.0.1:19090",
+    "grafana": "http://127.0.0.1:13000"
+  },
+  "nodes": [
+    { "id": 0, "url": "http://127.0.0.1:18000", "label": "compose-0", "region": "local", "zone": "local-a" },
+    { "id": 1, "url": "http://127.0.0.1:18001", "label": "compose-1", "region": "local", "zone": "local-a" },
+    { "id": 2, "url": "http://127.0.0.1:18002", "label": "compose-2", "region": "local", "zone": "local-a" },
+    { "id": 3, "url": "http://127.0.0.1:18003", "label": "compose-3", "region": "local", "zone": "local-a" }
+  ]
+}

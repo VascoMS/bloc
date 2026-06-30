@@ -75,15 +75,16 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 	}
 	cluster := be.NewNode(btd, pk, secret, cfg.N, cfg.Threshold)
 	node := &Node{
-		cfg:      cfg,
-		self:     self,
-		nodeIDs:  ids,
-		peers:    peers,
-		cluster:  cluster,
-		secret:   secret,
-		suite:    suite,
-		faults:   faults,
-		lastSlot: cfg.Slot,
+		cfg:           cfg,
+		self:          self,
+		nodeIDs:       ids,
+		peers:         peers,
+		cluster:       cluster,
+		secret:        secret,
+		suite:         suite,
+		faults:        faults,
+		lastSlot:      cfg.Slot,
+		observability: newNodeMetrics(cfg.ClusterID, id),
 	}
 	node.slotState = node.newSlotState(cfg.Slot)
 	node.transport = newLibP2PTransport(node, ProtoEnvelopeCodec{})
@@ -91,7 +92,7 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 }
 
 func (n *Node) newSlotState(slotID uint64) *slotState {
-	return &slotState{
+	state := &slotState{
 		id:          slotID,
 		phase:       slotPrepared,
 		seenPending: make(map[string]bool),
@@ -110,6 +111,13 @@ func (n *Node) newSlotState(slotID uint64) *slotState {
 			Slot:   slotID,
 		}),
 	}
+	if n.observability != nil {
+		n.observability.setCurrentSlot(slotID)
+		n.observability.setPhase(slotPrepared)
+		n.observability.setResultAvailable(false)
+		n.observability.setSelected(0, 0)
+	}
+	return state
 }
 
 // parseFaults converts evaluator fault names into runtime fault switches.
@@ -140,7 +148,7 @@ func (n *Node) startTransport() error {
 // local evaluator.
 func (n *Node) listenHTTP(outPath string) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/healthz", n.instrumentHTTP("healthz", func(w http.ResponseWriter, _ *http.Request) {
 		ready := true
 		if transport, ok := n.transport.(interface{ Ready() bool }); ok {
 			ready = transport.Ready()
@@ -150,11 +158,12 @@ func (n *Node) listenHTTP(outPath string) error {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "id": n.self.ID})
-	})
-	mux.HandleFunc("/tx", n.handleSubmitTx)
-	mux.HandleFunc("/slot/prepare", n.handlePrepareSlot)
-	mux.HandleFunc("/slot/status", n.handleSlotStatus)
-	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/tx", n.instrumentHTTP("tx", n.handleSubmitTx))
+	mux.HandleFunc("/slot/prepare", n.instrumentHTTP("slot_prepare", n.handlePrepareSlot))
+	mux.HandleFunc("/slot/status", n.instrumentHTTP("slot_status", n.handleSlotStatus))
+	mux.HandleFunc("/metrics", n.instrumentHTTP("metrics", n.handleMetrics))
+	mux.HandleFunc("/start", n.instrumentHTTP("start", func(w http.ResponseWriter, r *http.Request) {
 		if err := n.validateRequestedSlot(r); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
@@ -164,8 +173,8 @@ func (n *Node) listenHTTP(outPath string) error {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
-	})
-	mux.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/result", n.instrumentHTTP("result", func(w http.ResponseWriter, r *http.Request) {
 		n.lifecycleMu.RLock()
 		defer n.lifecycleMu.RUnlock()
 		if err := n.validateRequestedSlotLocked(r); err != nil {
@@ -179,9 +188,9 @@ func (n *Node) listenHTTP(outPath string) error {
 			return
 		}
 		writeJSON(w, http.StatusOK, n.result)
-	})
-	server := &http.Server{Addr: n.self.HTTPAddr, Handler: mux}
-	log.Printf("node %d http listening on http://%s", n.self.ID, n.self.HTTPAddr)
+	}))
+	server := &http.Server{Addr: n.self.httpListenAddr(), Handler: mux}
+	log.Printf("event=http_listen node_id=%d listen_addr=%s advertise_url=%s", n.self.ID, n.self.httpListenAddr(), n.self.httpAdvertiseURL())
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("http: %v", err)
@@ -373,9 +382,13 @@ func (n *Node) startConsensus() error {
 		n.mu.Lock()
 		n.phase = slotRunning
 		n.mu.Unlock()
+		if n.observability != nil {
+			n.observability.slotStarted()
+		}
 		list, buildErr := n.buildInclusionList()
 		if buildErr != nil {
 			err = buildErr
+			n.markSlotFailed("proposal")
 			return
 		}
 		if n.faults.OmitProposal {
@@ -385,6 +398,7 @@ func (n *Node) startConsensus() error {
 		encodedList, encodeErr := inclusion.EncodeList(list)
 		err = encodeErr
 		if err != nil {
+			n.markSlotFailed("proposal")
 			return
 		}
 		proposalReady := time.Now()
@@ -397,12 +411,13 @@ func (n *Node) startConsensus() error {
 		n.metrics.ProposalHash = list.Hash
 		n.refreshMetricsLocked()
 		n.mu.Unlock()
-		log.Printf("node %d starting slot %d with inclusion list %s (%d items)", n.self.ID, n.id, list.Hash, len(list.Items))
+		log.Printf("event=slot_start node_id=%d slot=%d proposal_hash=%s proposal_txs=%d", n.self.ID, n.id, list.Hash, len(list.Items))
 		output, stepErr := n.stepACS(func() error {
 			return n.slot.InputBatch(encodedList)
 		})
 		if stepErr != nil {
 			err = stepErr
+			n.markSlotFailed("acs")
 			return
 		}
 		n.handleACSOutput(output)
@@ -518,6 +533,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		list, err := inclusion.DecodeList(accepted.Batch)
 		if err != nil {
 			log.Printf("decode accepted inclusion list from %d: %v", accepted.ProposerID, err)
+			n.markSlotFailed("decode")
 			return
 		}
 		list.Hash = inclusion.HashInclusionList(list)
@@ -530,6 +546,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		ct, err := n.cluster.UnmarshalCiphertext(item.Ciphertext)
 		if err != nil {
 			log.Printf("decode ciphertext %s: %v", item.Hash, err)
+			n.markSlotFailed("decode")
 			return
 		}
 		encrypted = append(encrypted, ct)
@@ -541,6 +558,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	plan, err := n.cluster.PlanBatch(encrypted)
 	if err != nil {
 		log.Printf("plan batch: %v", err)
+		n.markSlotFailed("planning")
 		return
 	}
 	planAt := time.Now()
@@ -574,7 +592,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	n.metrics.SubBatches = len(plan.SubBatches)
 	n.refreshMetricsLocked()
 	n.mu.Unlock()
-	log.Printf("node %d ACS decided %d lists/%d candidates; selected %d txs (%d gas); batch %s has %d sub-batches", n.self.ID, len(agreed.Lists), agreed.TotalItems, len(encrypted), merged.SelectedGas, hex.EncodeToString(plan.BatchID[:]), len(plan.SubBatches))
+	log.Printf("event=acs_decision node_id=%d slot=%d agreed_lists=%d agreed_candidates=%d selected_txs=%d selected_gas=%d batch_id=%s sub_batches=%d", n.self.ID, n.id, len(agreed.Lists), agreed.TotalItems, len(encrypted), merged.SelectedGas, hex.EncodeToString(plan.BatchID[:]), len(plan.SubBatches))
 	for subBatchID := range plan.SubBatches {
 		if n.faults.WithholdShare {
 			continue
@@ -582,6 +600,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		d, err := n.cluster.MakeShare(n.secret, plan, subBatchID)
 		if err != nil {
 			log.Printf("make share %d: %v", subBatchID, err)
+			n.markSlotFailed("share")
 			return
 		}
 		if err := n.addShare(d); err != nil {
@@ -591,6 +610,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		wire, err := n.marshalShare(d)
 		if err != nil {
 			log.Printf("marshal share: %v", err)
+			n.markSlotFailed("share")
 			return
 		}
 		if n.faults.CorruptShare {
@@ -667,7 +687,11 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 		Metrics:      n.metrics.snapshot(),
 	}
 	n.phase = slotCompleted
-	log.Printf("node %d materialized empty transaction set after ACS (%d lists/%d candidates)", n.self.ID, len(agreed.Lists), agreed.TotalItems)
+	n.completedSlots++
+	if n.observability != nil {
+		n.observability.slotCompleted(n.metrics.snapshot())
+	}
+	log.Printf("event=result_available node_id=%d slot=%d selected_txs=0 selected_gas=%d empty=true", n.self.ID, n.id, merged.SelectedGas)
 }
 
 // tryCombine attempts BTE reconstruction once the node has threshold shares for
@@ -682,6 +706,7 @@ func (n *Node) tryCombine() {
 		log.Printf("ignored %d shares for other batches or sub-batches while waiting for batch %s", rejected, hex.EncodeToString(attempt.plan.BatchID[:]))
 	}
 	thresholdAt := time.Now()
+	log.Printf("event=threshold_reached node_id=%d slot=%d batch_id=%s shares=%d", n.self.ID, n.id, hex.EncodeToString(attempt.plan.BatchID[:]), len(shares))
 	results, err := n.cluster.CombineShares(attempt.plan, shares)
 	if err != nil {
 		log.Printf("combine shares: %v", err)
@@ -738,7 +763,11 @@ func (n *Node) tryCombine() {
 		result.Metrics = n.metrics.snapshot()
 		n.result = result
 		n.phase = slotCompleted
-		log.Printf("node %d decrypted batch %s with %d plaintext txs", n.self.ID, result.BatchID, len(result.Plaintexts))
+		n.completedSlots++
+		if n.observability != nil {
+			n.observability.slotCompleted(result.Metrics)
+		}
+		log.Printf("event=result_available node_id=%d slot=%d batch_id=%s selected_txs=%d selected_gas=%d", n.self.ID, n.id, result.BatchID, len(result.Plaintexts), result.Materialized.SelectedGas)
 	}
 	n.mu.Unlock()
 }
@@ -871,6 +900,9 @@ func (n *Node) recordInbound(kind string, size int) {
 	defer n.mu.Unlock()
 	n.metrics.InboundMessages[kind]++
 	n.metrics.InboundBytes[kind] += int64(size)
+	if n.observability != nil {
+		n.observability.recordProtocol("inbound", kind, size)
+	}
 }
 
 func (n *Node) recordOutbound(kind string, size int) {
@@ -878,6 +910,18 @@ func (n *Node) recordOutbound(kind string, size int) {
 	defer n.mu.Unlock()
 	n.metrics.OutboundMessages[kind]++
 	n.metrics.OutboundBytes[kind] += int64(size)
+	if n.observability != nil {
+		n.observability.recordProtocol("outbound", kind, size)
+	}
+}
+
+func (n *Node) markSlotFailed(reason string) {
+	n.mu.Lock()
+	n.failedSlots++
+	n.mu.Unlock()
+	if n.observability != nil {
+		n.observability.slotFailed(reason)
+	}
 }
 
 // refreshMetricsLocked derives durations from monotonic readings. Several

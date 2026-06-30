@@ -1,0 +1,8 @@
+.git
+.agents
+.codex
+**/.gocache
+**/results
+results
+latency-charts/.venv
+papers

@@ -9,36 +9,43 @@ sub-batching (`alpha = ceil(2*sqrt(B))`) during batch planning. M1 therefore
 measures the optimized integrated path, not the naive BEAT-MEV combine path or a
 comparison across optimization variants.
 
-The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, or PBS prefix enforcement. PBS remains a deferred target architecture item, not part of the active roadmap.
+The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred until after distributed sidecar deployment evidence exists.
 
 ## Active Milestone
 
-- Milestone: `M1. Slot Timing and Baseline Latency Evidence`
+- Milestone: `M2. Distributed Deployment-Ready BLOC Sidecar`
 - Status: `in progress`
 - Success criteria:
-  - end-to-end slot latency is measured for the current local prototype,
-  - per-stage timing is broken out for ACS, merge/planning, share generation, and commit-to-plaintext,
-  - output structure is ready for p50/p95/p99 aggregation in later runs,
-  - the baseline validation path is reproducible from documented commands.
+  - `bloc-node` can run as a containerized sidecar from mounted cluster config and `NODE_ID`,
+  - generated configs support local, container, and Kubernetes listen/advertise addresses without breaking old local configs,
+  - each sidecar exposes Prometheus-compatible `/metrics` using counters, gauges, seconds-based histograms, and bounded labels for slot phase, latency stages, message/byte volume, selected tx/gas, HTTP traffic, and result availability,
+  - Docker Compose can run a local 4-node sidecar cluster with Prometheus and Grafana visibility,
+  - a remote evaluator can drive already-running sidecars and write chart-compatible latency outputs,
+  - Kubernetes manifests provide a repeatable thesis deployment shape using generated prototype config.
 
 ## Immediate Next Actions
 
-1. Run the complete 315-sample `m1-baseline` profile using the corrected ACS/BBA liveness path.
-2. Generate and inspect the three documented latency charts only from a fully valid dataset.
-3. Record final p50/p95 results and update the roadmap only if the baseline changes milestone sequencing.
+1. Validate the mock-placeholder mempool path with `cd mempool-il && go test ./...` and `cd bloc-node && go test ./...`.
+2. Run Docker Compose with the mock-placeholder override and confirm sidecars recover the target transaction hashes.
+3. Generate charts from the mock-placeholder remote evaluator output.
+4. If Kubernetes is available, repeat the distributed sidecar smoke with a mounted corpus and generated cluster config.
 
 ## Current Blockers / Risks
 
 - The previous 315-run libp2p-only campaign remains invalid historical evidence: result timeouts were concentrated in 7/10-node scenarios.
 - The diagnosed cause was BBA/ACS liveness, not BTE combination: lagging nodes had all RBC outputs and peer decryption shares but were waiting for one or more BBA instances to terminate.
 - A corrected 30-run 7/10-node stress matrix passed; the complete 315-sample M1 campaign is still required before reporting final baseline figures.
-- Local-host scheduling noise remains a risk, and these measurements still do not represent an integrated DVT environment.
-- Distributed evidence and PBS-specific validation remain intentionally out of scope for the active roadmap.
+- Local-host scheduling noise remains a risk for Compose smoke runs; cloud/Kubernetes runs are still needed for distributed evidence.
+- The Kubernetes manifests intentionally rely on generated trusted-dealer config supplied out of band, because prototype key material should not be committed.
+- Prometheus `/metrics` now uses native collectors and histogram-safe PromQL is required for Grafana p50/p95 panels; evaluator CSV/JSON remains the offline chart artifact format.
+- Realistic transaction-source evidence now requires the mock-placeholder path: public mempool transactions are target payloads, not native BLOC placeholders, so they must be encrypted once by a mock external submitter before sidecars include them.
+- Builder API compatibility, SSV signing enforcement, and PBS-specific validation are intentionally out of scope for this milestone.
 
 ## Last Known Good State
 
-- Date: `2026-06-25`
-- Meaning: raw TCP has been removed; protobuf-over-libp2p is the sole operator transport; nodes execute sequential clean slots while reusing BTE state, processes, HTTP clients, and their libp2p mesh. The 7/10-node liveness stalls were traced to BBA accounting and ACS completion behavior, then corrected with per-slot ACS driver serialization, BBA dual-BVAL tracking, later-epoch self-BVAL handling, and an all-RBC ACS completion path. A 27-run 4/7/10 matrix and a 30-run 7/10 stress matrix both passed; the full 315-run M1 baseline is still pending.
+- Date: `2026-06-28`
+- Meaning: the local BLOC path remains stable after the deployment-readiness changes. `bloc-node` now has backward-compatible listen/advertise config fields, `NODE_ID` sidecar startup, a collector-backed Prometheus `/metrics` endpoint with counters/gauges/histograms, Docker/Compose/Kubernetes deployment artifacts, and an `eval-remote` command for already-running sidecar clusters. The local M1 full baseline is still pending, but the active engineering milestone has moved to distributed deployment readiness.
+- Data-realism addendum: `mempool-il` now has a corpus-backed `replay-placeholder` mode that validates real signed Ethereum target transactions, encrypts them once using BLOC public cluster material, and exposes mock placeholder candidates through the existing inclusion-list API. `bloc-node` can consume these encrypted payloads via the mempool provider without changing synthetic evaluator defaults.
 - Baseline commands:
   - `cd bloc-node && go test ./...`
   - `cd sbc/hbbft && go test ./...`
@@ -52,12 +59,13 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Next Milestone
 
-- `M2. Coordination and Cryptographic Overhead Characterization`
-  - Include a BEAT-MEV optimization sweep if the claim requires comparing normal, `sqrt(B)`, `2*sqrt(B)`, parallel combine, or batch sizes beyond the M1 `BMax=128` profile.
+- `M3. Distributed Sidecar Metrics Collection`
+  - Run repeated remote-evaluator campaigns against Compose and cloud/Kubernetes deployments, then generate thesis-ready latency/performance charts.
 
 ## Deferred Later Milestones
 
-- `M3. Fault and Adversarial Robustness Validation`
-- `M4. Economic and Resource Cost Characterization`
-- `M5. Distributed Evaluation and Dissertation-Ready Evidence`
+- `M4. Coordination, Cryptographic, and Resource Overhead Characterization`
+- `M5. Fault and Adversarial Robustness Validation`
+- `M6. Builder API Boundary`
+- `M7. SSV/DVT Signing Integration`
 - `Deferred Target: PBS Prefix Enforcement`

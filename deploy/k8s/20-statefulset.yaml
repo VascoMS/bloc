@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bloc-node
+  namespace: bloc
+  labels:
+    app: bloc-node
+spec:
+  serviceName: bloc-node-headless
+  replicas: 4
+  selector:
+    matchLabels:
+      app: bloc-node
+  template:
+    metadata:
+      labels:
+        app: bloc-node
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: bloc-node
+          image: bloc-node:local
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export NODE_ID="${HOSTNAME##*-}"
+              exec bloc-node run --config /config/cluster.json
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: p2p
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: bloc-cluster-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: bloc-cluster-config
+          configMap:
+            name: bloc-cluster-config

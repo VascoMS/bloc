@@ -30,13 +30,21 @@ func NewBuilder(cfg Config) *Builder {
 }
 
 type Item struct {
-	Hash                   string `json:"hash"`
-	From                   string `json:"from"`
-	Nonce                  uint64 `json:"nonce"`
-	Gas                    uint64 `json:"gas"`
-	Kind                   string `json:"kind"`
-	EffectiveFeePerGW      string `json:"effective_fee_per_gas_wei"`
-	PlaceholderEnvelopeHex string `json:"placeholder_envelope_hex,omitempty"`
+	Hash                     string `json:"hash"`
+	From                     string `json:"from"`
+	Nonce                    uint64 `json:"nonce"`
+	Gas                      uint64 `json:"gas"`
+	Kind                     string `json:"kind"`
+	EffectiveFeePerGW        string `json:"effective_fee_per_gas_wei"`
+	PlaceholderEnvelopeHex   string `json:"placeholder_envelope_hex,omitempty"`
+	EncryptedPayloadHex      string `json:"encrypted_payload_hex,omitempty"`
+	EncryptedPayloadHash     string `json:"encrypted_payload_hash,omitempty"`
+	TargetTxHash             string `json:"target_tx_hash,omitempty"`
+	TargetTxType             uint8  `json:"target_tx_type,omitempty"`
+	TargetTxSizeBytes        int    `json:"target_tx_size_bytes,omitempty"`
+	PlaceholderTxHash        string `json:"placeholder_tx_hash,omitempty"`
+	PlaceholderCalldataBytes int    `json:"placeholder_calldata_bytes,omitempty"`
+	PlaceholderGasEstimate   uint64 `json:"placeholder_gas_estimate,omitempty"`
 }
 
 type List struct {
@@ -93,13 +101,21 @@ func (b *Builder) Build(snapshot mempool.Snapshot) List {
 			placeholderEnvelope = strings.TrimPrefix(tx.Input, "0x")
 		}
 		items = append(items, Item{
-			Hash:                   tx.Hash,
-			From:                   tx.From,
-			Nonce:                  tx.Nonce,
-			Gas:                    tx.Gas,
-			Kind:                   string(tx.Kind),
-			EffectiveFeePerGW:      fee.String(),
-			PlaceholderEnvelopeHex: placeholderEnvelope,
+			Hash:                     tx.Hash,
+			From:                     tx.From,
+			Nonce:                    tx.Nonce,
+			Gas:                      tx.Gas,
+			Kind:                     string(tx.Kind),
+			EffectiveFeePerGW:        fee.String(),
+			PlaceholderEnvelopeHex:   placeholderEnvelope,
+			EncryptedPayloadHex:      tx.EncryptedPayloadHex,
+			EncryptedPayloadHash:     tx.EncryptedPayloadHash,
+			TargetTxHash:             tx.TargetTxHash,
+			TargetTxType:             tx.TargetTxType,
+			TargetTxSizeBytes:        tx.TargetTxSizeBytes,
+			PlaceholderTxHash:        tx.PlaceholderTxHash,
+			PlaceholderCalldataBytes: tx.PlaceholderCalldataBytes,
+			PlaceholderGasEstimate:   tx.PlaceholderGasEstimate,
 		})
 		totalGas += tx.Gas
 	}

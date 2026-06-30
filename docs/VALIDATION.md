@@ -10,6 +10,7 @@
 | `sbc/hbbft` logic | `go test ./...` in `sbc/hbbft` | Run simulation or bench when consensus behavior or throughput assumptions change |
 | Latency charts | `python -m pytest` in `latency-charts` | Render charts from an `eval-suite` directory after schema or presentation changes |
 | Cross-module protocol behavior | Relevant module tests plus `bloc-node` smoke flow | Use the demo flow for reproducible end-to-end evidence |
+| Deployment artifacts | Docker build plus Compose smoke | Run remote evaluator and Prometheus scrape checks before cloud claims |
 | Documentation-only changes | Link and ownership review | No code validation required unless commands were edited |
 
 ## Canonical Commands
@@ -151,6 +152,173 @@ cd bloc-node
 ./scripts/demo-local.sh
 ```
 
+### Distributed Sidecar Deployment Smoke
+
+Build the sidecar image from the repository root:
+
+```sh
+docker build -f bloc-node/Dockerfile -t bloc-node:local .
+```
+
+Run the local 4-node sidecar deployment with Prometheus and Grafana:
+
+```sh
+cd deploy/docker-compose
+docker compose up --build
+```
+
+Useful local URLs:
+
+- sidecar HTTP APIs: `http://127.0.0.1:18000` through `http://127.0.0.1:18003`
+- Prometheus: `http://127.0.0.1:19090`
+- Grafana: `http://127.0.0.1:13000`
+
+Confirm Prometheus can scrape sidecars:
+
+```sh
+curl -s http://127.0.0.1:18000/metrics
+curl -s "http://127.0.0.1:19090/api/v1/targets"
+```
+
+The `/metrics` endpoint is the live Prometheus/Grafana interface, not a mirror
+of evaluator CSV fields. It must use Prometheus base units and bounded labels:
+
+| Metric | Type | Purpose |
+|---|---|---|
+| `bloc_node_info{cluster_id,node_id}` | gauge | static sidecar identity |
+| `bloc_slot_phase{cluster_id,node_id,phase}` | gauge | one-hot current slot phase |
+| `bloc_slot_current{cluster_id,node_id}` | gauge | current slot id |
+| `bloc_slot_started_total{cluster_id,node_id}` | counter | started slots |
+| `bloc_slot_completed_total{cluster_id,node_id}` | counter | completed slots |
+| `bloc_slot_failed_total{cluster_id,node_id,reason}` | counter | bounded failure reasons |
+| `bloc_slot_result_available{cluster_id,node_id}` | gauge | active-slot result availability |
+| `bloc_slot_stage_duration_seconds{cluster_id,node_id,stage}` | histogram | completed slot stage durations |
+| `bloc_slot_selected_transactions{cluster_id,node_id}` | gauge | latest selected transaction count |
+| `bloc_slot_selected_gas{cluster_id,node_id}` | gauge | latest selected gas |
+| `bloc_protocol_messages_total{cluster_id,node_id,direction,kind}` | counter | protocol message count |
+| `bloc_protocol_message_bytes_total{cluster_id,node_id,direction,kind}` | counter | protocol message bytes |
+| `bloc_http_requests_total{cluster_id,node_id,method,handler,code}` | counter | normalized HTTP requests |
+| `bloc_http_request_duration_seconds{cluster_id,node_id,method,handler,code}` | histogram | normalized HTTP latency |
+
+Prometheus labels must not include slot IDs, batch IDs, transaction hashes, raw
+URLs, peer IDs, or free-form error strings. Evaluator outputs keep microsecond
+columns such as `total_slot_us` for chart compatibility.
+
+Grafana p50/p95 panels must query histograms, for example:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le) (rate(bloc_slot_stage_duration_seconds_bucket{stage="total"}[5m]))
+)
+```
+
+If `promtool` is available in the Prometheus container, a scraped metrics file
+can be checked with:
+
+```sh
+docker compose exec prometheus promtool check metrics < scraped-metrics.txt
+```
+
+Run the remote evaluator against the already-running Compose sidecars:
+
+```sh
+cd bloc-node
+go run ./cmd/bloc-node eval-remote \
+  --config ../deploy/docker-compose/remote-eval.compose.json \
+  --experiment-id compose-smoke \
+  --batch-size 8 \
+  --warmups 0 \
+  --repetitions 1 \
+  --out-dir results/distributed/compose-smoke
+```
+
+Generate charts from the distributed output using the same chart module:
+
+```powershell
+cd latency-charts
+python -m bloc_latency_charts ..\bloc-node\results\distributed\compose-smoke
+```
+
+### Mock Placeholder Mempool Smoke
+
+Use this when validating realistic transaction-source behavior. Public mempool
+transactions are treated as target payloads, not as already-valid BLOC
+placeholders. `mempool-il` encrypts each corpus target once, signs a mock
+placeholder transaction, parses that placeholder transaction's calldata, and
+sidecars consume the derived `encrypted_payload_hex` from the inclusion-list
+API.
+
+```sh
+cd deploy/docker-compose
+docker compose -f compose.yaml -f compose.mock-placeholder.yaml up --build
+```
+
+Then run the remote evaluator without direct `/tx` submissions:
+
+```sh
+cd bloc-node
+go run ./cmd/bloc-node eval-remote \
+  --config ../deploy/docker-compose/remote-eval.mock-placeholder.json \
+  --experiment-id compose-mock-placeholder \
+  --tx-source mock-placeholder \
+  --mempool-url http://127.0.0.1:18080 \
+  --batch-size 4 \
+  --warmups 0 \
+  --repetitions 1 \
+  --out-dir results/distributed/compose-mock-placeholder
+```
+
+Acceptance criteria:
+
+- all sidecars report success and cross-node consistency;
+- materialized `ethereum_tx_hashes` match target transactions from the corpus;
+- inclusion-list responses expose encrypted payload and target metadata derived
+  from placeholder calldata, but not raw target transaction bytes;
+- evaluator manifests record `tx_source=mock-placeholder`;
+- chart generation remains compatible with the resulting evaluator directory.
+
+### Kubernetes Deployment Shape
+
+Generate the prototype cluster config outside git so trusted-dealer shares and
+libp2p private keys are not committed:
+
+```sh
+cd bloc-node
+go run ./cmd/bloc-node gen-config \
+  --nodes 4 \
+  --threshold 3 \
+  --bmax 128 \
+  --slot 1 \
+  --cluster-id bloc-k8s \
+  --address-mode kubernetes \
+  --out cluster.k8s.local.json
+```
+
+Create the Kubernetes config and deploy the sidecars:
+
+```sh
+kubectl apply -f deploy/k8s/00-namespace.yaml
+kubectl -n bloc create configmap bloc-cluster-config \
+  --from-file=cluster.json=bloc-node/cluster.k8s.local.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f deploy/k8s/10-services.yaml
+kubectl apply -f deploy/k8s/20-statefulset.yaml
+```
+
+If the Prometheus operator and Grafana sidecar dashboard discovery are
+available, also apply:
+
+```sh
+kubectl apply -f deploy/k8s/30-servicemonitor.yaml
+kubectl apply -f deploy/k8s/40-grafana-dashboard-configmap.yaml
+```
+
+The example remote-evaluator config in
+`deploy/k8s/remote-eval.k8s.example.json` uses in-cluster DNS names. When
+running the evaluator outside the cluster, port-forward each pod or replace the
+URLs with externally reachable addresses.
+
 ### BTE Benchmarks
 
 ```sh
@@ -211,7 +379,9 @@ The current prototype does not yet support stronger deployment claims involving:
 - public share-verifiability,
 - real proposer signing,
 - execution-client validation of decrypted transactions,
-- realistic network-loss or WAN deployment evidence.
+- Builder API compatibility,
+- realistic network-loss or WAN deployment evidence until a distributed run has
+  actually been collected.
 
 ## Milestone Evidence Map
 
@@ -219,10 +389,11 @@ The current prototype does not yet support stronger deployment claims involving:
 |---|---|
 | `M0. Current Prototype Baseline` | module tests, `bloc-node` demo smoke flow, documented command paths |
 | `M1. Slot Timing and Baseline Latency Evidence` | `bloc-node` `eval-suite` repeated timing runs with explicit configuration fields plus raw per-node and aggregated per-scenario results |
-| `M2. Coordination and Cryptographic Overhead Characterization` | evaluator message/byte counters plus BTE full-path benchmarks and optimization sweeps over normal, `sqrt(B)`, `2*sqrt(B)`, parallel combine, and larger `BMax`/batch sizes |
-| `M3. Fault and Adversarial Robustness Validation` | fault-injection runs and targeted correctness tests |
-| `M4. Economic and Resource Cost Characterization` | byte-size, bandwidth, and resource measurements tied to prototype runs |
-| `M5. Distributed Evaluation and Dissertation-Ready Evidence` | repeated local or distributed runs, aggregated metrics, and plot-ready outputs |
+| `M2. Distributed Deployment-Ready BLOC Sidecar` | Docker/Compose/Kubernetes deployment checks, Prometheus `/metrics`, Grafana dashboard, and `eval-remote` outputs |
+| `M3. Distributed Sidecar Metrics Collection` | repeated remote-evaluator campaigns, distributed manifests/CSVs, Prometheus/Grafana observations, and plot-ready outputs |
+| `M4. Coordination, Cryptographic, and Resource Overhead Characterization` | evaluator message/byte counters plus BTE full-path benchmarks and optimization sweeps over normal, `sqrt(B)`, `2*sqrt(B)`, parallel combine, and larger `BMax`/batch sizes |
+| `M5. Fault and Adversarial Robustness Validation` | fault-injection runs and targeted correctness tests |
+| `M6. Builder API Boundary` | future Builder-facing development adapter serving real BLOC-agreed transaction sets |
 
 ## Last Known Good State Guidance
 

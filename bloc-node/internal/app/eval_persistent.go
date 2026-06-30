@@ -58,7 +58,7 @@ func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []e
 	sort.Ints(nodeCounts)
 	corpora := make(map[string][]evalSubmission, len(scenarios))
 	for _, scenario := range scenarios {
-		items, err := buildSubmissionCorpus(scenario, options)
+		items, err := buildSubmissionCorpusForSource(scenario, options)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -205,6 +205,17 @@ func buildSubmissionCorpus(scenario evalScenario, options suiteOptions) ([]evalS
 	return items, nil
 }
 
+func buildSubmissionCorpusForSource(scenario evalScenario, options suiteOptions) ([]evalSubmission, error) {
+	switch options.TxSource {
+	case "", "synthetic":
+		return buildSubmissionCorpus(scenario, options)
+	case "mock-placeholder":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported tx-source %q", options.TxSource)
+	}
+}
+
 func startPersistentCluster(self, outDir string, options suiteOptions, scenario evalScenario, generation int, initialSlot uint64, reason string) (*persistentCluster, clusterMeasurement, error) {
 	measurement := clusterMeasurement{Nodes: scenario.Nodes, Threshold: scenario.Threshold, Generation: generation, Reason: reason, StartedAt: time.Now().UTC()}
 	clusterRoot := filepath.Join(outDir, "clusters", fmt.Sprintf("n%d", scenario.Nodes))
@@ -215,6 +226,9 @@ func startPersistentCluster(self, outDir string, options suiteOptions, scenario 
 	}
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--out", configPath}
+		if options.TxSource == "mock-placeholder" {
+			args = append(args, "--provider", "mempool-http", "--mempool-url", options.MempoolURL)
+		}
 		if out, genErr := exec.Command(self, args...).CombinedOutput(); genErr != nil {
 			err = fmt.Errorf("gen-config: %w: %s", genErr, string(out))
 			measurement.Error = err.Error()

@@ -5,7 +5,8 @@ import "testing"
 func TestParsePlaceholderCalldata(t *testing.T) {
 	input := "0x70686c64" +
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
-		"00000000000000000000000000000000000000000000000000000000000186a0"
+		"00000000000000000000000000000000000000000000000000000000000186a0" +
+		"deadbeef"
 
 	p, err := ParsePlaceholderCalldata(input)
 	if err != nil {
@@ -16,6 +17,12 @@ func TestParsePlaceholderCalldata(t *testing.T) {
 	}
 	if p.RequestedGas != 100000 {
 		t.Fatalf("unexpected gas: %d", p.RequestedGas)
+	}
+	if p.EncryptedPayloadHex != "0xdeadbeef" {
+		t.Fatalf("unexpected encrypted payload: %s", p.EncryptedPayloadHex)
+	}
+	if p.EncryptedPayloadHash == "" || p.CalldataBytes != 72 {
+		t.Fatalf("missing derived payload metadata: %+v", p)
 	}
 }
 

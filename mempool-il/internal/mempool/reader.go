@@ -10,6 +10,10 @@ type Source interface {
 	Fetch(ctx context.Context) ([]Transaction, error)
 }
 
+type SlotSource interface {
+	FetchSlot(ctx context.Context, slot uint64) ([]Transaction, error)
+}
+
 type Reader struct {
 	source   Source
 	store    *Store

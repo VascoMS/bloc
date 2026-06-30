@@ -18,8 +18,11 @@ import (
 func main() {
 	var (
 		rpcURL       = flag.String("rpc-url", "http://127.0.0.1:8545", "execution/public JSON-RPC URL")
-		sourceType   = flag.String("source", "txpool", "mempool source: txpool | public-pending | alchemy-pending")
+		sourceType   = flag.String("source", "txpool", "mempool source: txpool | public-pending | alchemy-pending | replay-placeholder")
 		alchemyTTL   = flag.Duration("alchemy-ttl", 5*time.Minute, "retention for alchemy pending tx cache")
+		corpusPath   = flag.String("corpus", "", "JSONL corpus of raw signed Ethereum target transactions for replay-placeholder")
+		clusterPath  = flag.String("cluster-config", "", "BLOC cluster config for replay-placeholder encryption")
+		replaySlot   = flag.Uint64("replay-slot", 1, "slot id used when encrypting replay-placeholder payloads")
 		listenAddr   = flag.String("listen", ":8080", "HTTP listen address")
 		pollInterval = flag.Duration("poll-interval", 2*time.Second, "mempool polling interval")
 		maxTxs       = flag.Int("max-items", 128, "max inclusion list tx count")
@@ -35,6 +38,7 @@ func main() {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 
 	var source mempool.Source
+	var slotSource mempool.SlotSource
 	switch *sourceType {
 	case "txpool":
 		source = mempool.NewRPCClient(*rpcURL, httpClient)
@@ -42,8 +46,20 @@ func main() {
 		source = mempool.NewPublicRPCClient(*rpcURL, httpClient)
 	case "alchemy-pending":
 		source = mempool.NewAlchemyPendingClient(*rpcURL, httpClient, *alchemyTTL)
+	case "replay-placeholder":
+		var err error
+		replaySource, err := mempool.NewReplayPlaceholderClient(mempool.ReplayPlaceholderConfig{
+			CorpusPath:  *corpusPath,
+			ClusterPath: *clusterPath,
+			Slot:        *replaySlot,
+		})
+		if err != nil {
+			log.Fatalf("load replay-placeholder source: %v", err)
+		}
+		source = replaySource
+		slotSource = replaySource
 	default:
-		log.Fatalf("invalid -source %q; expected txpool, public-pending or alchemy-pending", *sourceType)
+		log.Fatalf("invalid -source %q; expected txpool, public-pending, alchemy-pending or replay-placeholder", *sourceType)
 	}
 
 	reader := mempool.NewReader(source, store, *pollInterval)
@@ -53,8 +69,15 @@ func main() {
 	}
 	builder := inclusion.NewBuilder(inclusion.Config{MaxTransactions: *maxTxs, MaxGas: effectiveMaxGas})
 	apiServer := api.NewServer(store, builder)
+	if slotSource != nil {
+		apiServer = api.NewServerWithSlotSource(store, builder, slotSource)
+	}
 
-	go reader.Run(rootCtx)
+	if slotSource == nil {
+		go reader.Run(rootCtx)
+	} else if txs, err := source.Fetch(rootCtx); err == nil {
+		store.ReplaceAll(txs)
+	}
 
 	httpServer := &http.Server{
 		Addr:              *listenAddr,

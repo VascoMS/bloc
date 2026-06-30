@@ -31,6 +31,11 @@ func genConfig(args []string) error {
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
 	mempoolURL := fs.String("mempool-url", "", "mempool-il base URL for provider=mempool-http")
 	baseP2P := fs.Int("base-p2p-port", 10000, "first libp2p listen port")
+	addressMode := fs.String("address-mode", "local", "address preset: local, container, kubernetes")
+	httpListenTemplate := fs.String("http-listen-template", "", "HTTP listen template; supports {id}, {http_port}, {p2p_port}")
+	httpAdvertiseTemplate := fs.String("http-advertise-template", "", "HTTP advertised URL template for remote evaluators")
+	p2pListenTemplate := fs.String("p2p-listen-template", "", "libp2p listen multiaddr template")
+	p2pAdvertiseTemplate := fs.String("p2p-advertise-template", "", "libp2p advertised multiaddr template for peer dialing")
 	out := fs.String("out", "cluster.json", "output config")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -72,17 +77,31 @@ func genConfig(args []string) error {
 		Provider: ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL},
 		Network:  NetworkConfig{Mode: "libp2p"},
 	}
+	templates, err := resolveAddressTemplates(*addressMode, *httpListenTemplate, *httpAdvertiseTemplate, *p2pListenTemplate, *p2pAdvertiseTemplate)
+	if err != nil {
+		return err
+	}
 	for i := 0; i < *nodes; i++ {
 		p2pPrivHex, p2pPeerID, err := generateLibP2PIdentity()
 		if err != nil {
 			return err
 		}
+		httpPort := *baseHTTP + i
+		p2pPort := *baseP2P + i
+		httpListen := renderAddressTemplate(templates.httpListen, i, httpPort, p2pPort)
+		httpAdvertise := renderAddressTemplate(templates.httpAdvertise, i, httpPort, p2pPort)
+		p2pListen := renderAddressTemplate(templates.p2pListen, i, httpPort, p2pPort)
+		p2pAdvertise := renderAddressTemplate(templates.p2pAdvertise, i, httpPort, p2pPort)
 		cfg.Nodes = append(cfg.Nodes, NodeConfig{
-			ID:            uint64(i),
-			HTTPAddr:      fmt.Sprintf("127.0.0.1:%d", *baseHTTP+i),
-			P2PAddr:       fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", *baseP2P+i),
-			P2PPeerID:     p2pPeerID,
-			P2PPrivKeyHex: p2pPrivHex,
+			ID:               uint64(i),
+			HTTPAddr:         legacyHTTPAddr(httpAdvertise, httpListen),
+			HTTPListenAddr:   httpListen,
+			HTTPAdvertiseURL: httpAdvertise,
+			P2PAddr:          p2pAdvertise,
+			P2PListenAddr:    p2pListen,
+			P2PAdvertiseAddr: p2pAdvertise,
+			P2PPeerID:        p2pPeerID,
+			P2PPrivKeyHex:    p2pPrivHex,
 		})
 		scalarHex, err := marshalScalarHex(shares[i].V)
 		if err != nil {
@@ -100,7 +119,7 @@ func genConfig(args []string) error {
 func runNode(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "cluster.json", "cluster config")
-	id := fs.Uint64("id", 0, "operator id")
+	idRaw := fs.String("id", "", "operator id; defaults to NODE_ID when unset")
 	slot := fs.Uint64("slot", 0, "slot to run; defaults to config slot")
 	startAfter := fs.Duration("start-after", 0, "start consensus after delay")
 	outPath := fs.String("out", "", "optional result JSON path")
@@ -109,6 +128,16 @@ func runNode(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *idRaw == "" {
+		*idRaw = os.Getenv("NODE_ID")
+	}
+	if *idRaw == "" {
+		return fmt.Errorf("operator id is required via --id or NODE_ID")
+	}
+	id, err := strconv.ParseUint(*idRaw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid operator id %q: %w", *idRaw, err)
+	}
 	cfg, err := readConfig(*configPath)
 	if err != nil {
 		return err
@@ -116,7 +145,7 @@ func runNode(args []string) error {
 	if *slot != 0 {
 		cfg.Slot = *slot
 	}
-	node, err := newNode(cfg, *id, parseFaults(*fault, *delay))
+	node, err := newNode(cfg, id, parseFaults(*fault, *delay))
 	if err != nil {
 		return err
 	}
@@ -163,6 +192,89 @@ func submitTx(args []string) error {
 	}
 	fmt.Print(string(respBody))
 	return nil
+}
+
+type addressTemplates struct {
+	httpListen    string
+	httpAdvertise string
+	p2pListen     string
+	p2pAdvertise  string
+}
+
+func resolveAddressTemplates(mode, httpListen, httpAdvertise, p2pListen, p2pAdvertise string) (addressTemplates, error) {
+	switch mode {
+	case "", "local":
+		return fillAddressTemplateDefaults(addressTemplates{
+			httpListen:    httpListen,
+			httpAdvertise: httpAdvertise,
+			p2pListen:     p2pListen,
+			p2pAdvertise:  p2pAdvertise,
+		}, addressTemplates{
+			httpListen:    "127.0.0.1:{http_port}",
+			httpAdvertise: "http://127.0.0.1:{http_port}",
+			p2pListen:     "/ip4/127.0.0.1/tcp/{p2p_port}",
+			p2pAdvertise:  "/ip4/127.0.0.1/tcp/{p2p_port}",
+		}), nil
+	case "container":
+		return fillAddressTemplateDefaults(addressTemplates{
+			httpListen:    httpListen,
+			httpAdvertise: httpAdvertise,
+			p2pListen:     p2pListen,
+			p2pAdvertise:  p2pAdvertise,
+		}, addressTemplates{
+			httpListen:    "0.0.0.0:{http_port}",
+			httpAdvertise: "http://bloc-node-{id}:{http_port}",
+			p2pListen:     "/ip4/0.0.0.0/tcp/{p2p_port}",
+			p2pAdvertise:  "/dns4/bloc-node-{id}/tcp/{p2p_port}",
+		}), nil
+	case "kubernetes":
+		return fillAddressTemplateDefaults(addressTemplates{
+			httpListen:    httpListen,
+			httpAdvertise: httpAdvertise,
+			p2pListen:     p2pListen,
+			p2pAdvertise:  p2pAdvertise,
+		}, addressTemplates{
+			httpListen:    "0.0.0.0:8000",
+			httpAdvertise: "http://bloc-node-{id}.bloc-node-headless.bloc.svc.cluster.local:8000",
+			p2pListen:     "/ip4/0.0.0.0/tcp/9000",
+			p2pAdvertise:  "/dns4/bloc-node-{id}.bloc-node-headless.bloc.svc.cluster.local/tcp/9000",
+		}), nil
+	default:
+		return addressTemplates{}, fmt.Errorf("unknown address-mode %q", mode)
+	}
+}
+
+func fillAddressTemplateDefaults(value, defaults addressTemplates) addressTemplates {
+	if value.httpListen == "" {
+		value.httpListen = defaults.httpListen
+	}
+	if value.httpAdvertise == "" {
+		value.httpAdvertise = defaults.httpAdvertise
+	}
+	if value.p2pListen == "" {
+		value.p2pListen = defaults.p2pListen
+	}
+	if value.p2pAdvertise == "" {
+		value.p2pAdvertise = defaults.p2pAdvertise
+	}
+	return value
+}
+
+func renderAddressTemplate(tmpl string, id, httpPort, p2pPort int) string {
+	replacer := strings.NewReplacer(
+		"{id}", strconv.Itoa(id),
+		"{http_port}", strconv.Itoa(httpPort),
+		"{p2p_port}", strconv.Itoa(p2pPort),
+	)
+	return replacer.Replace(tmpl)
+}
+
+func legacyHTTPAddr(httpAdvertiseURL, httpListenAddr string) string {
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(httpAdvertiseURL, "http://"), "https://")
+	if trimmed != "" {
+		return trimmed
+	}
+	return httpListenAddr
 }
 
 func parseIntList(raw string) ([]int, error) {

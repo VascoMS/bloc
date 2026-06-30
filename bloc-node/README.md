@@ -60,6 +60,7 @@ All correct operators should report the same `batch_id`, merged-set hash, select
 `gen-config` writes:
 
 - operator HTTP and libp2p addresses,
+- explicit HTTP/libp2p listen and advertised addresses for container or Kubernetes deployments,
 - the BTE public key,
 - one trusted-dealer secret share per operator,
 - a shared `crs_seed_hex`,
@@ -71,6 +72,12 @@ ACS and BTE share messages use protobuf envelopes over authenticated,
 multiplexed libp2p streams. The generated bindings live in
 `proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
 local multiaddresses use TCP underneath; libp2p is not gRPC.
+
+For deployment configs, use `--address-mode container` or
+`--address-mode kubernetes`. The old `http_addr` and `p2p_addr` fields remain
+backward-compatible defaults for local configs, while the newer
+`http_listen_addr`, `http_advertise_url`, `p2p_listen_addr`, and
+`p2p_advertise_addr` fields separate local binding from dialable addresses.
 
 Regenerate the protobuf bindings after schema edits with:
 
@@ -131,3 +138,45 @@ short smoke command.
 
 Use `--execution-mode isolated` when validating process startup and teardown on
 every sample. Custom suites remain isolated unless persistent mode is requested.
+
+## Container and Remote Evaluation
+
+Build the sidecar image from the repository root:
+
+```sh
+docker build -f bloc-node/Dockerfile -t bloc-node:local .
+```
+
+Run a node inside a container with a mounted cluster config and `NODE_ID`:
+
+```sh
+docker run --rm \
+  -e NODE_ID=0 \
+  -v "$PWD/bloc-cluster.local.json:/config/cluster.json:ro" \
+  bloc-node:local
+```
+
+The node exposes `/healthz`, `/metrics`, `/tx`, `/slot/prepare`,
+`/slot/status`, `/start`, and `/result` on its configured HTTP listen address.
+
+Use `eval-remote` when a sidecar cluster is already running, for example via
+Docker Compose or Kubernetes:
+
+```sh
+go run ./cmd/bloc-node eval-remote \
+  --config ../deploy/docker-compose/remote-eval.compose.json \
+  --experiment-id compose-smoke \
+  --batch-size 8 \
+  --repetitions 1 \
+  --out-dir results/distributed/compose-smoke
+```
+
+`eval-remote` does not spawn processes. It prepares slots, submits generated
+signed Ethereum transactions, starts all sidecars, polls `/result`, verifies
+cross-node consistency, and writes chart-compatible CSV/manifest outputs.
+
+For mock-placeholder runs, start the sidecars with a mempool-backed provider and
+run `eval-remote --tx-source mock-placeholder --mempool-url <mempool-il>`. In
+that mode the evaluator does not submit `/tx` payloads; sidecars fetch encrypted
+placeholder candidates from `mempool-il` and materialize the original target
+transactions after threshold decryption.

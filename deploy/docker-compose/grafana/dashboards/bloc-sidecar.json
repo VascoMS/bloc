@@ -1,0 +1,97 @@
+{
+  "uid": "bloc-sidecar",
+  "title": "BLOC Sidecar Distributed Visibility",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Completed slots",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(bloc_slot_completed_total)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Failed slots",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "sum(bloc_slot_failed_total)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "p50/p95 total slot latency over scrape window",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(bloc_slot_stage_duration_seconds_bucket{stage=\"total\"}[5m]))) * 1000", "legendFormat": "p50 ms", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(bloc_slot_stage_duration_seconds_bucket{stage=\"total\"}[5m]))) * 1000", "legendFormat": "p95 ms", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Per-stage latency",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(bloc_slot_stage_duration_seconds_bucket{stage!=\"total\"}[5m]))) * 1000", "legendFormat": "{{stage}} p95 ms", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Protocol messages",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "rate(bloc_protocol_messages_total[1m])", "legendFormat": "{{node_id}} {{direction}} {{kind}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Protocol bytes",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(bloc_protocol_message_bytes_total[1m])", "legendFormat": "{{node_id}} {{direction}} {{kind}} B/s", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Selected transactions and gas",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "bloc_slot_selected_transactions", "legendFormat": "{{node_id}} txs", "refId": "A" },
+        { "expr": "bloc_slot_selected_gas", "legendFormat": "{{node_id}} gas", "refId": "B" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Current slot phase",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "bloc_slot_phase", "legendFormat": "{{node_id}} {{phase}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "HTTP request rate and latency",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "sum by (handler, code) (rate(bloc_http_requests_total[1m]))", "legendFormat": "{{handler}} {{code}} req/s", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(bloc_http_request_duration_seconds_bucket[5m]))) * 1000", "legendFormat": "{{handler}} p95 ms", "refId": "B" }
+      ]
+    }
+  ]
+}

@@ -34,7 +34,7 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 1. Keep local `eval-local`/`eval-suite` as the clean protocol baseline and rerun the corrected local baseline when thesis baseline figures are needed.
 2. Treat Docker Compose as a local deployment-mechanics rehearsal only.
-3. Run the dedicated BTE combine-attribution campaign on two placements each of `t3.small` and `c7a.large`, then compare its paired factor ladder with the completed same-AZ and cross-AZ integrated measurements.
+3. Resolve the account's Free Tier-only EC2 restriction for the dedicated BTE combine-attribution campaign, or explicitly revise the comparison host from `c7a.large` to the eligible `c7i-flex.large`; then run two placements per instance class and compare the paired factor ladder with the completed same-AZ and cross-AZ integrated measurements.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
 6. Keep the bash runner as an optional Linux/WSL path once the distro/tooling issue is resolved.
@@ -47,6 +47,7 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 - Local-host scheduling noise means Compose timing output is diagnostic only. Distributed thesis metrics should come from the VM/EC2-per-sidecar deployment, where each operator has an independent machine and network identity.
 - Prometheus `/metrics` now uses native collectors and histogram-safe PromQL is required for Grafana p50/p95 panels; evaluator CSV/JSON remains the offline chart artifact format.
 - Realistic transaction-source evidence now requires the mock-placeholder path: public mempool transactions are target payloads, not native BLOC placeholders, so they must be encrypted once by a mock external submitter before sidecars include them.
+- The first BTE attribution launch was rejected for both `c7a.large` placements because this AWS account currently permits only Free Tier-eligible instance types. Terraform cleanup completed and follow-up checks found no active instances, volumes, VPC, ECR repository, or temporary AWS key. `c7i-flex.large` is the closest eligible compute-family alternative but must not be substituted without recording the campaign-design change.
 - Builder API compatibility, SSV signing enforcement, and PBS-specific validation are intentionally out of scope for this milestone.
 
 ## Last Known Good State

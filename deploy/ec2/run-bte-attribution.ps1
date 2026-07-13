@@ -194,7 +194,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($keyMaterial)) { throw "failed to create EC2 key pair" }
 	$keyCreated = $true
   $keyMaterial | Set-Content -Encoding ascii -NoNewline $keyPath
-  & icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
+  & icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(F)" | Out-Null
 
   Push-Location $terraformWork
   try {
@@ -304,7 +304,7 @@ try {
 				Record-Command "terraform destroy -var-file=$tfvarsPath -auto-approve"
 				Invoke-Checked { terraform destroy "-var-file=$tfvarsPath" -auto-approve } "terraform destroy"
 				$remainingState = @(terraform state list)
-				$remainingState | Set-Content -Encoding utf8 (Join-Path $artifactRoot "terraform-state-after-destroy.txt")
+				Set-Content -Encoding utf8 (Join-Path $artifactRoot "terraform-state-after-destroy.txt") -Value $remainingState
 				if ($remainingState.Count -gt 0) { throw "Terraform state is not empty after destroy" }
 			} finally {
 				Pop-Location
@@ -317,8 +317,11 @@ try {
 			& aws ec2 delete-key-pair --profile $AwsProfile --region $AwsRegion --key-name $keyName
 			if ($LASTEXITCODE -ne 0) { throw "failed to delete temporary EC2 key pair $keyName" }
 		}
+		if (Test-Path -LiteralPath $keyPath) {
+			Remove-Item -LiteralPath $keyPath -Force
+		}
 		if ($shouldDestroy) {
-			[ordered]@{ status = "complete"; terraform_state_entries = @(); key_pair_deleted = $keyCreated } |
+			[ordered]@{ status = "complete"; terraform_state_entries = @(); key_pair_deleted = $keyCreated; local_key_deleted = (-not (Test-Path -LiteralPath $keyPath)) } |
 				ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $artifactRoot "cleanup-verification.json")
 		}
 	} catch {

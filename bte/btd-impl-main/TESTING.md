@@ -251,6 +251,33 @@ These inherited benchmarks are the correct surface for comparing the paper's
 optimization variants. They are not the same thing as the integrated M1
 `bloc-node` evaluator.
 
+## Combine Attribution Harness
+
+`cmd/bte-attribution` is the reproducible diagnostic surface for explaining a
+gap between the inherited paper result and integrated `combine_us`. For batches
+8, 32, and 128 it records randomized warmup and measured runs for:
+
+- the paper-equivalent sequential and parallel `Opt-2`, `t=2`, unverified path;
+- BLOC planning with unique indices;
+- the `n=4` and `n=7` round-robin index shapes;
+- the actual `t=3` and `t=5` thresholds, with and without verification;
+- the complete hybrid `CombineShares` wrapper.
+
+Each host writes a manifest, raw CSV, and Type-7 summary CSV/JSON. The `report`
+subcommand aggregates two placements per instance class and can add the
+existing same-AZ and cross-AZ sidecar measurements as integrated context.
+Focused profiles use an exact variant filter, for example:
+
+```sh
+go run ./cmd/bte-attribution run \
+  --batch-sizes 128 \
+  --warmups 2 \
+  --repetitions 10 \
+  --variants bloc-hybrid-n7-t5-verified \
+  --cpu-profile results/profile/cpu.pprof \
+  --out-dir results/profile
+```
+
 ## Cluster Full-Path Benchmarks
 
 These benchmarks live in `be/cluster_test.go`. They measure the new cluster-facing full path.

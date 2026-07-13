@@ -34,9 +34,10 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 1. Keep local `eval-local`/`eval-suite` as the clean protocol baseline and rerun the corrected local baseline when thesis baseline figures are needed.
 2. Treat Docker Compose as a local deployment-mechanics rehearsal only.
-3. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
-4. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
-5. Keep the bash runner as an optional Linux/WSL path once the distro/tooling issue is resolved.
+3. Run the dedicated BTE combine-attribution campaign on two placements each of `t3.small` and `c7a.large`, then compare its paired factor ladder with the completed same-AZ and cross-AZ integrated measurements.
+4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
+5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
+6. Keep the bash runner as an optional Linux/WSL path once the distro/tooling issue is resolved.
 
 ## Current Blockers / Risks
 

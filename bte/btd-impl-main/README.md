@@ -27,6 +27,22 @@ Run the cluster-facing full-path benchmarks:
 go test ./be -run '^$' -bench '^BenchmarkHybridFullPath' -benchtime=1x
 ```
 
+Run a controlled combine-attribution matrix without network or ACS work:
+
+```sh
+go run ./cmd/bte-attribution run \
+  --batch-sizes 8,32,128 \
+  --warmups 5 \
+  --repetitions 30 \
+  --out-dir results/bte-attribution/local
+```
+
+The matrix starts with the paper-equivalent sequential `Opt-2`, `t=2`,
+unverified path, then changes one relevant dimension at a time: BLOC planning,
+round-robin repeated indices, production thresholds, proof verification, and
+the hybrid wrapper. Use `--variants` and `--cpu-profile` for a separate focused
+profile; do not profile the primary timed matrix.
+
 You can also rerun the original benchmark script with:
 
 ```sh

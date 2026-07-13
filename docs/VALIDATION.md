@@ -446,6 +446,25 @@ microbenchmarks in `main_test.go` are the right place to compare normal,
 `sqrt(B)`, `2*sqrt(B)`, and parallel combine behavior. Treat that comparison as
 M2 cryptographic-overhead evidence rather than M1 slot-latency evidence.
 
+For discrepancy attribution, first smoke-test the harness locally:
+
+```sh
+cd bte/btd-impl-main
+go test ./cmd/bte-attribution
+go run ./cmd/bte-attribution run --batch-sizes 8 --bmax 8 \
+  --warmups 0 --repetitions 1 --tx-size 64 \
+  --out-dir results/bte-attribution-smoke
+```
+
+The controlled EC2 campaign is launched from the repository root with
+`deploy/ec2/run-bte-attribution.ps1`. Accept the dataset only when all four host
+manifests are complete, every one of the 11 variant/batch pairs per batch has
+exactly 30 successful measured rows, the inherited benchmark output and both
+focused CPU profiles exist, and Terraform destroy leaves an empty state. The
+report uses placement-median host p50 values; ratios below 5% are negligible,
+5--15% secondary, and above 15% material. A causal conclusion should agree in
+direction across both placements of an instance class.
+
 ### hbbft Bench and Simulation
 
 ```sh

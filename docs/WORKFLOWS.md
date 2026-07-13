@@ -91,6 +91,24 @@ Use a separate M2 benchmark or evaluator sweep when the question is normal vs
 `sqrt(B)` vs `2*sqrt(B)` vs parallel combine, or when testing batch sizes beyond
 the M1 `BMax=128` profile.
 
+For the current paper-versus-integrated combine discrepancy, use the dedicated
+attribution command and EC2 wrapper. The wrapper holds batches, warmups, and
+repetitions constant across two placements of both `t3.small` and `c7a.large`,
+runs the inherited paper benchmark as a cross-check, captures CPU-credit data
+for burstable hosts, and destroys its Terraform resources by default:
+
+```powershell
+.\deploy\ec2\run-bte-attribution.ps1 `
+  -AdminCidrs @("203.0.113.10/32")
+```
+
+Review the Terraform plan before typing `APPLY`. Do not substitute instance
+families after a capacity error in an evidence run; record the failed placement
+and rerun only with an explicit campaign change. Campaign-relevant paths must
+be committed unless `-AllowDirtyTree` is deliberately used for a non-evidence
+smoke run. Results and the generated attribution report are written under
+`results/ec2/<experiment-id>/`.
+
 ## Distributed Sidecar Workflow
 
 Use Docker Compose as a local bridge before distributed deployment work.

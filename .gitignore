@@ -20,10 +20,33 @@ results/
 pic-node/results/
 *.log
 
+# Local secrets and AWS credential exports
+.env
+.env.*
+*.pem
+*accessKeys*.csv
+*AccessKeys*.csv
+*_accessKeys.csv
+*_AccessKeys.csv
+credentials.csv
+aws_access_keys.csv
+
 # Temporary local configs with threshold key material
 cluster.json
+bloc-node/cluster*.json
 pic-cluster*.json
 !pic-node/pic-cluster.local.json
+deploy/ec2/cluster*.json
+deploy/ec2/remote-eval*.json
+deploy/ec2/inventory.json
+deploy/ec2/prometheus.ec2.yml
+deploy/ec2/terraform/.terraform/
+deploy/ec2/terraform/*.tfstate
+deploy/ec2/terraform/*.tfstate.*
+deploy/ec2/terraform/*.tfvars
+deploy/ec2/terraform/tfplan
+deploy/ec2/terraform/*.tfplan
+deploy/ec2/artifacts/
 
 bloc-node/DOCUMENTATION.md
 **/.gocache/

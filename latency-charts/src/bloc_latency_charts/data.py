@@ -75,7 +75,7 @@ def load_experiment(result_dir: str | Path) -> ExperimentData:
     manifest_path = root / "manifest.json"
     if manifest_path.is_file():
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
             experiment_id = str(manifest.get("experiment_id") or experiment_id)
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"invalid manifest.json: {exc}") from exc

@@ -95,8 +95,15 @@ responsible only for the BLOC protocol path and measurement surface:
 
 Cluster config supports both legacy local addresses and explicit
 listen-vs-advertise fields. Local runs default to loopback addresses. Container
-and Kubernetes runs listen on container interfaces while advertising service or
-pod DNS names that other sidecars and evaluators can dial.
+rehearsal runs listen on container interfaces while advertising dialable
+addresses that other sidecars and evaluators can reach.
+
+The primary distributed thesis evaluation shape is VM/EC2-per-sidecar rather
+than an orchestrated container cluster. In that shape, each BLOC operator runs
+on an independent VM with its own network identity, and a separate controller
+machine runs `eval-remote`, artifact collection, and optional metrics
+collection. This better matches the protocol model and keeps orchestration
+behavior out of the main distributed latency results.
 
 Prometheus-compatible `/metrics` is the live operational visibility interface.
 It uses the official Go Prometheus client with bounded labels, counters for

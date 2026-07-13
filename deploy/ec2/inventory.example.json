@@ -1,0 +1,53 @@
+{
+  "deployment": {
+    "environment": "ec2",
+    "region": "us-east-1",
+    "topology": "one-ec2-per-sidecar"
+  },
+  "controller": {
+    "label": "bloc-controller",
+    "private_ip": "10.0.0.10",
+    "private_dns": "ip-10-0-0-10.ec2.internal",
+    "public_ip": "198.51.100.10",
+    "region": "us-east-1",
+    "zone": "us-east-1a"
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "label": "operator-0",
+      "private_ip": "10.0.1.10",
+      "private_dns": "ip-10-0-1-10.ec2.internal",
+      "public_ip": "198.51.100.20",
+      "region": "us-east-1",
+      "zone": "us-east-1a"
+    },
+    {
+      "id": 1,
+      "label": "operator-1",
+      "private_ip": "10.0.1.11",
+      "private_dns": "ip-10-0-1-11.ec2.internal",
+      "public_ip": "198.51.100.21",
+      "region": "us-east-1",
+      "zone": "us-east-1a"
+    },
+    {
+      "id": 2,
+      "label": "operator-2",
+      "private_ip": "10.0.1.12",
+      "private_dns": "ip-10-0-1-12.ec2.internal",
+      "public_ip": "198.51.100.22",
+      "region": "us-east-1",
+      "zone": "us-east-1b"
+    },
+    {
+      "id": 3,
+      "label": "operator-3",
+      "private_ip": "10.0.1.13",
+      "private_dns": "ip-10-0-1-13.ec2.internal",
+      "public_ip": "198.51.100.23",
+      "region": "us-east-1",
+      "zone": "us-east-1b"
+    }
+  ]
+}

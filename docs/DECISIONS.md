@@ -89,9 +89,10 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Status: Accepted
 - Context: The next thesis milestone needs cloud/distributed latency and performance evidence for the BLOC sidecar. The proposed SSV-BLOC architecture eventually reaches a Builder API boundary, but production block-building would require execution-payload construction, beacon-client compatibility, and signing-boundary work that should not be implied by deployment evidence.
 - Options considered: implement Builder API compatibility first; implement a Builder-shaped mock before deployment; defer Builder API work and first make the sidecar containerized, observable, and remotely evaluable.
-- Decision: Defer Builder API compatibility and focus the active milestone on a containerized `bloc-node` sidecar, listen-vs-advertise config, Prometheus/Grafana visibility, Docker Compose/Kubernetes deployment artifacts, and a remote evaluator for already-running clusters.
+- Decision: Defer Builder API compatibility and focus the active milestone on a containerized `bloc-node` sidecar, listen-vs-advertise config, Prometheus/Grafana visibility, Docker Compose/EC2 deployment artifacts, and a remote evaluator for already-running clusters.
 - Rationale: Distributed deployment and observability are prerequisites for thesis-grade sidecar latency/performance evidence, while Builder API compatibility is a separate integration boundary that can be added once the runtime is measurable.
 - Consequences: `bloc-node` now exposes deployment-oriented config fields and `/metrics`; deployment artifacts live under `deploy/`; `eval-remote` is the canonical path for measuring non-local sidecar clusters; Builder/PBS/SSV signing claims remain deferred.
+- Update: Decision 0010 refines the main evaluation substrate: VM/EC2-per-sidecar is the primary distributed metric-gathering path; earlier orchestrated-container artifacts are retained only as out-of-scope historical deployment material.
 - Related files: `bloc-node/internal/app/commands.go`, `bloc-node/internal/app/metrics.go`, `bloc-node/internal/app/eval_remote.go`, `deploy/`, `docs/STATUS.md`, `docs/VALIDATION.md`, `docs/ROADMAP.md`
 
 ## 0008. Use Prometheus-native metrics for live sidecar visibility
@@ -103,7 +104,7 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Use the official Go Prometheus client for `/metrics`. Slot and HTTP latencies are seconds-based histograms; events and byte/message totals are counters; current state is exposed as gauges. Evaluator CSV/JSON remains the offline artifact format.
 - Rationale: Prometheus/Grafana dashboards need stable metric names, low-cardinality labels, and histogram-safe p50/p95 queries, while thesis charts still benefit from existing per-run CSV outputs.
 - Consequences: Grafana panels must use `histogram_quantile()` over `_bucket` series for live p50/p95 latency. Prometheus labels must not include slot IDs, batch IDs, transaction hashes, URLs, peer IDs, or free-form errors.
-- Related files: `bloc-node/internal/app/metrics.go`, `deploy/docker-compose/grafana/dashboards/bloc-sidecar.json`, `deploy/k8s/40-grafana-dashboard-configmap.yaml`, `docs/VALIDATION.md`
+- Related files: `bloc-node/internal/app/metrics.go`, `deploy/docker-compose/grafana/dashboards/bloc-sidecar.json`, `docs/VALIDATION.md`
 
 ## 0009. Use mock placeholders for realistic transaction-source tests
 
@@ -115,3 +116,14 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: The model preserves the separation between target transaction, placeholder transaction, and BTE encrypted payload, while keeping thesis runs deterministic.
 - Consequences: Sidecars consume encrypted payloads parsed from placeholder transactions and do not independently re-encrypt the same public transaction. Live public mempool ingestion and Builder/execution validation remain later work.
 - Related files: `mempool-il/internal/mempool/replay_placeholder.go`, `bloc-node/internal/app/provider.go`, `deploy/docker-compose/compose.mock-placeholder.yaml`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md`
+
+## 0010. Use VM-per-operator deployment for primary distributed evidence
+
+- Date: 2026-07-04
+- Status: Accepted
+- Context: The thesis needs distributed ACS/BTE latency and overhead evidence that maps cleanly to DVT-style operator independence. A single orchestrated container cluster introduces one administrative/control-plane/failure domain and measurement confounders such as scheduling, service routing, probes, restarts, throttling, and cluster control-plane effects.
+- Options considered: use a managed container cluster as the main distributed evaluation substrate; use Docker Compose only; run one BLOC sidecar on each independent VM/EC2 instance and drive the cluster from a separate controller.
+- Decision: Keep local `eval-local`/`eval-suite` runs as the clean protocol baseline, keep Docker Compose as a local deployment-mechanics rehearsal, and use one VM/EC2 instance per BLOC operator as the primary distributed thesis evaluation environment. A separate controller machine runs `eval-remote`, artifact collection, and optional Prometheus/Grafana or OpenTelemetry collection. Earlier orchestrated-container manifests remain in the repo only as out-of-scope historical deployment artifacts.
+- Rationale: VM-per-operator deployment maps directly to the protocol model: one operator, one machine, one network identity. It reduces orchestration-specific confounders and is easier to explain when reporting ACS/BTE latency under distributed network conditions.
+- Consequences: M3 distributed campaigns should target VM/EC2-per-sidecar clusters and clearly separate those results from local M1 baselines and local deployment rehearsals. Orchestrated-container deployment is out of scope for the current roadmap and should not appear in metric collection plans unless explicitly revived later.
+- Related files: `docs/STATUS.md`, `docs/VALIDATION.md`, `docs/ROADMAP.md`, `docs/WORKFLOWS.md`, `docs/ARCHITECTURE.md`

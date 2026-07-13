@@ -209,3 +209,80 @@ func TestRemoteManifestRecordsDeploymentFields(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
+	inventory := ec2Inventory{
+		Deployment: map[string]string{"region": "us-east-1"},
+		Controller: &ec2InventoryHost{
+			Label:     "controller",
+			PrivateIP: "10.0.0.10",
+		},
+		Nodes: []ec2InventoryHost{
+			{ID: 0, Label: "operator-0", PrivateIP: "10.0.1.10", Region: "us-east-1", Zone: "us-east-1a"},
+			{ID: 1, Label: "operator-1", PrivateIP: "10.0.1.11", Region: "us-east-1", Zone: "us-east-1a"},
+			{ID: 2, Label: "operator-2", PrivateIP: "10.0.1.12", Region: "us-east-1", Zone: "us-east-1b"},
+			{ID: 3, Label: "operator-3", PrivateIP: "10.0.1.13", Region: "us-east-1", Zone: "us-east-1b"},
+		},
+	}
+	options := ec2ConfigOptions{
+		ClusterID:     "bloc-ec2-test",
+		BMax:          128,
+		Slot:          7,
+		HTTPPort:      8000,
+		P2PPort:       9000,
+		HTTPHostMode:  "private-ip",
+		P2PHostMode:   "private-ip",
+		ProviderMode:  "direct",
+		DefaultTxGas:  21000,
+		PrometheusURL: "http://controller:9090",
+		GrafanaURL:    "http://controller:3000",
+	}
+	cluster, remote, err := buildEC2Configs(inventory, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cluster.N != 4 || cluster.Threshold != 3 || cluster.Slot != 7 {
+		t.Fatalf("unexpected cluster metadata: %+v", cluster)
+	}
+	if len(cluster.Nodes) != 4 || len(cluster.Shares) != 4 {
+		t.Fatalf("unexpected cluster node/share count: nodes=%d shares=%d", len(cluster.Nodes), len(cluster.Shares))
+	}
+	node := cluster.Nodes[2]
+	if node.HTTPListenAddr != "0.0.0.0:8000" || node.HTTPAdvertiseURL != "http://10.0.1.12:8000" {
+		t.Fatalf("unexpected HTTP config: %+v", node)
+	}
+	if node.P2PListenAddr != "/ip4/0.0.0.0/tcp/9000" || node.P2PAdvertiseAddr != "/ip4/10.0.1.12/tcp/9000" {
+		t.Fatalf("unexpected p2p config: %+v", node)
+	}
+	if remote.NodeCount != 4 || remote.Threshold != 3 || remote.InitialSlot != 7 {
+		t.Fatalf("unexpected remote metadata: %+v", remote)
+	}
+	if len(remote.Nodes) != 4 || remote.Nodes[2].URL != "http://10.0.1.12:8000" || remote.Nodes[2].Zone != "us-east-1b" {
+		t.Fatalf("unexpected remote nodes: %+v", remote.Nodes)
+	}
+	if remote.Deployment["environment"] != "ec2" || remote.Deployment["region"] != "us-east-1" || remote.Deployment["controller"] != "controller" {
+		t.Fatalf("unexpected deployment metadata: %+v", remote.Deployment)
+	}
+}
+
+func TestBuildEC2ConfigsRejectsMissingHostModeValue(t *testing.T) {
+	inventory := ec2Inventory{Nodes: []ec2InventoryHost{
+		{ID: 0, PrivateIP: "10.0.1.10"},
+		{ID: 1, PrivateIP: "10.0.1.11"},
+		{ID: 2, PrivateIP: "10.0.1.12"},
+		{ID: 3, PrivateIP: "10.0.1.13"},
+	}}
+	options := ec2ConfigOptions{
+		BMax:         128,
+		HTTPPort:     8000,
+		P2PPort:      9000,
+		HTTPHostMode: "private-dns",
+		P2PHostMode:  "private-ip",
+		ProviderMode: "direct",
+		DefaultTxGas: 21000,
+	}
+	_, _, err := buildEC2Configs(inventory, options)
+	if err == nil || !strings.Contains(err.Error(), "missing private-dns") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

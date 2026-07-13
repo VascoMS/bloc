@@ -60,7 +60,7 @@ All correct operators should report the same `batch_id`, merged-set hash, select
 `gen-config` writes:
 
 - operator HTTP and libp2p addresses,
-- explicit HTTP/libp2p listen and advertised addresses for container or Kubernetes deployments,
+- explicit HTTP/libp2p listen and advertised addresses for container deployments,
 - the BTE public key,
 - one trusted-dealer secret share per operator,
 - a shared `crs_seed_hex`,
@@ -73,9 +73,9 @@ multiplexed libp2p streams. The generated bindings live in
 `proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
 local multiaddresses use TCP underneath; libp2p is not gRPC.
 
-For deployment configs, use `--address-mode container` or
-`--address-mode kubernetes`. The old `http_addr` and `p2p_addr` fields remain
-backward-compatible defaults for local configs, while the newer
+For deployment configs, use `--address-mode container`. The old `http_addr`
+and `p2p_addr` fields remain backward-compatible defaults for local configs,
+while the newer
 `http_listen_addr`, `http_advertise_url`, `p2p_listen_addr`, and
 `p2p_advertise_addr` fields separate local binding from dialable addresses.
 
@@ -159,8 +159,12 @@ docker run --rm \
 The node exposes `/healthz`, `/metrics`, `/tx`, `/slot/prepare`,
 `/slot/status`, `/start`, and `/result` on its configured HTTP listen address.
 
-Use `eval-remote` when a sidecar cluster is already running, for example via
-Docker Compose or Kubernetes:
+Use `eval-remote` when a sidecar cluster is already running. Docker Compose is
+a useful local rehearsal for deployment mechanics, but the primary distributed
+thesis evaluation target is one VM/EC2 instance per BLOC operator with a
+separate controller running the evaluator.
+
+Example against the local Docker Compose rehearsal:
 
 ```sh
 go run ./cmd/bloc-node eval-remote \
@@ -174,6 +178,11 @@ go run ./cmd/bloc-node eval-remote \
 `eval-remote` does not spawn processes. It prepares slots, submits generated
 signed Ethereum transactions, starts all sidecars, polls `/result`, verifies
 cross-node consistency, and writes chart-compatible CSV/manifest outputs.
+
+For VM/EC2-per-sidecar runs, generate a cluster config whose advertised HTTP
+and libp2p addresses are reachable between the controller and operator hosts,
+run one sidecar per machine, and point the remote-evaluator config at those
+operator HTTP endpoints.
 
 For mock-placeholder runs, start the sidecars with a mempool-backed provider and
 run `eval-remote --tx-source mock-placeholder --mempool-url <mempool-il>`. In

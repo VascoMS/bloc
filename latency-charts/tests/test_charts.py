@@ -54,6 +54,13 @@ def test_load_filters_warmups_and_failed_runs(tmp_path: Path) -> None:
     assert experiment.skipped_runs == 1
 
 
+def test_load_accepts_utf8_bom_manifest(tmp_path: Path) -> None:
+    write_fixture(tmp_path)
+    (tmp_path / "manifest.json").write_text(json.dumps({"experiment_id": "bom-fixture"}), encoding="utf-8-sig")
+    experiment = load_experiment(tmp_path)
+    assert experiment.experiment_id == "bom-fixture"
+
+
 def test_scaling_summary_calculates_percentiles(tmp_path: Path) -> None:
     write_fixture(tmp_path)
     summary = scaling_summary(load_experiment(tmp_path).runs)

@@ -1,8 +1,8 @@
 # Roadmap
 
-This roadmap is now ordered around the thesis path from local protocol evidence to distributed sidecar evidence, then to later Builder API and DVT integration work.
+This roadmap is now ordered around the thesis path from local protocol baseline evidence to VM/EC2-per-sidecar distributed evidence, then to later Builder API and DVT integration work.
 
-Builder API compatibility, production mev-boost behavior, real proposer signing, and PBS prefix enforcement are explicitly deferred until the sidecar can first be deployed, observed, and evaluated as a distributed cluster.
+Builder API compatibility, production mev-boost behavior, real proposer signing, and PBS prefix enforcement are explicitly deferred until the sidecar can first be deployed, observed, and evaluated across independently hosted operator machines.
 
 ## M0. Current Prototype Baseline
 
@@ -34,9 +34,8 @@ Builder API compatibility, production mev-boost behavior, real proposer signing,
 - Objective: make `bloc-node` deployable as a DVT-adjacent sidecar cluster with first-class visibility.
 - Deliverables:
   - multi-stage `bloc-node` Docker image,
-  - local/container/Kubernetes listen-vs-advertise config support,
+  - local/container listen-vs-advertise config support,
   - Docker Compose 4-node cluster with Prometheus and Grafana,
-  - Kubernetes StatefulSet/headless Service/HTTP Service manifests,
   - Prometheus-native `/metrics` with counters, gauges, seconds-based histograms, and bounded labels,
   - remote evaluator for already-running sidecar clusters.
 - Done criteria:
@@ -48,17 +47,25 @@ Builder API compatibility, production mev-boost behavior, real proposer signing,
 ## M3. Distributed Sidecar Metrics Collection
 
 - RQs advanced: `RQ1`, `RQ2`, `RQ4`
-- Objective: collect repeated distributed latency/performance evidence from the deployment-ready sidecar, using both synthetic transaction submissions and mock-placeholder mempool inputs.
+- Objective: collect repeated distributed latency/performance evidence from the deployment-ready sidecar using one VM/EC2 instance per operator, with both synthetic transaction submissions and mock-placeholder mempool inputs where useful.
 - Deliverables:
-  - Compose smoke evidence,
+  - clean local `eval-suite` baseline for protocol comparison,
+  - Compose smoke evidence as local deployment rehearsal,
   - corpus-backed mock placeholder mempool evidence,
-  - Kubernetes or cloud deployment evidence,
-  - remote-evaluator campaigns over 4/7/10-node clusters where infrastructure allows,
+  - VM/EC2-per-sidecar deployment evidence,
+  - remote-evaluator campaigns over 4/7/10-node VM clusters where infrastructure allows,
   - charts/tables for p50/p95 latency, per-stage timing, message volume, and resource observations.
 - Done criteria:
-  - sidecar runs are reproducible from documented deployment commands,
+  - sidecar VM runs are reproducible from documented deployment commands,
   - distributed results are clearly separated from local M1 results,
-  - thesis figures identify environment, image tag, git commit, node count, threshold, batch size, and region/zone labels when available.
+  - thesis figures identify environment, node count, threshold, batch size, endpoint mode, and region/zone labels when available,
+
+## Out-of-Scope Deployment Artifacts
+
+The repository still contains Kubernetes manifests from an earlier deployment
+rehearsal under `deploy/k8s/`. They are retained as optional historical
+artifacts in case they are useful later, but Kubernetes is not part of the
+current roadmap, validation path, or thesis metric collection plan.
 
 ## M4. Coordination, Cryptographic, and Resource Overhead Characterization
 

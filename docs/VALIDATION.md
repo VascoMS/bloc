@@ -1,5 +1,21 @@
 # Validation
 
+## Evidence Policy
+
+Local module tests are preflight checks. Local `eval-local` and `eval-suite`
+runs are the clean protocol baseline for ACS/BTE behavior under controlled
+conditions. Docker Compose validates local deployment mechanics, but it should
+not be the primary distributed performance substrate.
+
+The current distributed thesis evidence target is VM/EC2-per-sidecar behavior:
+one independent machine per BLOC operator, plus a separate controller running
+`eval-remote`, artifact collection, and optional Prometheus/Grafana or
+OpenTelemetry collection.
+
+Use charts only after there is a local baseline or VM-distributed evidence worth
+presenting. Chart generation is a reporting step, not a reason to run
+experiments.
+
 ## Validation Matrix
 
 | Change area | Minimum validation | When to go further |
@@ -9,8 +25,8 @@
 | BTE library logic | `go test ./...` in `bte/btd-impl-main` | Run full-path benchmark when performance or batch planning changes |
 | `sbc/hbbft` logic | `go test ./...` in `sbc/hbbft` | Run simulation or bench when consensus behavior or throughput assumptions change |
 | Latency charts | `python -m pytest` in `latency-charts` | Render charts from an `eval-suite` directory after schema or presentation changes |
-| Cross-module protocol behavior | Relevant module tests plus `bloc-node` smoke flow | Use the demo flow for reproducible end-to-end evidence |
-| Deployment artifacts | Docker build plus Compose smoke | Run remote evaluator and Prometheus scrape checks before cloud claims |
+| Cross-module protocol behavior | Relevant module tests plus `bloc-node` smoke flow | Use local `eval-suite` for protocol-baseline evidence, then VM/EC2-per-sidecar `eval-remote` for distributed evidence |
+| Deployment artifacts | Docker build plus Compose smoke | Use VM/EC2-per-sidecar deployment for the main distributed evidence path |
 | Documentation-only changes | Link and ownership review | No code validation required unless commands were edited |
 
 ## Canonical Commands
@@ -26,6 +42,10 @@ cd sbc/hbbft && go test ./...
 
 ### bloc-node Local Evaluation
 
+Use local evaluation for controlled protocol behavior and baseline timing. Local
+numbers are not a substitute for distributed VM evidence, but they are the clean
+baseline against which distributed runs should be interpreted.
+
 ```sh
 cd bloc-node
 go run ./cmd/bloc-node eval-local \
@@ -39,10 +59,11 @@ go run ./cmd/bloc-node eval-local \
 ### M1 Evidence Campaign (Not a Per-Change Test)
 
 This is a long-running milestone evidence campaign, not a mandatory validation
-step for ordinary code changes. Run it only when collecting or refreshing the
-M1 baseline, or after a change that can materially affect the evaluator's
-latency results. For routine `bloc-node` changes, use `go test ./...` and, when
-the end-to-end path is relevant, the reduced smoke check below.
+step for ordinary code changes. Run it when deliberately refreshing the clean
+local protocol baseline, or after a change that can materially affect the
+evaluator's local latency results. For routine `bloc-node` changes, use
+`go test ./...` and, when the end-to-end path is relevant, the reduced smoke
+check below.
 
 The named profile executes 4/7/10-node and 8/32/128-transaction scenarios over
 libp2p, with five warmups and thirty measured repetitions per scenario: 9
@@ -123,6 +144,10 @@ suite reports Type-7 p50/p95; p99 is deferred until a 100+ repetition campaign.
 overhead and are not included in `total_slot_us`.
 
 ### M1 Latency Charts
+
+These charts are for the clean local protocol baseline. For distributed sidecar
+work, generate charts only after a VM/EC2-per-sidecar remote-evaluator campaign
+has produced result artifacts worth reporting.
 
 Set up the chart module once:
 
@@ -233,7 +258,8 @@ go run ./cmd/bloc-node eval-remote \
   --out-dir results/distributed/compose-smoke
 ```
 
-Generate charts from the distributed output using the same chart module:
+Optionally test chart compatibility from the distributed output if the charting
+schema changed. Do not treat Compose charts as thesis evidence:
 
 ```powershell
 cd latency-charts
@@ -248,6 +274,8 @@ placeholders. `mempool-il` encrypts each corpus target once, signs a mock
 placeholder transaction, parses that placeholder transaction's calldata, and
 sidecars consume the derived `encrypted_payload_hex` from the inclusion-list
 API.
+This is a realism smoke path, not the central milestone unless the task is
+specifically about transaction-source realism.
 
 ```sh
 cd deploy/docker-compose
@@ -276,48 +304,134 @@ Acceptance criteria:
 - inclusion-list responses expose encrypted payload and target metadata derived
   from placeholder calldata, but not raw target transaction bytes;
 - evaluator manifests record `tx_source=mock-placeholder`;
-- chart generation remains compatible with the resulting evaluator directory.
+- evaluator artifacts remain compatible with the later distributed reporting
+  pipeline when those results are intentionally promoted for presentation.
 
-### Kubernetes Deployment Shape
+### VM/EC2-Per-Sidecar Distributed Evidence
 
-Generate the prototype cluster config outside git so trusted-dealer shares and
-libp2p private keys are not committed:
+Use this as the primary distributed thesis evaluation shape. Run one
+`bloc-node` sidecar per independent VM/EC2 instance and run the evaluator from a
+separate controller machine.
+
+The first supported EC2 recipe uses host-local Docker Compose:
+
+- each operator EC2 runs exactly one `bloc-node` sidecar container from
+  `deploy/ec2/operator-compose.yaml`;
+- the controller EC2 runs Prometheus/Grafana from
+  `deploy/ec2/controller-compose.yaml` and runs `eval-remote`;
+- `deploy/ec2/terraform/` can create the operator/controller instances and
+  emit an inventory JSON;
+- Terraform creates an ECR repository for the sidecar image and an EC2 instance
+  profile with ECR read-only pull access, so the deploy IAM principal needs
+  ECR repository-management permissions and scoped IAM role/profile permissions;
+- ECR-backed experiment ids must begin with `bloc-ec2-`, because the scoped IAM
+  policy allows only `bloc-ec2-*` roles and instance profiles;
+- `bloc-node gen-ec2-config` converts that inventory into a shared
+  `cluster.ec2.json` plus the controller's `remote-eval.ec2.json`;
+- Prometheus on the controller scrapes every operator's `/metrics` directly.
+
+Generate configs from the Terraform inventory:
 
 ```sh
 cd bloc-node
-go run ./cmd/bloc-node gen-config \
+go run ./cmd/bloc-node gen-ec2-config \
+  --inventory ../deploy/ec2/inventory.json \
+  --cluster-out ../deploy/ec2/cluster.ec2.json \
+  --remote-eval-out ../deploy/ec2/remote-eval.ec2.json \
+  --cluster-id bloc-ec2 \
   --nodes 4 \
-  --threshold 3 \
-  --bmax 128 \
-  --slot 1 \
-  --cluster-id bloc-k8s \
-  --address-mode kubernetes \
-  --out cluster.k8s.local.json
+  --bmax 128
 ```
 
-Create the Kubernetes config and deploy the sidecars:
+The generated `cluster.ec2.json` contains prototype trusted-dealer shares and
+libp2p private keys. Do not commit it. Copy it to
+`/etc/bloc/cluster.json` on each operator host.
 
-```sh
-kubectl apply -f deploy/k8s/00-namespace.yaml
-kubectl -n bloc create configmap bloc-cluster-config \
-  --from-file=cluster.json=bloc-node/cluster.k8s.local.json \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f deploy/k8s/10-services.yaml
-kubectl apply -f deploy/k8s/20-statefulset.yaml
+Acceptance criteria for a first VM-distributed smoke:
+
+- all sidecars report healthy `/healthz`;
+- all sidecars expose bounded-label `/metrics`;
+- `eval-remote` succeeds and reports cross-node consistency;
+- result manifests record environment, image or binary version, git commit,
+  node count, threshold, batch size, region/zone labels where applicable, and
+  endpoint mode.
+
+For the A1 same-AZ pilot readiness campaign, run the Windows PowerShell EC2
+runner:
+
+```powershell
+.\deploy\ec2\run-a1-pilot.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -ExperimentId bloc-ec2-a1-pilot-same-az-n4-step1
 ```
 
-If the Prometheus operator and Grafana sidecar dashboard discovery are
-available, also apply:
+The A1 pilot must:
 
-```sh
-kubectl apply -f deploy/k8s/30-servicemonitor.yaml
-kubectl apply -f deploy/k8s/40-grafana-dashboard-configmap.yaml
+- plan only the expected low-cost EC2, VPC, ECR, and scoped IAM resources,
+  with generated role/profile names under the `bloc-ec2-*` IAM policy scope;
+- deploy 4 operators plus 1 controller in one availability zone;
+- run batch sizes `8`, `32`, and `128` with 1 warmup and 3 measured repetitions;
+- collect `manifest.json`, generated configs, inventory, network pre/post CSVs,
+  Prometheus target snapshots, logs, and merged evaluator CSV/JSON outputs;
+- generate charts when the latency chart virtual environment is available;
+- destroy Terraform resources and verify no experiment EC2 instances, EBS
+  volumes, VPC, ECR repository, temporary key pair, IAM role, or instance
+  profile remain.
+
+When debugging the runner itself, it is acceptable to keep a failed environment
+alive with `-KeepResourcesOnFailure`, then use
+`deploy/ec2/rerun-a1-pilot-existing.ps1` to rebuild and redeploy only the
+container image and rerun evaluator scenarios against the existing EC2
+instances. Use fresh slot ranges for every rerun and destroy the Terraform
+workdir as soon as the debugging window ends.
+
+Network pre/post files should report controller-to-operator HTTP timing for
+`/healthz`; do not interpret ICMP ping loss as BLOC network loss unless ICMP is
+explicitly allowed in the pilot security groups.
+
+For the first thesis-grade M3 same-AZ synthetic campaign, run:
+
+```powershell
+.\deploy\ec2\run-m3-same-az.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -AutoApprovePlan
 ```
 
-The example remote-evaluator config in
-`deploy/k8s/remote-eval.k8s.example.json` uses in-cluster DNS names. When
-running the evaluator outside the cluster, port-forward each pod or replace the
-URLs with externally reachable addresses.
+The wrapper runs `n=4`, `n=7`, and `n=10` as separate EC2 phases with batch
+sizes `8`, `32`, and `128`, 5 warmups, and 30 measured repetitions per batch.
+It pauses between node counts unless `-AutoApprovePhases` is supplied.
+
+For the same-region cross-AZ synthetic comparison, run:
+
+```powershell
+.\deploy\ec2\run-m3-cross-az.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -AutoApprovePlan
+```
+
+The cross-AZ wrapper defaults to `n=4` and `n=7`, spreading generated public
+subnets across `us-east-1a`, `us-east-1b`, and `us-east-1c`. It uses the same
+batch sizes, warmups, repetitions, instance sizing, cleanup verification, and
+chart-generation expectations as the same-AZ M3 path. Do not run `n=10` with
+`t3.small` operators until the account vCPU quota can cover 10 operators plus
+the controller.
+
+Acceptance criteria:
+
+- every phase manifest is `status=complete`;
+- every measured row in `run_measurements.csv` is `success=true` and
+  `consistent=true`;
+- each node-count phase has exactly 30 measured rows per batch size;
+- Prometheus target snapshots show every operator target as `up`;
+- `resource-samples.csv` exists and contains pre-campaign, before-batch,
+  during-batch, and after-batch operator `docker stats` rows;
+- combined campaign charts generate under `results/charts/<campaign-id>/`;
+- each phase and the top-level campaign write cleanup verification showing no
+  leftover EC2 instances, EBS volumes, VPC, ECR repository, temporary key pair,
+  IAM role, or instance profile.
 
 ### BTE Benchmarks
 
@@ -368,7 +482,7 @@ go run bench/main.go
 
 The current prototype can support:
 
-- slot-level latency experiments under local-process conditions,
+- local slot-level latency experiments for clean protocol baselines,
 - coordination and message-overhead measurement,
 - fault-injection scenarios such as omitted proposals or withheld shares,
 - blockspace-cap experiments and related materialization metrics.
@@ -380,17 +494,17 @@ The current prototype does not yet support stronger deployment claims involving:
 - real proposer signing,
 - execution-client validation of decrypted transactions,
 - Builder API compatibility,
-- realistic network-loss or WAN deployment evidence until a distributed run has
-  actually been collected.
+- realistic network-loss or WAN deployment evidence until VM/EC2-per-sidecar
+  distributed runs have actually been collected.
 
 ## Milestone Evidence Map
 
 | Milestone | Primary evidence |
 |---|---|
 | `M0. Current Prototype Baseline` | module tests, `bloc-node` demo smoke flow, documented command paths |
-| `M1. Slot Timing and Baseline Latency Evidence` | `bloc-node` `eval-suite` repeated timing runs with explicit configuration fields plus raw per-node and aggregated per-scenario results |
-| `M2. Distributed Deployment-Ready BLOC Sidecar` | Docker/Compose/Kubernetes deployment checks, Prometheus `/metrics`, Grafana dashboard, and `eval-remote` outputs |
-| `M3. Distributed Sidecar Metrics Collection` | repeated remote-evaluator campaigns, distributed manifests/CSVs, Prometheus/Grafana observations, and plot-ready outputs |
+| `M1. Slot Timing and Baseline Latency Evidence` | Clean local protocol baseline from `eval-suite`, useful for interpreting distributed overhead |
+| `M2. Distributed Deployment-Ready BLOC Sidecar` | Docker/Compose deployment rehearsal, Prometheus `/metrics`, Grafana dashboard, and `eval-remote` outputs |
+| `M3. Distributed Sidecar Metrics Collection` | repeated VM/EC2-per-sidecar remote-evaluator campaigns, distributed manifests/CSVs, Prometheus/Grafana or OpenTelemetry observations, and plot-ready outputs |
 | `M4. Coordination, Cryptographic, and Resource Overhead Characterization` | evaluator message/byte counters plus BTE full-path benchmarks and optimization sweeps over normal, `sqrt(B)`, `2*sqrt(B)`, parallel combine, and larger `BMax`/batch sizes |
 | `M5. Fault and Adversarial Robustness Validation` | fault-injection runs and targeted correctness tests |
 | `M6. Builder API Boundary` | future Builder-facing development adapter serving real BLOC-agreed transaction sets |

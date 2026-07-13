@@ -1,0 +1,12 @@
+services:
+  bloc-node:
+    image: ${BLOC_IMAGE:-bloc-node:local}
+    restart: unless-stopped
+    environment:
+      NODE_ID: ${NODE_ID:?set NODE_ID for this EC2 operator}
+    command: ["run", "--config", "/config/cluster.json"]
+    volumes:
+      - /etc/bloc/cluster.json:/config/cluster.json:ro
+    ports:
+      - "8000:8000"
+      - "9000:9000"

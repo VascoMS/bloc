@@ -21,6 +21,10 @@ func Run(args []string) {
 		if err := genConfig(args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "gen-ec2-config":
+		if err := genEC2Config(args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "run":
 		if err := runNode(args[2:]); err != nil {
 			log.Fatal(err)
@@ -54,6 +58,7 @@ func Run(args []string) {
 func usage() {
 	fmt.Fprintf(os.Stderr, `usage:
   bloc-node gen-config --nodes 4 --threshold 3 --bmax 128 --out cluster.json
+  bloc-node gen-ec2-config --inventory deploy/ec2/inventory.json --cluster-out cluster.ec2.json --remote-eval-out remote-eval.ec2.json
   bloc-node run --config cluster.json --id 0 --slot 1 --start-after 3s
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results

@@ -87,11 +87,11 @@ function Save-AwsJson([string[]]$Arguments, [string]$Path) {
   $output | Set-Content -Encoding utf8 $Path
 }
 
-function Save-CreditMetrics($Host, [datetime]$StartTime, [datetime]$EndTime, [string]$Destination) {
+function Save-CreditMetrics($CampaignHost, [datetime]$StartTime, [datetime]$EndTime, [string]$Destination) {
   New-Item -ItemType Directory -Force $Destination | Out-Null
-  Save-AwsJson @("ec2", "describe-credit-specifications", "--profile", $AwsProfile, "--region", $AwsRegion, "--instance-ids", $Host.instance_id, "--output", "json") (Join-Path $Destination "credit-specification.json")
+  Save-AwsJson @("ec2", "describe-credit-specifications", "--profile", $AwsProfile, "--region", $AwsRegion, "--instance-ids", $CampaignHost.instance_id, "--output", "json") (Join-Path $Destination "credit-specification.json")
   foreach ($metric in @("CPUCreditBalance", "CPUCreditUsage", "CPUSurplusCreditBalance", "CPUSurplusCreditsCharged")) {
-    Save-AwsJson @("cloudwatch", "get-metric-statistics", "--profile", $AwsProfile, "--region", $AwsRegion, "--namespace", "AWS/EC2", "--metric-name", $metric, "--dimensions", "Name=InstanceId,Value=$($Host.instance_id)", "--statistics", "Average", "Maximum", "--period", "300", "--start-time", $StartTime.ToUniversalTime().ToString("o"), "--end-time", $EndTime.ToUniversalTime().ToString("o"), "--output", "json") (Join-Path $Destination "$metric.json")
+    Save-AwsJson @("cloudwatch", "get-metric-statistics", "--profile", $AwsProfile, "--region", $AwsRegion, "--namespace", "AWS/EC2", "--metric-name", $metric, "--dimensions", "Name=InstanceId,Value=$($CampaignHost.instance_id)", "--statistics", "Average", "Maximum", "--period", "300", "--start-time", $StartTime.ToUniversalTime().ToString("o"), "--end-time", $EndTime.ToUniversalTime().ToString("o"), "--output", "json") (Join-Path $Destination "$metric.json")
   }
 }
 
@@ -238,25 +238,25 @@ try {
 
   $inventory = Get-Content -Raw (Join-Path $artifactRoot "inventory.json") | ConvertFrom-Json
   $campaignStart = (Get-Date).ToUniversalTime()
-  foreach ($host in ($inventory.hosts | Sort-Object label)) {
-    $hostDir = Join-Path $artifactRoot "hosts\$($host.label)"
+  foreach ($campaignHost in ($inventory.hosts | Sort-Object label)) {
+    $hostDir = Join-Path $artifactRoot "hosts\$($campaignHost.label)"
     New-Item -ItemType Directory -Force $hostDir | Out-Null
-    Wait-SSH $host.public_ip
-    Invoke-SSH $host.public_ip "set -e; lscpu; echo; uname -a; echo; docker version" | Set-Content -Encoding utf8 (Join-Path $hostDir "host-facts.txt")
-    $remoteRoot = "/opt/bloc/results/$ExperimentId/$($host.label)"
+    Wait-SSH $campaignHost.public_ip
+    Invoke-SSH $campaignHost.public_ip "set -e; lscpu; echo; uname -a; echo; docker version" | Set-Content -Encoding utf8 (Join-Path $hostDir "host-facts.txt")
+    $remoteRoot = "/opt/bloc/results/$ExperimentId/$($campaignHost.label)"
     $batchCsv = $BatchSizes -join ","
     $paperRegex = '^BenchmarkBatchCombine(8|32|128)/B=(8|32|128),_alpha=2[.]000000[*]sqrt[(]B[)]$'
-    $remote = "set -euo pipefail; aws ecr get-login-password --region '$AwsRegion' | docker login --username AWS --password-stdin '$registry'; docker pull '$imageUri'; sudo mkdir -p '$remoteRoot/timed' '$remoteRoot/profiles/paper' '$remoteRoot/profiles/bloc'; sudo chown -R 10001:10001 '$remoteRoot'; docker run --rm --entrypoint /usr/local/bin/paper-bench '$imageUri' '-test.run=^`$' '-test.bench=$paperRegex' '-test.benchtime=${PaperBenchmarkCount}x' '-test.count=3' | sudo tee '$remoteRoot/paper-benchmark.txt' >/dev/null; docker run --rm -v '$remoteRoot/timed:/work' '$imageUri' run --batch-sizes '$batchCsv' --warmups '$Warmups' --repetitions '$Repetitions' --tx-size '$TxSize' --out-dir /work --host-label '$($host.label)' --instance-type '$($host.instance_type)' --zone '$($host.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'; docker run --rm -v '$remoteRoot/profiles/paper:/work' '$imageUri' run --batch-sizes 128 --warmups 2 --repetitions 10 --variants paper-opt2-sequential-t2 --cpu-profile /work/cpu.pprof --out-dir /work --host-label '$($host.label)-profile-paper' --instance-type '$($host.instance_type)' --zone '$($host.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'; docker run --rm -v '$remoteRoot/profiles/bloc:/work' '$imageUri' run --batch-sizes 128 --warmups 2 --repetitions 10 --variants bloc-hybrid-n7-t5-verified --cpu-profile /work/cpu.pprof --out-dir /work --host-label '$($host.label)-profile-bloc' --instance-type '$($host.instance_type)' --zone '$($host.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'"
-    Invoke-SSH $host.public_ip $remote | Set-Content -Encoding utf8 (Join-Path $hostDir "remote-run.log")
-    Record-Command "scp -r ubuntu@$($host.public_ip):$remoteRoot/. $hostDir"
-    & scp -i $keyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -r "ubuntu@$($host.public_ip):$remoteRoot/." $hostDir
-    if ($LASTEXITCODE -ne 0) { throw "artifact collection failed for $($host.label)" }
+    $remote = "set -euo pipefail; aws ecr get-login-password --region '$AwsRegion' | docker login --username AWS --password-stdin '$registry'; docker pull '$imageUri'; sudo mkdir -p '$remoteRoot/timed' '$remoteRoot/profiles/paper' '$remoteRoot/profiles/bloc'; sudo chown -R 10001:10001 '$remoteRoot'; docker run --rm --entrypoint /usr/local/bin/paper-bench '$imageUri' '-test.run=^`$' '-test.bench=$paperRegex' '-test.benchtime=${PaperBenchmarkCount}x' '-test.count=3' | sudo tee '$remoteRoot/paper-benchmark.txt' >/dev/null; docker run --rm -v '$remoteRoot/timed:/work' '$imageUri' run --batch-sizes '$batchCsv' --warmups '$Warmups' --repetitions '$Repetitions' --tx-size '$TxSize' --out-dir /work --host-label '$($campaignHost.label)' --instance-type '$($campaignHost.instance_type)' --zone '$($campaignHost.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'; docker run --rm -v '$remoteRoot/profiles/paper:/work' '$imageUri' run --batch-sizes 128 --warmups 2 --repetitions 10 --variants paper-opt2-sequential-t2 --cpu-profile /work/cpu.pprof --out-dir /work --host-label '$($campaignHost.label)-profile-paper' --instance-type '$($campaignHost.instance_type)' --zone '$($campaignHost.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'; docker run --rm -v '$remoteRoot/profiles/bloc:/work' '$imageUri' run --batch-sizes 128 --warmups 2 --repetitions 10 --variants bloc-hybrid-n7-t5-verified --cpu-profile /work/cpu.pprof --out-dir /work --host-label '$($campaignHost.label)-profile-bloc' --instance-type '$($campaignHost.instance_type)' --zone '$($campaignHost.zone)' --git-commit '$gitCommit' --image-tag '$imageUri'"
+    Invoke-SSH $campaignHost.public_ip $remote | Set-Content -Encoding utf8 (Join-Path $hostDir "remote-run.log")
+    Record-Command "scp -r ubuntu@$($campaignHost.public_ip):$remoteRoot/. $hostDir"
+    & scp -i $keyPath -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -r "ubuntu@$($campaignHost.public_ip):$remoteRoot/." $hostDir
+    if ($LASTEXITCODE -ne 0) { throw "artifact collection failed for $($campaignHost.label)" }
     Assert-HostArtifacts $hostDir
   }
   $campaignEnd = (Get-Date).ToUniversalTime()
 
-  foreach ($host in $inventory.hosts | Where-Object instance_type -like "t3.*") {
-    Save-CreditMetrics $host $campaignStart $campaignEnd (Join-Path $artifactRoot "hosts\$($host.label)\cloudwatch")
+  foreach ($campaignHost in $inventory.hosts | Where-Object instance_type -like "t3.*") {
+    Save-CreditMetrics $campaignHost $campaignStart $campaignEnd (Join-Path $artifactRoot "hosts\$($campaignHost.label)\cloudwatch")
   }
 
   $reportArgs = @("run", "./cmd/bte-attribution", "report", "--campaign-dir", (Join-Path $artifactRoot "hosts"), "--out", (Join-Path $artifactRoot "RUN_REPORT.md"))

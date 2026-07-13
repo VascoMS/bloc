@@ -196,8 +196,11 @@ try {
   $keyMaterial = & aws ec2 create-key-pair --profile $AwsProfile --region $AwsRegion --key-name $keyName --key-type rsa --query KeyMaterial --output text
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($keyMaterial)) { throw "failed to create EC2 key pair" }
 	$keyCreated = $true
-  $keyMaterial | Set-Content -Encoding ascii -NoNewline $keyPath
+	$keyText = (($keyMaterial -join "`n").TrimEnd() + "`n")
+	[System.IO.File]::WriteAllText($keyPath, $keyText, (New-Object System.Text.UTF8Encoding($false)))
   & icacls $keyPath /inheritance:r /grant:r "$($env:USERNAME):(F)" | Out-Null
+	& ssh-keygen -y -f $keyPath | Out-Null
+	if ($LASTEXITCODE -ne 0) { throw "temporary EC2 private key failed local format validation" }
 
   Push-Location $terraformWork
   try {

@@ -102,6 +102,11 @@ for burstable hosts, and destroys its Terraform resources by default:
   -AdminCidrs @("203.0.113.10/32")
 ```
 
+If the account cannot launch the default `c7a.large` comparison host, pass an
+explicitly approved alternative with `-ComparisonInstanceType`. Record the CPU
+vendor and instance type in the resulting report; do not present a substituted
+host as a direct reproduction of the paper's Ryzen hardware.
+
 Review the Terraform plan before typing `APPLY`. Do not substitute instance
 families after a capacity error in an evidence run; record the failed placement
 and rerun only with an explicit campaign change. Campaign-relevant paths must

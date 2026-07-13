@@ -5,6 +5,8 @@ param(
   [string]$AwsProfile = "bloc",
   [string]$AwsRegion = "us-east-1",
   [string[]]$AvailabilityZones = @("us-east-1a", "us-east-1b"),
+  [ValidateNotNullOrEmpty()]
+  [string]$ComparisonInstanceType = "c7a.large",
   [string]$ExperimentId = ("bloc-ec2-bteattr-" + (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")),
   [int[]]$BatchSizes = @(8, 32, 128),
   [int]$Warmups = 5,
@@ -172,11 +174,12 @@ try {
   Copy-Item -Path @("$terraformSource\main.tf", "$terraformSource\outputs.tf", "$terraformSource\variables.tf", "$terraformSource\user-data.sh") -Destination $terraformWork
   if (Test-Path "$terraformSource\.terraform.lock.hcl") { Copy-Item "$terraformSource\.terraform.lock.hcl" $terraformWork }
 
+  $comparisonLabel = $ComparisonInstanceType.ToLowerInvariant() -replace "[^a-z0-9-]", "-"
   $hosts = @(
     [ordered]@{ label = "t3-small-a"; instance_type = "t3.small"; zone_index = 0 },
     [ordered]@{ label = "t3-small-b"; instance_type = "t3.small"; zone_index = 1 },
-    [ordered]@{ label = "c7a-large-a"; instance_type = "c7a.large"; zone_index = 0 },
-    [ordered]@{ label = "c7a-large-b"; instance_type = "c7a.large"; zone_index = 1 }
+    [ordered]@{ label = "$comparisonLabel-a"; instance_type = $ComparisonInstanceType; zone_index = 0 },
+    [ordered]@{ label = "$comparisonLabel-b"; instance_type = $ComparisonInstanceType; zone_index = 1 }
   )
   [ordered]@{
     aws_region = $AwsRegion
@@ -280,6 +283,7 @@ try {
     batch_sizes = $BatchSizes
     warmups = $Warmups
     repetitions = $Repetitions
+    comparison_instance_type = $ComparisonInstanceType
     hosts = $inventory.hosts
   } | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $artifactRoot "campaign-manifest.json")
   $campaignComplete = $true

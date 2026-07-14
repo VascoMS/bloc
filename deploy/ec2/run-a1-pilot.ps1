@@ -523,8 +523,14 @@ try {
   foreach ($forbidden in @("aws_nat_gateway", "aws_lb", "aws_eks_cluster", "aws_db_instance", "aws_eip", "aws_autoscaling_group")) {
     if ($planText.Contains($forbidden)) { throw "Terraform plan contains forbidden expensive resource: $forbidden" }
   }
-  foreach ($forbiddenSetting in @("spot_instance_request", "monitoring = true")) {
-    if ($planText.Contains($forbiddenSetting)) { throw "Terraform plan contains forbidden setting: $forbiddenSetting" }
+  $forbiddenSettings = [ordered]@{
+    "Spot market type" = '(?m)^\s*\+\s*market_type\s*=\s*"spot"\s*$'
+    "detailed monitoring" = '(?m)^\s*\+\s*monitoring\s*=\s*true\s*$'
+  }
+  foreach ($forbiddenSetting in $forbiddenSettings.GetEnumerator()) {
+    if ($planText -match $forbiddenSetting.Value) {
+      throw "Terraform plan contains forbidden setting: $($forbiddenSetting.Key)"
+    }
   }
   $allowedResourceTypes = @(
     "aws_vpc",
@@ -535,6 +541,7 @@ try {
     "aws_ecr_repository",
     "aws_iam_role",
     "aws_iam_role_policy",
+    "aws_iam_role_policy_attachment",
     "aws_iam_instance_profile",
     "aws_security_group",
     "aws_instance"

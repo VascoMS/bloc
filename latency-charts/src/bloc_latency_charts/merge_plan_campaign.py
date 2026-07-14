@@ -108,10 +108,9 @@ def _summaries(measurements: pd.DataFrame) -> pd.DataFrame:
 def _comparisons(summary: pd.DataFrame) -> pd.DataFrame:
     critical = summary[summary["scope"] == "critical-node"].set_index(["phase", "batch", "stage"])
     rows = []
-    pairs = [
-        ("compute-flex-n7_vs_compute-flex-n4", "compute-flex-n4", "compute-flex-n7"),
-        ("burstable-n7_vs_compute-flex-n7", "compute-flex-n7", "burstable-n7"),
-    ]
+    pairs = [("compute-flex-n7_vs_compute-flex-n4", "compute-flex-n4", "compute-flex-n7")]
+    if "burstable-n7" in set(summary["phase"]):
+        pairs.append(("burstable-n7_vs_compute-flex-n7", "compute-flex-n7", "burstable-n7"))
     for label, baseline, candidate in pairs:
         for batch in [8, 32, 128]:
             for stage in STAGES:
@@ -222,29 +221,30 @@ def _charts(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> 
     ax.set_title("Compute Flex n=7 batch-128 per-node distributions")
     _save_figure(fig, output, "per-node-distributions")
 
-    instance = summary[
-        (summary["scope"] == "critical-node")
-        & (summary["stage"] == "merge_plan_us")
-        & summary["phase"].isin(["compute-flex-n7", "burstable-n7"])
-    ].pivot(index="batch", columns="phase", values="p50_us")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    instance.plot(kind="bar", ax=ax)
-    ax.set_ylabel("p50 Merge + Plan latency (us)")
-    ax.set_title("n=7 instance-class comparison")
-    _save_figure(fig, output, "instance-class-comparison")
+    if "burstable-n7" in set(summary["phase"]):
+        instance = summary[
+            (summary["scope"] == "critical-node")
+            & (summary["stage"] == "merge_plan_us")
+            & summary["phase"].isin(["compute-flex-n7", "burstable-n7"])
+        ].pivot(index="batch", columns="phase", values="p50_us")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        instance.plot(kind="bar", ax=ax)
+        ax.set_ylabel("p50 Merge + Plan latency (us)")
+        ax.set_title("n=7 instance-class comparison")
+        _save_figure(fig, output, "instance-class-comparison")
 
 
 def _report(
     measurements: pd.DataFrame,
     summary: pd.DataFrame,
     block_summary: pd.DataFrame,
+    manifest: dict,
     output: Path,
 ) -> None:
     critical = summary[summary["scope"] == "critical-node"].set_index(["phase", "batch", "stage"])
     flex_decode = critical.loc[("compute-flex-n7", 128, "ciphertext_decode_us"), "p50_us"]
     flex_total = critical.loc[("compute-flex-n7", 128, "merge_plan_us"), "p50_us"]
     flex_n4 = critical.loc[("compute-flex-n4", 128, "merge_plan_us"), "p50_us"]
-    burstable = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p50_us"]
     decode_medians = [
         critical.loc[("compute-flex-n7", batch, "ciphertext_decode_us"), "p50_us"]
         for batch in [8, 32, 128]
@@ -255,7 +255,6 @@ def _report(
     node_ratio = flex_total / flex_n4
     node_assessment = "material" if abs(node_ratio - 1) >= 0.10 else "not material under a 10% threshold"
     flex_p95 = critical.loc[("compute-flex-n7", 128, "merge_plan_us"), "p95_us"]
-    burstable_p95 = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p95_us"]
     local_delta_percent = 100 * (flex_decode - 457000) / 457000
     local_assessment = "reproduced within 10%" if abs(local_delta_percent) <= 10 else "not reproduced within 10%"
     flex_blocks = block_summary[
@@ -275,7 +274,6 @@ def _report(
         f"- **Ciphertext decoding share:** at Compute Flex n=7 and batch 128, decoding is {flex_decode / 1000:.1f} ms p50, or {100 * flex_decode / flex_total:.1f}% of Merge + Plan.",
         f"- **Decode scaling:** Compute Flex n=7 p50 values for batches 8/32/128 are {decode_medians[0] / 1000:.1f}, {decode_medians[1] / 1000:.1f}, and {decode_medians[2] / 1000:.1f} ms. This is {scaling_assessment}; the max/min per-ciphertext cost ratio is {per_ciphertext_spread:.2f}x.",
         f"- **Compute Flex n=7 versus n=4:** batch-128 Merge + Plan p50 changes from {flex_n4 / 1000:.1f} ms to {flex_total / 1000:.1f} ms ({node_ratio:.2f}x), which is {node_assessment}.",
-        f"- **T3 versus Compute Flex at n=7:** batch-128 Merge + Plan p50 changes from {flex_total / 1000:.1f} ms to {burstable / 1000:.1f} ms ({burstable / flex_total:.2f}x). The p95/p50 ratio changes from {flex_p95 / flex_total:.2f}x to {burstable_p95 / burstable:.2f}x.",
         f"- **Temporal drift:** Compute Flex n=7 batch-128 block p50 values span {block_drift_ratio:.2f}x from minimum to maximum.",
         f"- **Local reference:** EC2 Compute Flex n=7 batch-128 decode differs from the contextual 457 ms local median by {local_delta_percent:+.1f}% and is {local_assessment}. The machines are not treated as directly comparable hardware baselines.",
         f"- **Node skew:** the median within-run Merge + Plan range is {skew.median() / 1000:.1f} ms; the maximum retained range is {skew.max() / 1000:.1f} ms.", "",
@@ -284,10 +282,29 @@ def _report(
         "## Artifacts", "",
         "- merge-plan-measurements.csv: node-level observations and decode time per ciphertext",
         "- merge-plan-summary.csv: p50, p95, dispersion, and bounds",
-        "- comparison.csv: fixed-size and instance-class comparisons",
+        "- comparison.csv: accepted node-count and, when valid, instance-class comparisons",
         "- measurement-block-summary.csv: temporal drift across the three balanced blocks",
-        "- PNG and SVG charts: attribution, scaling, per-node distributions, skew, and instance-class comparison",
+        "- PNG and SVG charts: attribution, scaling, per-node distributions, skew, and any valid instance-class comparison",
     ]
+    if "burstable-n7" in set(measurements["phase"]):
+        burstable = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p50_us"]
+        burstable_p95 = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p95_us"]
+        lines.insert(11,
+            f"- **T3 versus Compute Flex at n=7:** batch-128 Merge + Plan p50 changes from {flex_total / 1000:.1f} ms to {burstable / 1000:.1f} ms ({burstable / flex_total:.2f}x). The p95/p50 ratio changes from {flex_p95 / flex_total:.2f}x to {burstable_p95 / burstable:.2f}x."
+        )
+    diagnostics = manifest.get("diagnostic_phases", [])
+    if diagnostics:
+        lines.extend(["", "## Invalid Diagnostic Phases", ""])
+        for diagnostic in diagnostics:
+            measured = diagnostic.get("measured_runs")
+            successful = diagnostic.get("successful_measured_runs")
+            sample_note = ""
+            if measured is not None and successful is not None:
+                sample_note = f" It completed {successful} of {measured} measured runs successfully."
+            lines.append(
+                f"- **{diagnostic.get('id', 'unknown')}:** {diagnostic.get('reason', 'invalid')}. "
+                f"Its partial observations are excluded from every headline statistic and comparison.{sample_note}"
+            )
     (output / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -297,9 +314,11 @@ def analyze_campaign(campaign_root: Path, output: Path | None = None) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((campaign_root / "manifest.json").read_text(encoding="utf-8-sig"))
     phases = manifest.get("phases", [])
-    expected = {"compute-flex-n4", "compute-flex-n7", "burstable-n7"}
-    if {phase.get("id") for phase in phases} != expected:
-        raise ValueError("campaign manifest must contain compute-flex-n4, compute-flex-n7, and burstable-n7")
+    phase_ids = {phase.get("id") for phase in phases}
+    required = {"compute-flex-n4", "compute-flex-n7"}
+    allowed = required | {"burstable-n7"}
+    if not required.issubset(phase_ids) or not phase_ids.issubset(allowed):
+        raise ValueError("campaign manifest must contain Compute Flex n4/n7 and may contain burstable n7")
     digests = {phase.get("image_digest") for phase in phases}
     if len(digests) != 1 or None in digests or "" in digests:
         raise ValueError("all phases must record one identical non-empty image digest")
@@ -316,7 +335,7 @@ def analyze_campaign(campaign_root: Path, output: Path | None = None) -> Path:
     block_summary = _block_summaries(measurements)
     block_summary.to_csv(output / "measurement-block-summary.csv", index=False)
     _charts(measurements, summary, output)
-    _report(measurements, summary, block_summary, output)
+    _report(measurements, summary, block_summary, manifest, output)
     return output
 
 

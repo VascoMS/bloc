@@ -262,6 +262,11 @@ records 30 samples per batch without restarting sidecars, destroys successful
 infrastructure, and must retain the same image digest. The final analysis
 contains node-level measurements, p50/p95 summaries, comparisons, a Markdown
 report, and PNG/SVG charts. This 30-sample campaign does not support p99 claims.
+Compute Flex `n=4/n=7` are the required attribution phases. T3 `n=7` is an
+optional comparison phase and enters comparison tables only if it independently
+passes the same 30-run acceptance checks. Preserve a failed T3 run as explicitly
+invalid diagnostic evidence; never merge its partial observations into accepted
+summary statistics.
 
 For the same-region cross-AZ synthetic comparison, use the cross-AZ wrapper:
 

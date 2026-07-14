@@ -38,8 +38,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Run the committed Merge/Plan attribution PowerShell campaign using Free-plan-eligible `c7i-flex.large` `n=4/n=7` and `t3.small` `n=7` phases; its source guard refuses to build or allocate AWS resources from relevant uncommitted files.
-2. Use the resulting Compute Flex and T3 report to decide whether the roughly 457 ms local batch-128 decode result is primarily cryptographic work or host-class contention. Treat C7i Flex as baseline-plus-burst capacity, not fixed-performance hardware, and inspect the three measurement blocks for temporal drift.
+1. Profile the isolated 128-ciphertext decoder and separate curve/scalar unmarshalling, byte parsing/copying, allocation, and garbage-collection costs.
+2. Compare one decoder process with seven affinity-limited processes, then benchmark deterministic one-worker versus two-worker decoding without changing protocol identities.
 3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
@@ -57,8 +57,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Last Known Good State
 
-- Date: `2026-07-13`
-- Meaning: the local BLOC path remains stable after merge/plan attribution and optimization. A matched local 4/7-node, batch-8/32/128 campaign completed 60/60 measured runs successfully and consistently in both baseline and optimized phases. Batch-32/128 pipeline benchmark medians improved by 6.1% to 17.5%, with no retained-scenario regression; evaluator merge/plan medians improved by 11.0% to 14.3%. Existing same-AZ and cross-AZ EC2 evidence remains valid for the earlier image but must be labeled separately from future optimized-image campaigns. `n=10` with `t3.small` remains blocked by the current 16-vCPU account quota.
+- Date: `2026-07-14`
+- Meaning: the optimized image completed accepted same-AZ Compute Flex `n=4/n=7` attribution phases with 30 measured runs per batch. At `n=7`, batch-128 ciphertext decoding was 195.1 ms p50 and 98.0% of Merge + Plan; Merge + Plan was only 5% slower than `n=4`, and batch-128 block drift was 1.02x. The contextual 457 ms local decoder median was not reproduced on isolated EC2 operators. The T3 `n=7` phase is retained only as invalid diagnostic evidence: 55/60 measured runs succeeded, batch-128 total-slot p50 worsened 2.27x between completed blocks, and the phase then timed out. All phases destroyed their AWS resources and reported empty cleanup checks; a later redundant live sweep could not run because the temporary AWS profile was no longer loaded.
 - Data-realism addendum: `mempool-il` now has a corpus-backed `replay-placeholder` mode that validates real signed Ethereum target transactions, encrypts them once using BLOC public cluster material, and exposes mock placeholder candidates through the existing inclusion-list API. `bloc-node` can consume these encrypted payloads via the mempool provider without changing synthetic evaluator defaults.
 - Baseline commands:
   - `cd bloc-node && go test ./...`
@@ -66,6 +66,7 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 3 --out-dir results/acs-bba-self-vote-matrix`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 5 --out-dir results/acs-all-rbc-stress`
 - Evidence location:
+  - `results/ec2/merge-plan-attribution-free-20260714/` (ignored accepted Compute Flex `n=4/n=7` measurements, analysis tables/charts/report, and separately labeled invalid T3 diagnostic artifacts)
   - `results/local/merge-plan-optimization/merge-plan-opt-20260713/` (ignored local baseline/optimized benchmarks, profiles, evaluator outputs, charts, comparison CSVs, and report; 60/60 measured runs succeeded and were consistent in each phase)
   - `results/ec2/m3-cross-az-synthetic-20260706t122922z/` and `results/charts/m3-cross-az-synthetic-20260706t122922z/` (ignored local artifact collection and generated charts from the M3 cross-AZ synthetic campaign: `n=4` and `n=7` `t3.small` operators plus one `t3.small` controller per phase in `us-east-1` across `us-east-1a/b/c`; batches 8/32/128; 5 warmups and 30 measured repetitions per batch; 180/180 measured runs had `success=true` and `consistent=true`; Prometheus saw 4/4 and 7/7 targets up; Terraform destroy completed for both phases; cleanup verification and follow-up AWS checks found no tagged EC2 instances, volumes, VPC, ECR repository, temporary key pair, IAM role, or instance profile)
   - `results/ec2/m3-same-az-synthetic-20260706t105535z/` (ignored local artifact collection from the M3 same-AZ synthetic campaign: `n=4` and `n=7` phases completed cleanly with 180/180 measured runs successful and consistent; the `n=10` phase was not collected because AWS rejected the `t3.small` plan under the current 16-vCPU account quota; cleanup checks found no leftover resources)

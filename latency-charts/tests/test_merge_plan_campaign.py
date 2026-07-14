@@ -14,9 +14,9 @@ PHASES = [
 ]
 
 
-def write_campaign(root: Path) -> None:
+def write_campaign(root: Path, phases: list[dict] = PHASES) -> None:
     manifest_phases = []
-    for phase in PHASES:
+    for phase in phases:
         phase_root = root / phase["path"]
         phase_root.mkdir(parents=True)
         rows = []
@@ -79,6 +79,27 @@ def test_analyze_campaign_writes_tables_report_and_charts(tmp_path: Path) -> Non
     report = (output / "REPORT.md").read_text(encoding="utf-8")
     assert "no p99 claim" in report
     assert "457 ms" in report
+
+
+def test_analyze_campaign_accepts_compute_flex_without_invalid_t3(tmp_path: Path) -> None:
+    write_campaign(tmp_path, PHASES[:2])
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["diagnostic_phases"] = [{
+        "id": "burstable-n7", "reason": "timed out",
+        "measured_runs": 60, "successful_measured_runs": 55,
+    }]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    output = analyze_campaign(tmp_path)
+
+    measurements = pd.read_csv(output / "merge-plan-measurements.csv")
+    assert set(measurements["phase"]) == {"compute-flex-n4", "compute-flex-n7"}
+    assert not (output / "instance-class-comparison.svg").exists()
+    report = (output / "REPORT.md").read_text(encoding="utf-8")
+    assert "Invalid Diagnostic Phases" in report
+    assert "excluded from every headline statistic" in report
+    assert "55 of 60 measured runs" in report
 
 
 def test_analyze_campaign_rejects_substage_mismatch(tmp_path: Path) -> None:

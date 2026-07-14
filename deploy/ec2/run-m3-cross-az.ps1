@@ -6,20 +6,58 @@ param(
   [string[]]$AvailabilityZones = @("us-east-1a", "us-east-1b", "us-east-1c"),
   [string[]]$SubnetCidrs = @("10.40.1.0/24", "10.40.2.0/24", "10.40.3.0/24"),
   [int[]]$NodeCounts = @(4, 7),
+  [string]$NodeCountsCsv = "",
   [string]$OperatorInstanceType = "t3.small",
   [string]$ControllerInstanceType = "t3.small",
   [int[]]$BatchSizes = @(8, 32, 128),
+  [string]$BatchSizesCsv = "",
   [int]$Warmups = 5,
   [int]$Repetitions = 30,
   [string]$CampaignId = "",
+  [string]$BaselineCampaignRoot = "",
   [switch]$AutoApprovePlan,
   [switch]$AutoApprovePhases,
+  [switch]$Unattended,
   [switch]$KeepResourcesOnFailure,
   [switch]$SkipChartGeneration
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+function ConvertFrom-IntegerCsv {
+  param([string]$Raw, [string]$Name)
+  $values = @()
+  foreach ($part in ($Raw -split ",")) {
+    $trimmed = $part.Trim()
+    $parsed = 0
+    if ([string]::IsNullOrWhiteSpace($trimmed) -or -not [int]::TryParse($trimmed, [ref]$parsed)) {
+      throw "$Name must be a comma-separated list of integers; received '$Raw'."
+    }
+    $values += $parsed
+  }
+  return [int[]]$values
+}
+
+if (-not [string]::IsNullOrWhiteSpace($NodeCountsCsv)) {
+  $NodeCounts = ConvertFrom-IntegerCsv $NodeCountsCsv "NodeCountsCsv"
+}
+if (-not [string]::IsNullOrWhiteSpace($BatchSizesCsv)) {
+  $BatchSizes = ConvertFrom-IntegerCsv $BatchSizesCsv "BatchSizesCsv"
+}
+if ($NodeCounts.Count -eq 0 -or @($NodeCounts | Where-Object { $_ -notin @(4, 7, 10) }).Count -gt 0) {
+  throw "M3 node counts must be selected from 4, 7, and 10; received $($NodeCounts -join ',')."
+}
+if ($BatchSizes.Count -eq 0 -or @($BatchSizes | Where-Object { $_ -notin @(8, 32, 128) }).Count -gt 0) {
+  throw "M3 batch sizes must be selected from 8, 32, and 128; received $($BatchSizes -join ',')."
+}
+if ($Warmups -lt 0 -or $Repetitions -lt 1) {
+  throw "Warmups must be non-negative and Repetitions must be positive."
+}
+if ($Unattended) {
+  $AutoApprovePlan = $true
+  $AutoApprovePhases = $true
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $phaseScript = Join-Path $PSScriptRoot "run-a1-pilot.ps1"
@@ -133,6 +171,8 @@ function Write-CampaignManifest {
     batch_sizes = $BatchSizes
     warmups = $Warmups
     repetitions = $Repetitions
+    baseline_campaign_root = if ([string]::IsNullOrWhiteSpace($BaselineCampaignRoot)) { $null } else { $BaselineCampaignRoot }
+    unattended = [bool]$Unattended
     resource_policy = "destroy-after-success; keep only on failure when requested"
     failure_rule = "any failed or inconsistent measured run invalidates the phase"
     phases = $phaseResults.ToArray()
@@ -242,6 +282,23 @@ try {
       Pop-Location
     } else {
       Write-Warning "Skipping campaign chart generation because latency-charts .venv is missing."
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($BaselineCampaignRoot)) {
+    $baseline = (Resolve-Path $BaselineCampaignRoot).Path
+    $comparisonPython = Join-Path $repoRoot "latency-charts\.venv\Scripts\python.exe"
+    if (-not (Test-Path $comparisonPython)) {
+      throw "baseline comparison requires latency-charts .venv: $comparisonPython"
+    }
+    $comparisonOutput = Join-Path $campaignRoot "comparison"
+    Record-Command "python -m bloc_latency_charts.campaign_comparison $baseline $campaignRoot --output $comparisonOutput"
+    Push-Location (Join-Path $repoRoot "latency-charts")
+    try {
+      & $comparisonPython -m bloc_latency_charts.campaign_comparison $baseline $campaignRoot --output $comparisonOutput
+      if ($LASTEXITCODE -ne 0) { throw "campaign baseline comparison failed" }
+    } finally {
+      Pop-Location
     }
   }
 }

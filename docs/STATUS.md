@@ -38,8 +38,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Profile the isolated 128-ciphertext decoder and separate curve/scalar unmarshalling, byte parsing/copying, allocation, and garbage-collection costs.
-2. Compare one decoder process with seven affinity-limited processes, then benchmark deterministic one-worker versus two-worker decoding without changing protocol identities.
+1. Run the optimized-image cross-AZ `n=4/n=7` campaign through the unattended M3 wrapper and generate its matched comparison against the 2026-07-06 baseline.
+2. Inspect the automatic p50/p95 comparison before deciding whether any further Merge and Batch Planning optimization is justified.
 3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.

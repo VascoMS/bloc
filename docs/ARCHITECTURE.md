@@ -39,6 +39,61 @@ into BLOC encrypted payloads and exposes mock placeholder candidates. Sidecars
 then include the encrypted payloads; they do not independently re-encrypt the
 same public transaction.
 
+## Post-ACS Merge And Batch Planning
+
+The Merge and Batch Planning phase is the deterministic bridge between an ACS
+decision and share generation. Every correct operator executes the same five
+stages locally over the same ordered ACS output. No network exchange occurs
+inside this phase.
+
+1. **ACS output decoding.** ACS returns accepted
+   proposer payloads as protobuf bytes because consensus treats proposals as
+   opaque application data. `DecodeList` parses each payload into an inclusion
+   list and validates its basic structure. It does not hash the list.
+2. **Agreed-set construction.** `NewAgreedSet` computes each
+   accepted inclusion-list hash exactly once using the existing canonical JSON
+   definition. It sorts lists by hash and then operator ID, counts their items,
+   and hashes that canonical list sequence into the slot's agreed-set identity.
+3. **Deterministic merge.** The merge validates
+   ciphertext presence, gas, decimal effective fee, and the claimed SHA-256
+   ciphertext hash. It parses each effective fee once and carries the parsed
+   integer through sorting. An exact repeated placeholder with the same claimed
+   hash, ciphertext, and metadata uses a fast path after the first validation;
+   conflicting duplicates still take the full validation path. Unique
+   candidates are ordered by effective fee descending, sender, nonce, and hash,
+   then bounded by `BMax`, transaction-count, and gas limits. The selected order,
+   gas total, skipped count, and merged-set hash are protocol outputs.
+4. **Ciphertext decoding.** `DecodeBatch`
+   serially parses each selected outer ciphertext and its BTE capsule. The
+   capsule contains seven encoded curve points and two encoded scalars, which
+   are reconstructed through the Kyber/Kilic suite. The result is a
+   `DecodedBatch` pairing decoded objects with the accepted canonical wire
+   encodings. Structural, length, and trailing-byte errors fail the slot; no
+   partially decoded batch is planned.
+5. **Batch planning.** `PlanDecodedBatch` validates the
+   decoded metadata, chooses deterministic Opt-2 sub-batches, and separates
+   repeated puncture indices. It derives `BatchID` directly from the already
+   accepted ordered encodings, including each encoding's length, instead of
+   serializing every curve object a second time. The resulting `BatchID`,
+   `alpha`, original positions, and sub-batch membership must match at every
+   operator before share generation begins.
+
+The retained implementation deliberately preserves the original wire formats,
+JSON hash definitions, first-winner merge behavior, ordering rules, gas limits,
+and BTE plan identities. The optimizations remove repeated work within those
+boundaries; they do not change the protocol algorithm. Ciphertext decoding is
+currently serial, with no worker pool, object pooling, unsafe byte conversion,
+or decoded-ciphertext cache. Empty selected sets complete the list and merge
+boundaries, record zero ciphertext-planning duration, and materialize an empty
+result without constructing a `BatchPlan`.
+
+For observability, these stages map respectively to the exported
+`acs_output_decode_us`, `agreed_set_us`, `merge_us`, `ciphertext_decode_us`, and
+`batch_plan_us` fields. Those integer fields record microseconds in evaluator
+artifacts; Prometheus exposes the same bounded stage concepts using seconds.
+Their durations must add up to the enclosing Merge and Batch Planning duration
+within the measurement tolerance documented in `docs/VALIDATION.md`.
+
 ## Cross-Module Invariants
 
 - The accepted encrypted set must be deterministic across honest operators.

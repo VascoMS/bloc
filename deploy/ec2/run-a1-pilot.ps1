@@ -41,6 +41,12 @@ if ([string]::IsNullOrWhiteSpace($ExperimentId)) {
 if (-not $ExperimentId.StartsWith("bloc-ec2-")) {
   throw "ExperimentId must start with 'bloc-ec2-' so generated IAM names match the scoped deploy policy."
 }
+if ($NodeCount -lt 1 -or $NodeCount -gt 10) {
+  throw "NodeCount must be between 1 and 10 for the current EC2 test bed; received $NodeCount."
+}
+if ($BatchSizes.Count -eq 0 -or @($BatchSizes | Where-Object { $_ -lt 1 -or $_ -gt 128 }).Count -gt 0) {
+  throw "BatchSizes must contain values between 1 and BMax=128; received $($BatchSizes -join ',')."
+}
 if ($AvailabilityZones.Count -eq 0) {
   $AvailabilityZones = @($AvailabilityZone)
 } else {

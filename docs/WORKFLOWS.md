@@ -255,6 +255,29 @@ For focused Merge + Plan attribution on the optimized image, use:
   -AutoApprovePlan
 ```
 
+For unattended repeated collection, use the explicit CSV parameters rather
+than passing PowerShell arrays through `powershell -File`:
+
+```powershell
+.\deploy\ec2\run-m3-cross-az.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -NodeCountsCsv "4,7" `
+  -BatchSizesCsv "8,32,128" `
+  -CampaignId "m3-cross-az-synthetic-<label>" `
+  -BaselineCampaignRoot ".\results\ec2\<baseline-campaign>" `
+  -Unattended
+```
+
+`-Unattended` removes both approval prompts but does not bypass Terraform's
+resource allowlist, instance-count and batch-size bounds, phase acceptance, or
+cleanup checks. When `-BaselineCampaignRoot` is supplied, the completed campaign
+automatically writes `comparison/comparison.csv`, `comparison/REPORT.md`, and a
+before/after p50 chart. Canonical M3 wrappers reject node counts outside
+`4,7,10` and batch sizes outside `8,32,128` before invoking AWS; the lower-level
+phase runner independently rejects more than 10 operators and batches above
+`BMax=128`.
+
 The wrapper refuses relevant uncommitted sources, builds one image, and runs
 Compute Flex `n=4`, Compute Flex `n=7`, and T3 burstable `n=7`
 sequentially in one AZ. Each phase follows the shared three-block batch order,

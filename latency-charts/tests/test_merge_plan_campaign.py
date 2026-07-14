@@ -26,6 +26,7 @@ def write_campaign(root: Path) -> None:
                     decode = batch * 100 + run + node
                     rows.append({
                         "run_id": f"{phase['id']}-b{batch}-r{run}",
+                        "phase": "measured",
                         "success": True,
                         "consistent": True,
                         "node_id": node,
@@ -87,4 +88,14 @@ def test_analyze_campaign_rejects_substage_mismatch(tmp_path: Path) -> None:
     frame.loc[0, "merge_plan_us"] += 21
     frame.to_csv(path, index=False)
     with pytest.raises(ValueError, match="additivity"):
+        analyze_campaign(tmp_path)
+
+
+def test_analyze_campaign_does_not_count_warmups_as_measurements(tmp_path: Path) -> None:
+    write_campaign(tmp_path)
+    path = tmp_path / "compute-flex-n4" / "node_measurements.csv"
+    frame = pd.read_csv(path)
+    frame.loc[frame["run_id"] == "compute-flex-n4-b8-r0", "phase"] = "warmup"
+    frame.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="exactly 30 runs"):
         analyze_campaign(tmp_path)

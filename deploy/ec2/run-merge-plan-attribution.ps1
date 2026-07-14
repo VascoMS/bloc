@@ -11,6 +11,7 @@ param(
   [string]$CampaignId = "",
   [decimal]$CostCeilingUSD = 5.00,
   [switch]$AutoApprovePlan,
+  [switch]$ResumeCompletedPhases,
   [switch]$KeepResourcesOnFailure
 )
 
@@ -126,7 +127,8 @@ function Assert-PhaseArtifacts {
   param([string]$Path, [object]$Phase)
   $manifest = Get-Content -Raw (Join-Path $Path "manifest.json") | ConvertFrom-Json
   if ($manifest.status -ne "complete") { throw "$($Phase.id) did not complete" }
-  $rows = Import-Csv (Join-Path $Path "node_measurements.csv")
+  $rows = @(Import-Csv (Join-Path $Path "node_measurements.csv") | Where-Object { $_.phase -eq "measured" })
+  if ($rows.Count -eq 0) { throw "$($Phase.id) has no measured node rows" }
   $required = @("acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "merge_plan_us", "selected_ciphertexts", "metrics_finalized", "measurement_block")
   foreach ($column in $required) {
     if (-not ($rows[0].PSObject.Properties.Name -contains $column)) { throw "$($Phase.id) is missing $column" }
@@ -261,6 +263,37 @@ try {
   foreach ($phase in $phases) {
     $operatorHourlyCap = if ($phase.operator -eq $BurstableInstanceType) { [decimal]0.05 } else { [decimal]0.24 }
     $phaseHourlyCap = ([decimal]$phase.nodes * $operatorHourlyCap) + [decimal]0.05
+    $phasePath = Join-Path $campaignRoot $phase.id
+    if ($ResumeCompletedPhases -and (Test-Path $phasePath)) {
+      Write-Host "Resuming accepted phase artifacts: $($phase.id)"
+      $phaseManifest = Assert-PhaseArtifacts $phasePath $phase
+      if ([int]$phaseManifest.node_count -ne $phase.nodes -or [string]$phaseManifest.operator_instance_type -ne $phase.operator) {
+        throw "$($phase.id) resume metadata does not match the requested topology"
+      }
+      $digest = [string]$phaseManifest.terraform.docker_image_digest
+      if ([string]::IsNullOrWhiteSpace($expectedDigest)) { $expectedDigest = $digest }
+      if ($digest -ne $expectedDigest) { throw "$($phase.id) image digest differs from accepted phases" }
+      $phaseStartedAt = [datetime]$phaseManifest.started_at
+      $phaseFinishedAt = [datetime]$phaseManifest.finished_at
+      $phaseHours = [decimal]($phaseFinishedAt - $phaseStartedAt).TotalHours
+      $phaseEstimatedCost = $phaseHours * $phaseHourlyCap
+      $estimatedCostUSD += $phaseEstimatedCost
+      $phasesCompleted += [ordered]@{
+        id = $phase.id
+        path = $phase.id
+        nodes = $phase.nodes
+        operator_instance_type = $phase.operator
+        controller_instance_type = $ControllerInstanceType
+        image_digest = $digest
+        started_at = $phaseStartedAt.ToUniversalTime().ToString("o")
+        finished_at = $phaseFinishedAt.ToUniversalTime().ToString("o")
+        duration_minutes = [Math]::Round(($phaseFinishedAt - $phaseStartedAt).TotalMinutes, 2)
+        conservative_estimated_cost_usd = [Math]::Round($phaseEstimatedCost, 4)
+        resumed_from_completed_artifacts = $true
+      }
+      Write-CampaignManifest "in-progress" $gitCommit $imageTag $goVersion
+      continue
+    }
     $phaseWorstCaseCost = [decimal]1.5 * $phaseHourlyCap
     if (($estimatedCostUSD + $phaseWorstCaseCost) -gt $CostCeilingUSD) {
       throw "Conservative cost projection would exceed $CostCeilingUSD USD; refusing to launch $($phase.id)."
@@ -295,7 +328,6 @@ try {
     & $runner @phaseArgs
     if ($LASTEXITCODE -ne 0) { throw "$($phase.id) runner failed" }
 
-    $phasePath = Join-Path $campaignRoot $phase.id
     if (Test-Path $phasePath) { throw "phase artifact path already exists: $phasePath" }
     Move-Item -LiteralPath $sourcePath -Destination $phasePath
     $phaseManifest = Assert-PhaseArtifacts $phasePath $phase

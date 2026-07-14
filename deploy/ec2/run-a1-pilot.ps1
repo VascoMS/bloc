@@ -374,6 +374,9 @@ function Merge-CsvOutputs {
       if (-not (Test-Path $source)) { throw "missing scenario output: $source" }
       foreach ($row in (Import-Csv $source)) {
         $row | Add-Member -NotePropertyName measurement_block -NotePropertyValue $scenario.block -Force
+        if ($RepetitionBlocks -gt 1 -and $row.PSObject.Properties.Name -contains "run_id") {
+          $row.run_id = "block-$($scenario.block)-$($row.run_id)"
+        }
         $mergedRows += $row
       }
     }

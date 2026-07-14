@@ -22,7 +22,7 @@ SUBSTAGES = [
 ]
 STAGES = ["merge_plan_us", *SUBSTAGES]
 REQUIRED_COLUMNS = {
-    "run_id", "success", "consistent", "node_id", "critical_node",
+    "run_id", "phase", "success", "consistent", "node_id", "critical_node",
     "metrics_finalized", "selected_ciphertexts", "measurement_block", *STAGES,
 }
 
@@ -50,6 +50,9 @@ def _load_phase(root: Path, phase: dict) -> pd.DataFrame:
     missing = REQUIRED_COLUMNS - set(frame.columns)
     if missing:
         raise ValueError(f"{phase['id']} is missing columns: {sorted(missing)}")
+    frame = frame[frame["phase"] == "measured"].copy()
+    if frame.empty:
+        raise ValueError(f"{phase['id']} has no measured node rows")
     for column in ["success", "consistent", "critical_node", "metrics_finalized"]:
         frame[column] = _as_bool(frame[column])
     numeric = ["node_id", "selected_ciphertexts", "measurement_block", *STAGES]

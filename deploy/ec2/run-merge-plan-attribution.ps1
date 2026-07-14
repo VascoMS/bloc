@@ -4,8 +4,8 @@ param(
   [string]$AwsProfile = "bloc",
   [string]$AwsRegion = "us-east-1",
   [string]$AvailabilityZone = "us-east-1a",
-  [string]$FixedInstanceType = "c7i.large",
-  [string]$FixedFallbackInstanceType = "c6i.large",
+  [string]$ComputeFlexInstanceType = "c7i-flex.large",
+  [string]$ComputeFlexFallbackInstanceType = "m7i-flex.large",
   [string]$BurstableInstanceType = "t3.small",
   [string]$ControllerInstanceType = "t3.small",
   [string]$CampaignId = "",
@@ -96,6 +96,21 @@ function Test-InstanceOffering {
     "--output", "text"
   )
   return -not [string]::IsNullOrWhiteSpace($value) -and $value -ne "None"
+}
+
+function Assert-FreeTierEligible {
+  param([string]$InstanceType)
+  $eligible = Get-AwsText @(
+    "ec2", "describe-instance-types",
+    "--profile", $AwsProfile,
+    "--region", $AwsRegion,
+    "--instance-types", $InstanceType,
+    "--query", "InstanceTypes[0].FreeTierEligible",
+    "--output", "text"
+  )
+  if ($eligible -ne "True") {
+    throw "$InstanceType is not Free Tier eligible; refusing to use it with this campaign."
+  }
 }
 
 function Test-PrometheusTargets {
@@ -206,14 +221,19 @@ try {
     "--query", "Quota.Value",
     "--output", "text"
   )
-  if ([double]$quotaText -lt 16) { throw "Standard On-Demand vCPU quota is $quotaText; fixed-n7 requires 16." }
+  if ([double]$quotaText -lt 16) { throw "Standard On-Demand vCPU quota is $quotaText; compute-flex-n7 requires 16." }
 
-  if (-not (Test-InstanceOffering $FixedInstanceType)) {
-    if (Test-InstanceOffering $FixedFallbackInstanceType) {
-      Write-Warning "$FixedInstanceType is not offered in $AvailabilityZone; using $FixedFallbackInstanceType."
-      $FixedInstanceType = $FixedFallbackInstanceType
+  Assert-FreeTierEligible $ComputeFlexInstanceType
+  Assert-FreeTierEligible $ComputeFlexFallbackInstanceType
+  Assert-FreeTierEligible $BurstableInstanceType
+  Assert-FreeTierEligible $ControllerInstanceType
+
+  if (-not (Test-InstanceOffering $ComputeFlexInstanceType)) {
+    if (Test-InstanceOffering $ComputeFlexFallbackInstanceType) {
+      Write-Warning "$ComputeFlexInstanceType is not offered in $AvailabilityZone; using $ComputeFlexFallbackInstanceType."
+      $ComputeFlexInstanceType = $ComputeFlexFallbackInstanceType
     } else {
-      throw "Neither $FixedInstanceType nor $FixedFallbackInstanceType is offered in $AvailabilityZone."
+      throw "Neither $ComputeFlexInstanceType nor $ComputeFlexFallbackInstanceType is offered in $AvailabilityZone."
     }
   }
   if (-not (Test-InstanceOffering $BurstableInstanceType)) {
@@ -232,8 +252,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "could not capture the image builder Go version" }
 
   $phases = @(
-    [pscustomobject]@{ id = "fixed-n4"; nodes = 4; operator = $FixedInstanceType },
-    [pscustomobject]@{ id = "fixed-n7"; nodes = 7; operator = $FixedInstanceType },
+    [pscustomobject]@{ id = "compute-flex-n4"; nodes = 4; operator = $ComputeFlexInstanceType },
+    [pscustomobject]@{ id = "compute-flex-n7"; nodes = 7; operator = $ComputeFlexInstanceType },
     [pscustomobject]@{ id = "burstable-n7"; nodes = 7; operator = $BurstableInstanceType }
   )
   $ecrTag = ($gitCommit + "-" + $CampaignId)

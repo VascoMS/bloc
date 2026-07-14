@@ -106,8 +106,8 @@ def _comparisons(summary: pd.DataFrame) -> pd.DataFrame:
     critical = summary[summary["scope"] == "critical-node"].set_index(["phase", "batch", "stage"])
     rows = []
     pairs = [
-        ("fixed-n7_vs_fixed-n4", "fixed-n4", "fixed-n7"),
-        ("burstable-n7_vs_fixed-n7", "fixed-n7", "burstable-n7"),
+        ("compute-flex-n7_vs_compute-flex-n4", "compute-flex-n4", "compute-flex-n7"),
+        ("burstable-n7_vs_compute-flex-n7", "compute-flex-n7", "burstable-n7"),
     ]
     for label, baseline, candidate in pairs:
         for batch in [8, 32, 128]:
@@ -129,6 +129,25 @@ def _comparisons(summary: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _block_summaries(measurements: pd.DataFrame) -> pd.DataFrame:
+    critical = measurements[measurements["critical_node"]]
+    rows = []
+    keys = ["phase", "instance_type", "nodes", "batch", "measurement_block"]
+    for config, group in critical.groupby(keys, sort=True):
+        for stage in ["ciphertext_decode_us", "merge_plan_us"]:
+            values = group[stage]
+            rows.append({
+                **dict(zip(keys, config)),
+                "stage": stage,
+                "count": len(values),
+                "p50_us": values.quantile(0.50, interpolation="linear"),
+                "p95_us": values.quantile(0.95, interpolation="linear"),
+                "min_us": values.min(),
+                "max_us": values.max(),
+            })
+    return pd.DataFrame(rows)
+
+
 def _save_figure(fig: plt.Figure, output: Path, name: str) -> None:
     fig.tight_layout()
     fig.savefig(output / f"{name}.png", dpi=180)
@@ -138,11 +157,11 @@ def _save_figure(fig: plt.Figure, output: Path, name: str) -> None:
 
 def _charts(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> None:
     critical = measurements[measurements["critical_node"]]
-    attribution = critical[critical["phase"] == "fixed-n7"].groupby("batch")[SUBSTAGES].median()
+    attribution = critical[critical["phase"] == "compute-flex-n7"].groupby("batch")[SUBSTAGES].median()
     fig, ax = plt.subplots(figsize=(9, 5))
     attribution.plot(kind="bar", stacked=True, ax=ax)
     ax.set_ylabel("Median latency (us)")
-    ax.set_title("Fixed n=7 Merge + Plan substage attribution")
+    ax.set_title("Compute Flex n=7 Merge + Plan substage attribution")
     ax.legend(title="Substage", fontsize=8)
     _save_figure(fig, output, "merge-plan-substages")
 
@@ -186,7 +205,7 @@ def _charts(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> 
     _save_figure(fig, output, "node-skew")
 
     per_node = measurements[
-        (measurements["phase"] == "fixed-n7") & (measurements["batch"] == 128)
+        (measurements["phase"] == "compute-flex-n7") & (measurements["batch"] == 128)
     ]
     node_ids = sorted(per_node["node_id"].unique())
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -197,13 +216,13 @@ def _charts(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> 
     )
     ax.set_xlabel("Operator node")
     ax.set_ylabel("Ciphertext decode latency (us)")
-    ax.set_title("Fixed n=7 batch-128 per-node distributions")
+    ax.set_title("Compute Flex n=7 batch-128 per-node distributions")
     _save_figure(fig, output, "per-node-distributions")
 
     instance = summary[
         (summary["scope"] == "critical-node")
         & (summary["stage"] == "merge_plan_us")
-        & summary["phase"].isin(["fixed-n7", "burstable-n7"])
+        & summary["phase"].isin(["compute-flex-n7", "burstable-n7"])
     ].pivot(index="batch", columns="phase", values="p50_us")
     fig, ax = plt.subplots(figsize=(8, 5))
     instance.plot(kind="bar", ax=ax)
@@ -212,38 +231,50 @@ def _charts(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> 
     _save_figure(fig, output, "instance-class-comparison")
 
 
-def _report(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> None:
+def _report(
+    measurements: pd.DataFrame,
+    summary: pd.DataFrame,
+    block_summary: pd.DataFrame,
+    output: Path,
+) -> None:
     critical = summary[summary["scope"] == "critical-node"].set_index(["phase", "batch", "stage"])
-    fixed_decode = critical.loc[("fixed-n7", 128, "ciphertext_decode_us"), "p50_us"]
-    fixed_total = critical.loc[("fixed-n7", 128, "merge_plan_us"), "p50_us"]
-    fixed_n4 = critical.loc[("fixed-n4", 128, "merge_plan_us"), "p50_us"]
+    flex_decode = critical.loc[("compute-flex-n7", 128, "ciphertext_decode_us"), "p50_us"]
+    flex_total = critical.loc[("compute-flex-n7", 128, "merge_plan_us"), "p50_us"]
+    flex_n4 = critical.loc[("compute-flex-n4", 128, "merge_plan_us"), "p50_us"]
     burstable = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p50_us"]
     decode_medians = [
-        critical.loc[("fixed-n7", batch, "ciphertext_decode_us"), "p50_us"]
+        critical.loc[("compute-flex-n7", batch, "ciphertext_decode_us"), "p50_us"]
         for batch in [8, 32, 128]
     ]
     per_ciphertext = [value / batch for value, batch in zip(decode_medians, [8, 32, 128])]
     per_ciphertext_spread = max(per_ciphertext) / min(per_ciphertext)
     scaling_assessment = "approximately linear" if per_ciphertext_spread <= 1.25 else "not linear within a 25% per-ciphertext band"
-    node_ratio = fixed_total / fixed_n4
+    node_ratio = flex_total / flex_n4
     node_assessment = "material" if abs(node_ratio - 1) >= 0.10 else "not material under a 10% threshold"
-    fixed_p95 = critical.loc[("fixed-n7", 128, "merge_plan_us"), "p95_us"]
+    flex_p95 = critical.loc[("compute-flex-n7", 128, "merge_plan_us"), "p95_us"]
     burstable_p95 = critical.loc[("burstable-n7", 128, "merge_plan_us"), "p95_us"]
-    local_delta_percent = 100 * (fixed_decode - 457000) / 457000
+    local_delta_percent = 100 * (flex_decode - 457000) / 457000
     local_assessment = "reproduced within 10%" if abs(local_delta_percent) <= 10 else "not reproduced within 10%"
+    flex_blocks = block_summary[
+        (block_summary["phase"] == "compute-flex-n7")
+        & (block_summary["batch"] == 128)
+        & (block_summary["stage"] == "merge_plan_us")
+    ]["p50_us"]
+    block_drift_ratio = flex_blocks.max() / flex_blocks.min()
     skew = measurements.groupby(["phase", "batch", "run_id"])["merge_plan_us"].agg(
         lambda values: values.max() - values.min()
     )
     lines = [
         "# EC2 Merge/Plan Attribution Campaign", "",
         "## Scope", "",
-        "Same-AZ, synthetic 256-byte transactions, five warmups, and 30 measured runs per batch. Headline statistics are p50 and p95; no p99 claim is made.", "",
+        "Same-AZ, synthetic 256-byte transactions, five warmups, and 30 measured runs per batch. C7i Flex is compute-optimized Flex capacity with a CPU baseline, not fixed-performance hardware. Headline statistics are p50 and p95; no p99 claim is made.", "",
         "## Answers", "",
-        f"- **Ciphertext decoding share:** at fixed n=7 and batch 128, decoding is {fixed_decode / 1000:.1f} ms p50, or {100 * fixed_decode / fixed_total:.1f}% of Merge + Plan.",
-        f"- **Decode scaling:** fixed n=7 p50 values for batches 8/32/128 are {decode_medians[0] / 1000:.1f}, {decode_medians[1] / 1000:.1f}, and {decode_medians[2] / 1000:.1f} ms. This is {scaling_assessment}; the max/min per-ciphertext cost ratio is {per_ciphertext_spread:.2f}x.",
-        f"- **Fixed n=7 versus n=4:** batch-128 Merge + Plan p50 changes from {fixed_n4 / 1000:.1f} ms to {fixed_total / 1000:.1f} ms ({node_ratio:.2f}x), which is {node_assessment}.",
-        f"- **T3 versus fixed at n=7:** batch-128 Merge + Plan p50 changes from {fixed_total / 1000:.1f} ms to {burstable / 1000:.1f} ms ({burstable / fixed_total:.2f}x). The p95/p50 ratio changes from {fixed_p95 / fixed_total:.2f}x to {burstable_p95 / burstable:.2f}x.",
-        f"- **Local reference:** EC2 fixed n=7 batch-128 decode differs from the contextual 457 ms local median by {local_delta_percent:+.1f}% and is {local_assessment}. The machines are not treated as directly comparable hardware baselines.",
+        f"- **Ciphertext decoding share:** at Compute Flex n=7 and batch 128, decoding is {flex_decode / 1000:.1f} ms p50, or {100 * flex_decode / flex_total:.1f}% of Merge + Plan.",
+        f"- **Decode scaling:** Compute Flex n=7 p50 values for batches 8/32/128 are {decode_medians[0] / 1000:.1f}, {decode_medians[1] / 1000:.1f}, and {decode_medians[2] / 1000:.1f} ms. This is {scaling_assessment}; the max/min per-ciphertext cost ratio is {per_ciphertext_spread:.2f}x.",
+        f"- **Compute Flex n=7 versus n=4:** batch-128 Merge + Plan p50 changes from {flex_n4 / 1000:.1f} ms to {flex_total / 1000:.1f} ms ({node_ratio:.2f}x), which is {node_assessment}.",
+        f"- **T3 versus Compute Flex at n=7:** batch-128 Merge + Plan p50 changes from {flex_total / 1000:.1f} ms to {burstable / 1000:.1f} ms ({burstable / flex_total:.2f}x). The p95/p50 ratio changes from {flex_p95 / flex_total:.2f}x to {burstable_p95 / burstable:.2f}x.",
+        f"- **Temporal drift:** Compute Flex n=7 batch-128 block p50 values span {block_drift_ratio:.2f}x from minimum to maximum.",
+        f"- **Local reference:** EC2 Compute Flex n=7 batch-128 decode differs from the contextual 457 ms local median by {local_delta_percent:+.1f}% and is {local_assessment}. The machines are not treated as directly comparable hardware baselines.",
         f"- **Node skew:** the median within-run Merge + Plan range is {skew.median() / 1000:.1f} ms; the maximum retained range is {skew.max() / 1000:.1f} ms.", "",
         "## Validity", "",
         "All retained observations passed success, consistency, finalized-metric, selected-count, complete-node, Prometheus-target, and 20 us substage-additivity checks. Outliers were retained.", "",
@@ -251,6 +282,7 @@ def _report(measurements: pd.DataFrame, summary: pd.DataFrame, output: Path) -> 
         "- merge-plan-measurements.csv: node-level observations and decode time per ciphertext",
         "- merge-plan-summary.csv: p50, p95, dispersion, and bounds",
         "- comparison.csv: fixed-size and instance-class comparisons",
+        "- measurement-block-summary.csv: temporal drift across the three balanced blocks",
         "- PNG and SVG charts: attribution, scaling, per-node distributions, skew, and instance-class comparison",
     ]
     (output / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -262,9 +294,9 @@ def analyze_campaign(campaign_root: Path, output: Path | None = None) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((campaign_root / "manifest.json").read_text(encoding="utf-8-sig"))
     phases = manifest.get("phases", [])
-    expected = {"fixed-n4", "fixed-n7", "burstable-n7"}
+    expected = {"compute-flex-n4", "compute-flex-n7", "burstable-n7"}
     if {phase.get("id") for phase in phases} != expected:
-        raise ValueError("campaign manifest must contain fixed-n4, fixed-n7, and burstable-n7")
+        raise ValueError("campaign manifest must contain compute-flex-n4, compute-flex-n7, and burstable-n7")
     digests = {phase.get("image_digest") for phase in phases}
     if len(digests) != 1 or None in digests or "" in digests:
         raise ValueError("all phases must record one identical non-empty image digest")
@@ -278,8 +310,10 @@ def analyze_campaign(campaign_root: Path, output: Path | None = None) -> Path:
     summary = _summaries(measurements)
     summary.to_csv(output / "merge-plan-summary.csv", index=False)
     _comparisons(summary).to_csv(output / "comparison.csv", index=False)
+    block_summary = _block_summaries(measurements)
+    block_summary.to_csv(output / "measurement-block-summary.csv", index=False)
     _charts(measurements, summary, output)
-    _report(measurements, summary, output)
+    _report(measurements, summary, block_summary, output)
     return output
 
 

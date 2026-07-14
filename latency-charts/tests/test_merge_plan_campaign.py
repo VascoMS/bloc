@@ -8,8 +8,8 @@ from bloc_latency_charts.merge_plan_campaign import analyze_campaign
 
 
 PHASES = [
-    {"id": "fixed-n4", "path": "fixed-n4", "nodes": 4, "operator_instance_type": "c7i.large"},
-    {"id": "fixed-n7", "path": "fixed-n7", "nodes": 7, "operator_instance_type": "c7i.large"},
+    {"id": "compute-flex-n4", "path": "compute-flex-n4", "nodes": 4, "operator_instance_type": "c7i-flex.large"},
+    {"id": "compute-flex-n7", "path": "compute-flex-n7", "nodes": 7, "operator_instance_type": "c7i-flex.large"},
     {"id": "burstable-n7", "path": "burstable-n7", "nodes": 7, "operator_instance_type": "t3.small"},
 ]
 
@@ -63,6 +63,7 @@ def test_analyze_campaign_writes_tables_report_and_charts(tmp_path: Path) -> Non
         "merge-plan-measurements.csv",
         "merge-plan-summary.csv",
         "comparison.csv",
+        "measurement-block-summary.csv",
         "REPORT.md",
         "merge-plan-substages.png",
         "ciphertext-decode-scaling.svg",
@@ -72,7 +73,7 @@ def test_analyze_campaign_writes_tables_report_and_charts(tmp_path: Path) -> Non
     ]
     assert all((output / name).exists() for name in expected)
     measurements = pd.read_csv(output / "merge-plan-measurements.csv")
-    assert set(measurements["phase"]) == {"fixed-n4", "fixed-n7", "burstable-n7"}
+    assert set(measurements["phase"]) == {"compute-flex-n4", "compute-flex-n7", "burstable-n7"}
     assert (measurements["decode_us_per_ciphertext"] > 0).all()
     report = (output / "REPORT.md").read_text(encoding="utf-8")
     assert "no p99 claim" in report
@@ -81,7 +82,7 @@ def test_analyze_campaign_writes_tables_report_and_charts(tmp_path: Path) -> Non
 
 def test_analyze_campaign_rejects_substage_mismatch(tmp_path: Path) -> None:
     write_campaign(tmp_path)
-    path = tmp_path / "fixed-n4" / "node_measurements.csv"
+    path = tmp_path / "compute-flex-n4" / "node_measurements.csv"
     frame = pd.read_csv(path)
     frame.loc[0, "merge_plan_us"] += 21
     frame.to_csv(path, index=False)

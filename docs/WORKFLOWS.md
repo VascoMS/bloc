@@ -256,7 +256,7 @@ For focused Merge + Plan attribution on the optimized image, use:
 ```
 
 The wrapper refuses relevant uncommitted sources, builds one image, and runs
-fixed-performance `n=4`, fixed-performance `n=7`, and burstable `n=7`
+Compute Flex `n=4`, Compute Flex `n=7`, and T3 burstable `n=7`
 sequentially in one AZ. Each phase follows the shared three-block batch order,
 records 30 samples per batch without restarting sidecars, destroys successful
 infrastructure, and must retain the same image digest. The final analysis

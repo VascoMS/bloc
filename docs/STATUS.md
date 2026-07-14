@@ -38,8 +38,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Commit the retained merge/plan optimization and EC2 attribution runner, then run the Merge/Plan attribution PowerShell campaign; its source guard intentionally refuses to build or allocate AWS resources from relevant uncommitted files.
-2. Use the resulting fixed-performance `n=4/n=7` and burstable `n=7` report to decide whether the roughly 457 ms local batch-128 decode result is primarily cryptographic work or host-class contention.
+1. Run the committed Merge/Plan attribution PowerShell campaign using Free-plan-eligible `c7i-flex.large` `n=4/n=7` and `t3.small` `n=7` phases; its source guard refuses to build or allocate AWS resources from relevant uncommitted files.
+2. Use the resulting Compute Flex and T3 report to decide whether the roughly 457 ms local batch-128 decode result is primarily cryptographic work or host-class contention. Treat C7i Flex as baseline-plus-burst capacity, not fixed-performance hardware, and inspect the three measurement blocks for temporal drift.
 3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.

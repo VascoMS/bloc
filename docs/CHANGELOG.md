@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-14 | `M3` | exact-image campaign resume | allow the Merge/Plan campaign to reuse a prebuilt local image and require its local image ID to match the resumed phase digest before allocating the next phase | preserve one-image attribution after runner-only commits and avoid spending Free-plan credits on an invalid comparison | `deploy/ec2/run-merge-plan-attribution.ps1` | PowerShell parser check and local Docker image inspection | resume n7 phases from the accepted `sha256:118f...` image |
+
 - 2026-07-14 | `M3` | blocked measurement identity and campaign resume | namespace merged evaluator run IDs by measurement block, exclude warmups from EC2 acceptance and analysis, and allow already-completed/cleaned phases to be validated and resumed without provisioning them again | preserve all 30 measurements per batch while avoiding repeated AWS allocation after an artifact-only validation failure | `deploy/ec2/run-a1-pilot.ps1`, `deploy/ec2/run-merge-plan-attribution.ps1`, `latency-charts/*` | PowerShell parser checks and latency-chart tests | resume the completed Compute Flex n=4 evidence, then run Compute Flex n=7 and T3 n=7 |
 
 Use this file for implementation-level changes that do not need a full decision record.

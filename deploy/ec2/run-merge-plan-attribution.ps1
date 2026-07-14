@@ -9,6 +9,7 @@ param(
   [string]$BurstableInstanceType = "t3.small",
   [string]$ControllerInstanceType = "t3.small",
   [string]$CampaignId = "",
+  [string]$PrebuiltCampaignImageTag = "",
   [decimal]$CostCeilingUSD = 5.00,
   [switch]$AutoApprovePlan,
   [switch]$ResumeCompletedPhases,
@@ -40,6 +41,7 @@ $estimatedCostUSD = [decimal]0
 $campaignCommands = [System.Collections.Generic.List[string]]::new()
 $gitCommit = ""
 $imageTag = ""
+$localImageID = ""
 $goVersion = ""
 
 function Invoke-Required {
@@ -247,9 +249,19 @@ try {
     throw "The conservative three-phase estimate is $conservativeProjectedCost USD, above the configured ceiling of $CostCeilingUSD USD."
   }
 
-  $imageTag = "bloc-node:$CampaignId-$gitCommit"
-  $campaignCommands.Add("docker build -f bloc-node/Dockerfile -t $imageTag .")
-  Invoke-Required { docker build -f bloc-node/Dockerfile -t $imageTag . } "build one campaign image"
+  if ([string]::IsNullOrWhiteSpace($PrebuiltCampaignImageTag)) {
+    $imageTag = "bloc-node:$CampaignId-$gitCommit"
+    $campaignCommands.Add("docker build -f bloc-node/Dockerfile -t $imageTag .")
+    Invoke-Required { docker build -f bloc-node/Dockerfile -t $imageTag . } "build one campaign image"
+  } else {
+    $imageTag = $PrebuiltCampaignImageTag
+    $campaignCommands.Add("docker image inspect $imageTag")
+    Invoke-Required { docker image inspect $imageTag | Out-Null } "verify prebuilt campaign image"
+  }
+  $localImageID = (docker image inspect $imageTag --format '{{.Id}}').Trim()
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($localImageID)) {
+    throw "could not capture the local campaign image ID"
+  }
   $goVersion = ((docker run --rm --entrypoint go golang:1.25-bookworm version | Out-String).Trim())
   if ($LASTEXITCODE -ne 0) { throw "could not capture the image builder Go version" }
 
@@ -273,6 +285,9 @@ try {
       $digest = [string]$phaseManifest.terraform.docker_image_digest
       if ([string]::IsNullOrWhiteSpace($expectedDigest)) { $expectedDigest = $digest }
       if ($digest -ne $expectedDigest) { throw "$($phase.id) image digest differs from accepted phases" }
+      if ($localImageID -ne $expectedDigest) {
+        throw "local prebuilt image ID $localImageID differs from resumed digest $expectedDigest"
+      }
       $phaseStartedAt = [datetime]$phaseManifest.started_at
       $phaseFinishedAt = [datetime]$phaseManifest.finished_at
       $phaseHours = [decimal]($phaseFinishedAt - $phaseStartedAt).TotalHours

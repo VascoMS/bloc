@@ -22,7 +22,8 @@ func EncodeList(list InclusionList) ([]byte, error) {
 	return proto.Marshal(msg)
 }
 
-// DecodeList parses an ACS proposal payload and recomputes its stable hash.
+// DecodeList parses an ACS proposal payload. NewAgreedSet assigns canonical
+// list hashes once all accepted proposals have been decoded.
 func DecodeList(data []byte) (InclusionList, error) {
 	var msg blocv1.InclusionList
 	if err := proto.Unmarshal(data, &msg); err != nil {
@@ -43,7 +44,6 @@ func DecodeList(data []byte) (InclusionList, error) {
 		}
 		list.Items = append(list.Items, placeholder)
 	}
-	list.Hash = HashInclusionList(list)
 	return list, nil
 }
 

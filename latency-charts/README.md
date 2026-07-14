@@ -29,6 +29,7 @@ The initial chart set contains:
 
 - p50/p95 end-to-end latency versus batch size,
 - mean sequential critical-path stage breakdown,
+- optional merge/plan substage attribution when all five columns are present,
 - raw end-to-end latency boxplots with individual observations.
 
 The stage stack excludes `share_generation_us` and

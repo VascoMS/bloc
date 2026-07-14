@@ -8,7 +8,7 @@ import pytest
 
 from bloc_latency_charts.charts import generate_all
 from bloc_latency_charts.cli import find_repository_root, output_directory
-from bloc_latency_charts.data import load_experiment, scaling_summary, validate_stage_additivity
+from bloc_latency_charts.data import load_experiment, scaling_summary, validate_merge_plan_additivity, validate_stage_additivity
 
 
 HEADER = [
@@ -100,6 +100,31 @@ def test_generate_all_supports_libp2p_only_campaign(tmp_path: Path) -> None:
     paths = generate_all(load_experiment(tmp_path), output)
     assert len(paths) == 6
     assert all(path.stat().st_size > 100 for path in paths)
+
+
+def test_generate_all_adds_merge_plan_attribution_when_available(tmp_path: Path) -> None:
+    write_fixture(tmp_path)
+    source = tmp_path / "run_measurements.csv"
+    with source.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    merge_index = rows[0].index("merge_plan_us")
+    attribution = [100, 200, 300, 400]
+    rows[0][merge_index + 1:merge_index + 1] = [
+        "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us",
+    ]
+    for row in rows[1:]:
+        merge_total = int(row[merge_index])
+        values = attribution + [merge_total - sum(attribution)]
+        row[merge_index + 1:merge_index + 1] = [str(value) for value in values]
+    with source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerows(rows)
+
+    experiment = load_experiment(tmp_path)
+    validate_merge_plan_additivity(experiment.runs)
+    paths = generate_all(experiment, tmp_path / "attribution-charts")
+    assert len(paths) == 8
+    assert any(path.name == "merge-plan-breakdown.png" for path in paths)
 
 
 def test_missing_columns_are_reported(tmp_path: Path) -> None:

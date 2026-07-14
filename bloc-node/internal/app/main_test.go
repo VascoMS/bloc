@@ -161,7 +161,7 @@ func TestInclusionListProtoRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode inclusion list: %v", err)
 	}
-	if out.Hash != list.Hash || len(out.Items) != len(list.Items) {
+	if out.Hash != "" || inclusion.HashInclusionList(out) != list.Hash || len(out.Items) != len(list.Items) {
 		t.Fatalf("decoded list mismatch: %+v", out)
 	}
 }
@@ -225,10 +225,11 @@ func TestMergeInclusionListsDeduplicatesAndSkipsInvalid(t *testing.T) {
 	invalidGas := testPlaceholder("invalid-gas", 0, "2", "0x2", 0)
 	invalidHash := testPlaceholder("invalid-hash", 21000, "3", "0x3", 0)
 	invalidHash.Hash = "deadbeef"
+	invalidFee := testPlaceholder("invalid-fee", 21000, "not-a-number", "0x4", 0)
 
 	merged := inclusion.Merge(1, []InclusionList{
 		{Slot: 1, OperatorID: 0, Items: []EncryptedPlaceholder{valid, invalidGas}},
-		{Slot: 1, OperatorID: 1, Items: []EncryptedPlaceholder{duplicate, invalidHash}},
+		{Slot: 1, OperatorID: 1, Items: []EncryptedPlaceholder{duplicate, invalidHash, invalidFee}},
 	}, BlockspaceConfig{}, 10)
 
 	if len(merged.Items) != 1 {
@@ -236,6 +237,43 @@ func TestMergeInclusionListsDeduplicatesAndSkipsInvalid(t *testing.T) {
 	}
 	if merged.Items[0].Hash != valid.Hash {
 		t.Fatalf("selected hash = %s, want %s", merged.Items[0].Hash, valid.Hash)
+	}
+}
+
+func TestMergeInclusionListsConflictingDuplicateKeepsFirstWinner(t *testing.T) {
+	first := testPlaceholder("shared", 21000, "10", "0x1", 0)
+	conflicting := first
+	conflicting.Gas = 42000
+
+	merged := inclusion.Merge(1, []InclusionList{
+		{Slot: 1, OperatorID: 0, Items: []EncryptedPlaceholder{first}},
+		{Slot: 1, OperatorID: 1, Items: []EncryptedPlaceholder{conflicting}},
+	}, BlockspaceConfig{}, 10)
+
+	if len(merged.Items) != 1 || merged.Items[0].Gas != first.Gas {
+		t.Fatalf("conflicting duplicate changed first-winner semantics: %+v", merged.Items)
+	}
+}
+
+func TestDecodeAcceptedListsHashesOnlyDuringCanonicalization(t *testing.T) {
+	list := InclusionList{Slot: 3, OperatorID: 2, Items: []EncryptedPlaceholder{
+		testPlaceholder("one", 21000, "7", "0x1", 0),
+	}}
+	encoded, err := inclusion.EncodeList(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lists, err := decodeAcceptedLists([]hbbft.AcceptedBatch{{ProposerID: 2, Batch: encoded}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lists[0].Hash != "" {
+		t.Fatalf("decoded list was hashed before agreed-set construction: %s", lists[0].Hash)
+	}
+	agreed := inclusion.NewAgreedSet(3, lists)
+	want := inclusion.HashInclusionList(list)
+	if agreed.Lists[0].Hash != want {
+		t.Fatalf("canonical hash = %s, want %s", agreed.Lists[0].Hash, want)
 	}
 }
 

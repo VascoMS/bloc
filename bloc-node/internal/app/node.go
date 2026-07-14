@@ -528,34 +528,34 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		return
 	}
 	decisionAt := time.Now()
-	lists := make([]InclusionList, 0, len(out.OrderedBatches))
-	for _, accepted := range out.OrderedBatches {
-		list, err := inclusion.DecodeList(accepted.Batch)
-		if err != nil {
-			log.Printf("decode accepted inclusion list from %d: %v", accepted.ProposerID, err)
-			n.markSlotFailed("decode")
-			return
-		}
-		list.Hash = inclusion.HashInclusionList(list)
-		lists = append(lists, list)
-	}
-	agreed := inclusion.NewAgreedSet(n.id, lists)
-	merged := inclusion.Merge(n.id, lists, n.cfg.Blockspace, n.cfg.BMax)
-	var encrypted []be.Ciphertext
-	for _, item := range merged.Items {
-		ct, err := n.cluster.UnmarshalCiphertext(item.Ciphertext)
-		if err != nil {
-			log.Printf("decode ciphertext %s: %v", item.Hash, err)
-			n.markSlotFailed("decode")
-			return
-		}
-		encrypted = append(encrypted, ct)
-	}
-	if len(encrypted) == 0 {
-		n.finishEmptyMaterializedSet(decisionAt, agreed, merged)
+	lists, err := decodeAcceptedLists(out.OrderedBatches)
+	if err != nil {
+		log.Printf("%v", err)
+		n.markSlotFailed("decode")
 		return
 	}
-	plan, err := n.cluster.PlanBatch(encrypted)
+	decodedAt := time.Now()
+	agreed := inclusion.NewAgreedSet(n.id, lists)
+	agreedAt := time.Now()
+	merged := inclusion.Merge(n.id, lists, n.cfg.Blockspace, n.cfg.BMax)
+	mergedAt := time.Now()
+	encodedCiphertexts := make([][]byte, 0, len(merged.Items))
+	for _, item := range merged.Items {
+		encodedCiphertexts = append(encodedCiphertexts, item.Ciphertext)
+	}
+	decodedBatch, err := n.cluster.DecodeBatch(encodedCiphertexts)
+	if err != nil {
+		log.Printf("decode ciphertext batch: %v", err)
+		n.markSlotFailed("decode")
+		return
+	}
+	encrypted := decodedBatch.Ciphertexts()
+	ciphertextsAt := time.Now()
+	if len(encrypted) == 0 {
+		n.finishEmptyMaterializedSet(decisionAt, decodedAt, agreedAt, mergedAt, ciphertextsAt, agreed, merged)
+		return
+	}
+	plan, err := n.cluster.PlanDecodedBatch(decodedBatch)
 	if err != nil {
 		log.Printf("plan batch: %v", err)
 		n.markSlotFailed("planning")
@@ -569,6 +569,10 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	}
 	n.plan = plan
 	n.metricTimes.acsDecision = decisionAt
+	n.metricTimes.acsOutputDecoded = decodedAt
+	n.metricTimes.agreedSetDone = agreedAt
+	n.metricTimes.mergeDone = mergedAt
+	n.metricTimes.ciphertextsDecoded = ciphertextsAt
 	n.metricTimes.planDone = planAt
 	n.metricTimes.shareGenerationStart = planAt
 	n.material = MaterializedTransactionSet{
@@ -635,9 +639,21 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	n.tryCombine()
 }
 
+func decodeAcceptedLists(batches []hbbft.AcceptedBatch) ([]InclusionList, error) {
+	lists := make([]InclusionList, 0, len(batches))
+	for _, accepted := range batches {
+		list, err := inclusion.DecodeList(accepted.Batch)
+		if err != nil {
+			return nil, fmt.Errorf("decode accepted inclusion list from %d: %w", accepted.ProposerID, err)
+		}
+		lists = append(lists, list)
+	}
+	return lists, nil
+}
+
 // finishEmptyMaterializedSet records a successful slot result when ACS decides
 // no decryptable ciphertexts.
-func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInclusionSet, merged MergedEncryptedSet) {
+func (n *Node) finishEmptyMaterializedSet(decisionAt, decodedAt, agreedAt, mergedAt, ciphertextsAt time.Time, agreed AgreedInclusionSet, merged MergedEncryptedSet) {
 	now := time.Now()
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -646,11 +662,15 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 	}
 	n.planned = true
 	n.metricTimes.acsDecision = decisionAt
-	n.metricTimes.planDone = now
-	n.metricTimes.shareGenerationStart = now
-	n.metricTimes.sharesDone = now
-	n.metricTimes.threshold = now
-	n.metricTimes.combineDone = now
+	n.metricTimes.acsOutputDecoded = decodedAt
+	n.metricTimes.agreedSetDone = agreedAt
+	n.metricTimes.mergeDone = mergedAt
+	n.metricTimes.ciphertextsDecoded = ciphertextsAt
+	n.metricTimes.planDone = ciphertextsAt
+	n.metricTimes.shareGenerationStart = ciphertextsAt
+	n.metricTimes.sharesDone = ciphertextsAt
+	n.metricTimes.threshold = ciphertextsAt
+	n.metricTimes.combineDone = ciphertextsAt
 	n.metricTimes.materialized = now
 	n.material = MaterializedTransactionSet{
 		Slot:            n.id,
@@ -662,11 +682,11 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt time.Time, agreed AgreedInc
 		PlaintextsHex:   []string{},
 	}
 	n.metrics.ACSDecisionUnixNano = decisionAt.UnixNano()
-	n.metrics.PlanDoneUnixNano = now.UnixNano()
-	n.metrics.ShareGenerationStartUnixNano = now.UnixNano()
-	n.metrics.SharesDoneUnixNano = now.UnixNano()
-	n.metrics.ThresholdUnixNano = now.UnixNano()
-	n.metrics.CombineDoneUnixNano = now.UnixNano()
+	n.metrics.PlanDoneUnixNano = ciphertextsAt.UnixNano()
+	n.metrics.ShareGenerationStartUnixNano = ciphertextsAt.UnixNano()
+	n.metrics.SharesDoneUnixNano = ciphertextsAt.UnixNano()
+	n.metrics.ThresholdUnixNano = ciphertextsAt.UnixNano()
+	n.metrics.CombineDoneUnixNano = ciphertextsAt.UnixNano()
 	n.metrics.MaterializedUnixNano = now.UnixNano()
 	n.metrics.AgreedLists = len(agreed.Lists)
 	n.metrics.AgreedSetHash = agreed.Hash
@@ -932,6 +952,11 @@ func (n *Node) refreshMetricsLocked() {
 	n.metrics.ProposalPreparationUS = durationUS(t.slotStart, t.proposalReady)
 	n.metrics.ACSUS = durationUS(t.proposalReady, t.acsDecision)
 	n.metrics.MergePlanUS = durationUS(t.acsDecision, t.planDone)
+	n.metrics.ACSOutputDecodeUS = durationUS(t.acsDecision, t.acsOutputDecoded)
+	n.metrics.AgreedSetUS = durationUS(t.acsOutputDecoded, t.agreedSetDone)
+	n.metrics.MergeUS = durationUS(t.agreedSetDone, t.mergeDone)
+	n.metrics.CiphertextDecodeUS = durationUS(t.mergeDone, t.ciphertextsDecoded)
+	n.metrics.BatchPlanUS = durationUS(t.ciphertextsDecoded, t.planDone)
 	n.metrics.ShareGenerationUS = durationUS(t.shareGenerationStart, t.sharesDone)
 	n.metrics.ThresholdWaitUS = durationUS(t.planDone, t.threshold)
 	n.metrics.CombineUS = durationUS(t.threshold, t.combineDone)

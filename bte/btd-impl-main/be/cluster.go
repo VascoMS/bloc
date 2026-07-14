@@ -68,6 +68,19 @@ type BatchPlan struct {
 	SubBatches [][]BatchItem
 }
 
+// DecodedBatch keeps parsed ciphertexts paired with the canonical wire bytes
+// they were decoded from. Construct it with DecodeBatch so planning can reuse
+// those bytes for the batch identity.
+type DecodedBatch struct {
+	ciphertexts []Ciphertext
+	encoded     [][]byte
+}
+
+// Ciphertexts returns the decoded ciphertexts in their accepted wire order.
+func (b DecodedBatch) Ciphertexts() []Ciphertext {
+	return append([]Ciphertext(nil), b.ciphertexts...)
+}
+
 type PlaintextResult struct {
 	OriginalPosition int
 	RawTx            []byte
@@ -152,25 +165,84 @@ func (c *ClusterBTE) pickGT() kyber.Point {
 }
 
 func (c *ClusterBTE) PlanBatch(ciphertexts []Ciphertext) (BatchPlan, error) {
+	alpha, subBatches, err := c.arrangeBatch(ciphertexts)
+	if err != nil {
+		return BatchPlan{}, err
+	}
+	batchID, err := computeBatchID(ciphertexts)
+	if err != nil {
+		return BatchPlan{}, err
+	}
+	return BatchPlan{BatchID: batchID, Alpha: alpha, SubBatches: subBatches}, nil
+}
+
+// DecodeBatch parses ordered canonical ciphertext encodings exactly once.
+func (c *ClusterBTE) DecodeBatch(encoded [][]byte) (DecodedBatch, error) {
+	decoded := DecodedBatch{
+		ciphertexts: make([]Ciphertext, 0, len(encoded)),
+		encoded:     append([][]byte(nil), encoded...),
+	}
+	for _, raw := range encoded {
+		ct, err := c.UnmarshalCiphertext(raw)
+		if err != nil {
+			return DecodedBatch{}, err
+		}
+		decoded.ciphertexts = append(decoded.ciphertexts, ct)
+	}
+	return decoded, nil
+}
+
+// PlanDecodedBatch arranges a decoded batch and derives its identity directly
+// from the canonical encodings accepted by DecodeBatch.
+func (c *ClusterBTE) PlanDecodedBatch(decoded DecodedBatch) (BatchPlan, error) {
+	if len(decoded.ciphertexts) != len(decoded.encoded) {
+		return BatchPlan{}, fmt.Errorf("decoded batch has %d ciphertexts and %d encodings", len(decoded.ciphertexts), len(decoded.encoded))
+	}
+	alpha, subBatches, err := c.arrangeBatch(decoded.ciphertexts)
+	if err != nil {
+		return BatchPlan{}, err
+	}
+	return BatchPlan{
+		BatchID:    computeBatchIDFromEncoded(decoded.encoded),
+		Alpha:      alpha,
+		SubBatches: subBatches,
+	}, nil
+}
+
+// DecodeAndPlanBatch is the one-call API for callers that do not need a timing
+// boundary between ciphertext decoding and batch arrangement.
+func (c *ClusterBTE) DecodeAndPlanBatch(encoded [][]byte) ([]Ciphertext, BatchPlan, error) {
+	decoded, err := c.DecodeBatch(encoded)
+	if err != nil {
+		return nil, BatchPlan{}, err
+	}
+	plan, err := c.PlanDecodedBatch(decoded)
+	if err != nil {
+		return nil, BatchPlan{}, err
+	}
+	return decoded.Ciphertexts(), plan, nil
+}
+
+func (c *ClusterBTE) arrangeBatch(ciphertexts []Ciphertext) (int, [][]BatchItem, error) {
 	if len(ciphertexts) == 0 {
-		return BatchPlan{}, fmt.Errorf("empty batch")
+		return 0, nil, fmt.Errorf("empty batch")
 	}
 	if len(ciphertexts) > c.Params.BMax {
-		return BatchPlan{}, fmt.Errorf("batch size %d exceeds BMax %d", len(ciphertexts), c.Params.BMax)
+		return 0, nil, fmt.Errorf("batch size %d exceeds BMax %d", len(ciphertexts), c.Params.BMax)
 	}
 	counts := make(map[int]int)
 	for _, ct := range ciphertexts {
 		if ct.Version != LibraryVersion {
-			return BatchPlan{}, fmt.Errorf("unsupported ciphertext version %q", ct.Version)
+			return 0, nil, fmt.Errorf("unsupported ciphertext version %q", ct.Version)
 		}
 		if ct.Index < 0 || ct.Index >= c.Params.N {
-			return BatchPlan{}, fmt.Errorf("ciphertext index out of domain: %d", ct.Index)
+			return 0, nil, fmt.Errorf("ciphertext index out of domain: %d", ct.Index)
 		}
 		if ct.Capsule.I != ct.Index {
-			return BatchPlan{}, fmt.Errorf("outer index %d does not match capsule index %d", ct.Index, ct.Capsule.I)
+			return 0, nil, fmt.Errorf("outer index %d does not match capsule index %d", ct.Index, ct.Capsule.I)
 		}
 		if !bytes.Equal(ct.Capsule.Context, aeadAAD(ct.ClusterID, ct.Slot, ct.Index)) {
-			return BatchPlan{}, fmt.Errorf("ciphertext context does not match metadata")
+			return 0, nil, fmt.Errorf("ciphertext context does not match metadata")
 		}
 		counts[ct.Index]++
 	}
@@ -207,16 +279,12 @@ func (c *ClusterBTE) PlanBatch(ciphertexts []Ciphertext) (BatchPlan, error) {
 		for _, item := range subBatch {
 			idx := item.Ciphertext.Index
 			if seen[idx] {
-				return BatchPlan{}, fmt.Errorf("duplicate index %d in sub-batch %d", idx, id)
+				return 0, nil, fmt.Errorf("duplicate index %d in sub-batch %d", idx, id)
 			}
 			seen[idx] = true
 		}
 	}
-	batchID, err := computeBatchID(ciphertexts)
-	if err != nil {
-		return BatchPlan{}, err
-	}
-	return BatchPlan{BatchID: batchID, Alpha: alpha, SubBatches: subBatches}, nil
+	return alpha, subBatches, nil
 }
 
 func (c *ClusterBTE) MakeShare(sk SecretShare, plan BatchPlan, subBatchID int) (DecryptionShare, error) {
@@ -410,19 +478,27 @@ func aeadAAD(clusterID string, slot uint64, index int) []byte {
 }
 
 func computeBatchID(ciphertexts []Ciphertext) ([32]byte, error) {
-	h := sha256.New()
-	h.Write([]byte(LibraryVersion))
+	encoded := make([][]byte, 0, len(ciphertexts))
 	for _, ct := range ciphertexts {
-		encoded, err := ct.MarshalBinary()
+		raw, err := ct.MarshalBinary()
 		if err != nil {
 			return [32]byte{}, err
 		}
-		_ = binary.Write(h, binary.BigEndian, uint64(len(encoded)))
-		h.Write(encoded)
+		encoded = append(encoded, raw)
+	}
+	return computeBatchIDFromEncoded(encoded), nil
+}
+
+func computeBatchIDFromEncoded(encoded [][]byte) [32]byte {
+	h := sha256.New()
+	h.Write([]byte(LibraryVersion))
+	for _, raw := range encoded {
+		_ = binary.Write(h, binary.BigEndian, uint64(len(raw)))
+		h.Write(raw)
 	}
 	var out [32]byte
 	copy(out[:], h.Sum(nil))
-	return out, nil
+	return out
 }
 
 func (ct Ciphertext) MarshalBinary() ([]byte, error) {

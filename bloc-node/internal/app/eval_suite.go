@@ -119,6 +119,11 @@ var latencyMetricNames = []string{
 	"proposal_preparation_us",
 	"acs_us",
 	"merge_plan_us",
+	"acs_output_decode_us",
+	"agreed_set_us",
+	"merge_us",
+	"ciphertext_decode_us",
+	"batch_plan_us",
 	"share_generation_us",
 	"threshold_wait_us",
 	"combine_us",
@@ -434,6 +439,9 @@ func metricValues(run EvalRun, result Result) map[string]float64 {
 	return map[string]float64{
 		"total_slot_us": float64(m.TotalSlotUS), "proposal_preparation_us": float64(m.ProposalPreparationUS),
 		"acs_us": float64(m.ACSUS), "merge_plan_us": float64(m.MergePlanUS),
+		"acs_output_decode_us": float64(m.ACSOutputDecodeUS), "agreed_set_us": float64(m.AgreedSetUS),
+		"merge_us": float64(m.MergeUS), "ciphertext_decode_us": float64(m.CiphertextDecodeUS),
+		"batch_plan_us":       float64(m.BatchPlanUS),
 		"share_generation_us": float64(m.ShareGenerationUS), "threshold_wait_us": float64(m.ThresholdWaitUS),
 		"combine_us": float64(m.CombineUS), "materialization_us": float64(m.MaterializationUS),
 		"commit_to_plaintext_us": float64(m.CommitToPlaintextUS),
@@ -533,12 +541,12 @@ func percentileType7(sorted []float64, p float64) float64 {
 }
 
 func writeNodeMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "success", "consistent", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "success", "consistent", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			for _, result := range run.Results {
 				m := result.Metrics
-				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
+				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
 				if err := w.Write(record); err != nil {
 					return err
 				}
@@ -549,12 +557,12 @@ func writeNodeMeasurements(path string, runs []EvalRun) error {
 }
 
 func writeRunMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "bmax", "tx_size", "tx_gas", "success", "consistent", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "bmax", "tx_size", "tx_gas", "success", "consistent", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			result, _ := criticalResult(run)
 			m := result.Metrics
-			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
+			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
 			if err := w.Write(record); err != nil {
 				return err
 			}

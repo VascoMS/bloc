@@ -128,6 +128,11 @@ go run ./cmd/bloc-node eval-suite \
 - `proposal_preparation_us`: local slot start through encoded proposal readiness.
 - `acs_us`: proposal readiness through local ACS decision.
 - `merge_plan_us`: ACS decision through deterministic merge, ciphertext decoding, and BTE batch planning.
+- `acs_output_decode_us`: accepted ACS proposal decoding inside `merge_plan_us`.
+- `agreed_set_us`: canonical inclusion-list hashing and agreed-set construction inside `merge_plan_us`.
+- `merge_us`: placeholder validation, deduplication, ordering, and blockspace selection inside `merge_plan_us`.
+- `ciphertext_decode_us`: selected BTE ciphertext deserialization inside `merge_plan_us`.
+- `batch_plan_us`: deterministic BTE sub-batch arrangement and batch-ID construction inside `merge_plan_us`.
 - `share_generation_us`: local share creation and encoding; overlaps with network share collection.
 - `threshold_wait_us`: plan readiness through threshold-share availability.
 - `combine_us`: threshold availability through BTE combination.
@@ -142,6 +147,27 @@ from distributions but remain present in raw outputs and failure counts. The
 suite reports Type-7 p50/p95; p99 is deferred until a 100+ repetition campaign.
 `cluster_measurements.csv`, `prepare_us`, and `submission_us` describe harness
 overhead and are not included in `total_slot_us`.
+
+The five merge/plan substages are monotonic, bounded Prometheus stage labels
+and must sum to `merge_plan_us` within 20 microseconds. Empty selected batches
+record completed decode/merge boundaries and zero ciphertext-planning time.
+Older CSVs without the optional five columns remain chart-compatible.
+
+### Merge/Plan Optimization Campaign
+
+Use the Windows-first local campaign when changing inclusion-list hashing,
+deterministic merge, ciphertext decoding, or BTE batch planning. It captures
+ten-sample allocation benchmarks, CPU/memory profiles, and a 4/7-node local
+evaluator matrix without allocating cloud resources:
+
+```powershell
+.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase baseline -CampaignId <id>
+.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase optimized -CampaignId <id>
+```
+
+Artifacts are ignored under `results/local/merge-plan-optimization/<id>/`.
+Retain an optimization only when semantic identities remain exact and no
+batch-32/128 pipeline median regresses by more than 5%.
 
 ### M1 Latency Charts
 
@@ -432,6 +458,23 @@ Acceptance criteria:
 - each phase and the top-level campaign write cleanup verification showing no
   leftover EC2 instances, EBS volumes, VPC, ECR repository, temporary key pair,
   IAM role, or instance profile.
+
+### EC2 Merge/Plan Attribution
+
+Run `deploy/ec2/run-merge-plan-attribution.ps1` only after the relevant
+protocol, chart, deployment, and canonical-document changes are committed. The
+runner deliberately blocks before AWS preflight when those sources are dirty.
+It requires at least 16 Standard On-Demand vCPUs, uses one image digest for all
+three phases, limits every phase to 90 minutes, and applies a conservative
+`$5` campaign ceiling.
+
+Each phase is valid only when every batch has exactly 30 successful and
+consistent measured runs, every node finalized metrics, selected ciphertext
+counts equal the batch, all five Merge + Plan substages are present and additive
+within 20 microseconds, Prometheus reports all operators up, and cleanup is
+empty. The analyzer writes `merge-plan-measurements.csv`,
+`merge-plan-summary.csv`, `comparison.csv`, `REPORT.md`, and both PNG and
+SVG charts. Use p50 and p95; 30 observations are not enough for a p99 claim.
 
 ### BTE Benchmarks
 

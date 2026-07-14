@@ -84,6 +84,17 @@ cd bte/btd-impl-main
 go test ./be -run '^$' -bench '^BenchmarkHybridFullPath'
 ```
 
+For merge/plan attribution or optimization work, capture a baseline and an
+optimized phase with the same campaign id. The PowerShell runner fixes
+`GOMAXPROCS=1`, records ten one-second benchmark samples with allocations,
+profiles the 7-node batch-128 overlap modes, runs the 4/7-node evaluator
+matrix, and writes a comparison report without using AWS:
+
+```powershell
+.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase baseline -CampaignId <id>
+.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase optimized -CampaignId <id>
+```
+
 When interpreting M1 results, remember that the integrated BTE path already
 uses deterministic BEAT-MEV `Opt-2` sub-batching: `alpha = ceil(2*sqrt(B))`.
 M1 is for integrated slot latency, not for comparing BTE optimization variants.
@@ -234,6 +245,23 @@ verification files must show no leftover EC2 instances, volumes, VPC, ECR
 repository, temporary key pair, IAM role, or instance profile. Resource samples
 from operator `docker stats --no-stream` are stored as `resource-samples.csv`
 for context only; detailed overhead characterization remains M4.
+
+For focused Merge + Plan attribution on the optimized image, use:
+
+```powershell
+.\deploy\ec2\run-merge-plan-attribution.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -AutoApprovePlan
+```
+
+The wrapper refuses relevant uncommitted sources, builds one image, and runs
+fixed-performance `n=4`, fixed-performance `n=7`, and burstable `n=7`
+sequentially in one AZ. Each phase follows the shared three-block batch order,
+records 30 samples per batch without restarting sidecars, destroys successful
+infrastructure, and must retain the same image digest. The final analysis
+contains node-level measurements, p50/p95 summaries, comparisons, a Markdown
+report, and PNG/SVG charts. This 30-sample campaign does not support p99 claims.
 
 For the same-region cross-AZ synthetic comparison, use the cross-AZ wrapper:
 

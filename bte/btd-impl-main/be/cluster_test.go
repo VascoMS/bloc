@@ -206,6 +206,94 @@ func TestCiphertextSerializationRoundTrip(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestDecodeAndPlanBatchMatchesLegacyPlan(t *testing.T) {
+	cluster := newTestCluster(t, 128, 10, 5)
+	for _, batchSize := range []int{8, 32, 128} {
+		ciphertexts := make([]Ciphertext, batchSize)
+		encoded := make([][]byte, batchSize)
+		for i := range ciphertexts {
+			ct, err := cluster.EncryptTx([]byte(fmt.Sprintf("canonical-tx-%d", i)), i%17, "cluster-a", 123)
+			require.NoError(t, err)
+			ciphertexts[i] = ct
+			encoded[i], err = ct.MarshalBinary()
+			require.NoError(t, err)
+		}
+
+		legacy, err := cluster.PlanBatch(ciphertexts)
+		require.NoError(t, err)
+		decoded, optimized, err := cluster.DecodeAndPlanBatch(encoded)
+		require.NoError(t, err)
+		require.Len(t, decoded, batchSize)
+		requirePlansEquivalent(t, legacy, optimized)
+		for i := range decoded {
+			reencoded, err := decoded[i].MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, encoded[i], reencoded)
+		}
+	}
+}
+
+func TestDecodeBatchRejectsTrailingNoncanonicalEncoding(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	encoded, err := ct.MarshalBinary()
+	require.NoError(t, err)
+	encoded = append(encoded, 0)
+	_, err = cluster.DecodeBatch([][]byte{encoded})
+	require.ErrorContains(t, err, "trailing ciphertext bytes")
+}
+
+func TestPlanDecodedBatchRejectsEmptyBatch(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	decoded, err := cluster.DecodeBatch(nil)
+	require.NoError(t, err)
+	_, err = cluster.PlanDecodedBatch(decoded)
+	require.ErrorContains(t, err, "empty batch")
+}
+
+func FuzzCiphertextDecoderCanonical(f *testing.F) {
+	cluster := newTestCluster(f, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("canonical-seed"), 0, "cluster-a", 123)
+	require.NoError(f, err)
+	encoded, err := ct.MarshalBinary()
+	require.NoError(f, err)
+	f.Add(encoded)
+	f.Add([]byte("malformed"))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		decoded, err := cluster.UnmarshalCiphertext(raw)
+		if err != nil {
+			return
+		}
+		reencoded, err := decoded.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(raw, reencoded) {
+			t.Fatalf("decoder accepted a noncanonical encoding")
+		}
+	})
+}
+
+func requirePlansEquivalent(t *testing.T, left, right BatchPlan) {
+	t.Helper()
+	require.Equal(t, left.BatchID, right.BatchID)
+	require.Equal(t, left.Alpha, right.Alpha)
+	require.Equal(t, len(left.SubBatches), len(right.SubBatches))
+	for i := range left.SubBatches {
+		require.Equal(t, len(left.SubBatches[i]), len(right.SubBatches[i]))
+		for j := range left.SubBatches[i] {
+			require.Equal(t, left.SubBatches[i][j].OriginalPosition, right.SubBatches[i][j].OriginalPosition)
+			leftEncoded, err := left.SubBatches[i][j].Ciphertext.MarshalBinary()
+			require.NoError(t, err)
+			rightEncoded, err := right.SubBatches[i][j].Ciphertext.MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, leftEncoded, rightEncoded)
+		}
+	}
+}
+
 func TestPlanBatchSeparatesDuplicateIndices(t *testing.T) {
 	cluster := newTestCluster(t, 16, 10, 5)
 	ciphertexts := make([]Ciphertext, 6)
@@ -309,6 +397,70 @@ func BenchmarkHybridFullPath128(b *testing.B) {
 
 func BenchmarkHybridFullPath512(b *testing.B) {
 	benchmarkHybridFullPath(b, 512)
+}
+
+func BenchmarkBatchPlanningAttribution(b *testing.B) {
+	for _, batchSize := range []int{8, 32, 128} {
+		cluster := newTestCluster(b, 128, 10, 5)
+		ciphertexts := make([]Ciphertext, batchSize)
+		for i := range ciphertexts {
+			ct, err := cluster.EncryptTx(bytes.Repeat([]byte{byte(i + 1)}, 256), i, "cluster-a", 123)
+			if err != nil {
+				b.Fatal(err)
+			}
+			ciphertexts[i] = ct
+		}
+		encoded := make([][]byte, len(ciphertexts))
+		for i := range ciphertexts {
+			var err error
+			encoded[i], err = ciphertexts[i].MarshalBinary()
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		decoded, err := cluster.DecodeBatch(encoded)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("b%d/arrangement", batchSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if _, _, err := cluster.arrangeBatch(ciphertexts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("b%d/batch-id", batchSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if _, err := computeBatchID(ciphertexts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("b%d/batch-id-encoded", batchSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				_ = computeBatchIDFromEncoded(encoded)
+			}
+		})
+		b.Run(fmt.Sprintf("b%d/plan", batchSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if _, err := cluster.PlanBatch(ciphertexts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("b%d/plan-decoded", batchSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if _, err := cluster.PlanDecodedBatch(decoded); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func benchmarkHybridFullPath(b *testing.B, batchSize int) {

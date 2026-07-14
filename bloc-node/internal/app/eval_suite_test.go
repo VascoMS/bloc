@@ -197,6 +197,10 @@ func TestRefreshMetricsUsesDefinedEventBoundaries(t *testing.T) {
 		slotStart:            base,
 		proposalReady:        base.Add(2 * time.Millisecond),
 		acsDecision:          base.Add(12 * time.Millisecond),
+		acsOutputDecoded:     base.Add(12*time.Millisecond + 500*time.Microsecond),
+		agreedSetDone:        base.Add(13 * time.Millisecond),
+		mergeDone:            base.Add(14 * time.Millisecond),
+		ciphertextsDecoded:   base.Add(14*time.Millisecond + 500*time.Microsecond),
 		planDone:             base.Add(15 * time.Millisecond),
 		shareGenerationStart: base.Add(15 * time.Millisecond),
 		sharesDone:           base.Add(19 * time.Millisecond),
@@ -209,6 +213,9 @@ func TestRefreshMetricsUsesDefinedEventBoundaries(t *testing.T) {
 	m := node.metrics
 	if m.ProposalPreparationUS != 2000 || m.ACSUS != 10000 || m.MergePlanUS != 3000 {
 		t.Fatalf("unexpected pre-commit timing: %+v", m)
+	}
+	if m.ACSOutputDecodeUS != 500 || m.AgreedSetUS != 500 || m.MergeUS != 1000 || m.CiphertextDecodeUS != 500 || m.BatchPlanUS != 500 {
+		t.Fatalf("unexpected merge-plan attribution: %+v", m)
 	}
 	if m.ShareGenerationUS != 4000 || m.ThresholdWaitUS != 5000 {
 		t.Fatalf("unexpected overlapping timing: %+v", m)
@@ -225,6 +232,7 @@ func TestRefreshMetricsWaitsForShareGenerationFinalization(t *testing.T) {
 	base := time.Now()
 	node := Node{slotState: &slotState{metricTimes: metricTimes{
 		slotStart: base, proposalReady: base, acsDecision: base,
+		acsOutputDecoded: base, agreedSetDone: base, mergeDone: base, ciphertextsDecoded: base,
 		planDone: base, shareGenerationStart: base, threshold: base,
 		combineDone: base, materialized: base.Add(time.Millisecond),
 	}}}

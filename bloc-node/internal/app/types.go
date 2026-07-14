@@ -180,6 +180,10 @@ type metricTimes struct {
 	slotStart            time.Time
 	proposalReady        time.Time
 	acsDecision          time.Time
+	acsOutputDecoded     time.Time
+	agreedSetDone        time.Time
+	mergeDone            time.Time
+	ciphertextsDecoded   time.Time
 	planDone             time.Time
 	shareGenerationStart time.Time
 	sharesDone           time.Time
@@ -248,6 +252,11 @@ type Metrics struct {
 	ProposalPreparationUS        int64            `json:"proposal_preparation_us"`
 	ACSUS                        int64            `json:"acs_us"`
 	MergePlanUS                  int64            `json:"merge_plan_us"`
+	ACSOutputDecodeUS            int64            `json:"acs_output_decode_us"`
+	AgreedSetUS                  int64            `json:"agreed_set_us"`
+	MergeUS                      int64            `json:"merge_us"`
+	CiphertextDecodeUS           int64            `json:"ciphertext_decode_us"`
+	BatchPlanUS                  int64            `json:"batch_plan_us"`
 	ShareGenerationUS            int64            `json:"share_generation_us"`
 	ThresholdWaitUS              int64            `json:"threshold_wait_us"`
 	CombineUS                    int64            `json:"combine_us"`

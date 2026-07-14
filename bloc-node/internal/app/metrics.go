@@ -16,7 +16,7 @@ var (
 	protocolMetricLabelNames = []string{"cluster_id", "node_id", "direction", "kind"}
 	failureMetricLabelNames  = []string{"cluster_id", "node_id", "reason"}
 	httpMetricLabelNames     = []string{"cluster_id", "node_id", "method", "handler", "code"}
-	slotStageNames           = []string{"total", "proposal_preparation", "acs", "merge_plan", "share_generation", "threshold_wait", "combine", "materialization", "commit_to_plaintext"}
+	slotStageNames           = []string{"total", "proposal_preparation", "acs", "merge_plan", "acs_output_decode", "agreed_set", "merge", "ciphertext_decode", "batch_plan", "share_generation", "threshold_wait", "combine", "materialization", "commit_to_plaintext"}
 	slotPhaseNames           = []slotPhase{slotPrepared, slotRunning, slotCompleted}
 )
 
@@ -184,6 +184,11 @@ func (m *nodeMetrics) slotCompleted(snapshot Metrics) {
 		"proposal_preparation": snapshot.ProposalPreparationUS,
 		"acs":                  snapshot.ACSUS,
 		"merge_plan":           snapshot.MergePlanUS,
+		"acs_output_decode":    snapshot.ACSOutputDecodeUS,
+		"agreed_set":           snapshot.AgreedSetUS,
+		"merge":                snapshot.MergeUS,
+		"ciphertext_decode":    snapshot.CiphertextDecodeUS,
+		"batch_plan":           snapshot.BatchPlanUS,
 		"share_generation":     snapshot.ShareGenerationUS,
 		"threshold_wait":       snapshot.ThresholdWaitUS,
 		"combine":              snapshot.CombineUS,

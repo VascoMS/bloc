@@ -16,6 +16,14 @@ STAGES = (
     ("materialization_us", "Materialization"),
 )
 
+MERGE_PLAN_STAGES = (
+    ("acs_output_decode_us", "ACS output decode"),
+    ("agreed_set_us", "Agreed set"),
+    ("merge_us", "Merge"),
+    ("ciphertext_decode_us", "Ciphertext decode"),
+    ("batch_plan_us", "Batch plan"),
+)
+
 REQUIRED_COLUMNS = {
     "run_id",
     "phase",
@@ -52,7 +60,15 @@ def load_experiment(result_dir: str | Path) -> ExperimentData:
     runs = runs.copy()
     runs["success"] = _boolean_series(runs["success"], "success")
     runs["consistent"] = _boolean_series(runs["consistent"], "consistent")
+    merge_columns = {name for name, _ in MERGE_PLAN_STAGES}
+    present_merge_columns = merge_columns.intersection(runs.columns)
+    if present_merge_columns and present_merge_columns != merge_columns:
+        missing_merge = sorted(merge_columns.difference(runs.columns))
+        raise ValueError(f"run_measurements.csv has partial merge-plan attribution; missing: {', '.join(missing_merge)}")
+
     numeric = ["nodes", "threshold", "batch_size", "total_slot_us", *(name for name, _ in STAGES)]
+    if present_merge_columns:
+        numeric.extend(name for name, _ in MERGE_PLAN_STAGES)
     for column in numeric:
         try:
             runs[column] = pd.to_numeric(runs[column], errors="raise")
@@ -69,6 +85,9 @@ def load_experiment(result_dir: str | Path) -> ExperimentData:
     runs["total_slot_ms"] = runs["total_slot_us"] / 1000.0
     for name, _ in STAGES:
         runs[name.removesuffix("_us") + "_ms"] = runs[name] / 1000.0
+    for name, _ in MERGE_PLAN_STAGES:
+        if name in runs:
+            runs[name.removesuffix("_us") + "_ms"] = runs[name] / 1000.0
     runs.sort_values(["nodes", "batch_size", "network", "iteration"], inplace=True, ignore_index=True)
 
     experiment_id = root.name
@@ -109,6 +128,35 @@ def scaling_summary(runs: pd.DataFrame) -> pd.DataFrame:
 
 def stage_summary(runs: pd.DataFrame) -> pd.DataFrame:
     columns = [name.removesuffix("_us") + "_ms" for name, _ in STAGES]
+    return (
+        runs.groupby(["nodes", "batch_size", "network"], as_index=False)[columns]
+        .mean()
+        .sort_values(["network", "nodes", "batch_size"], ignore_index=True)
+    )
+
+
+def has_merge_plan_attribution(runs: pd.DataFrame) -> bool:
+    return all(name in runs.columns for name, _ in MERGE_PLAN_STAGES)
+
+
+def validate_merge_plan_additivity(runs: pd.DataFrame, tolerance_us: float = 20.0) -> None:
+    if not has_merge_plan_attribution(runs):
+        return
+    attributed = runs[[name for name, _ in MERGE_PLAN_STAGES]].sum(axis=1)
+    difference = (attributed - runs["merge_plan_us"]).abs()
+    bad = difference > tolerance_us
+    if bad.any():
+        row = runs.loc[bad].iloc[0]
+        raise ValueError(
+            "merge-plan substages do not add to merge_plan_us for "
+            f"run {row['run_id']!r} (difference {difference.loc[bad].iloc[0]:.0f} us)"
+        )
+
+
+def merge_plan_summary(runs: pd.DataFrame) -> pd.DataFrame:
+    if not has_merge_plan_attribution(runs):
+        raise ValueError("merge-plan attribution columns are not available")
+    columns = [name.removesuffix("_us") + "_ms" for name, _ in MERGE_PLAN_STAGES]
     return (
         runs.groupby(["nodes", "batch_size", "network"], as_index=False)[columns]
         .mean()

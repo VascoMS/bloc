@@ -13,11 +13,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 
-from .data import ExperimentData, STAGES, scaling_summary, stage_summary, validate_stage_additivity
+from .data import (
+    MERGE_PLAN_STAGES,
+    ExperimentData,
+    STAGES,
+    has_merge_plan_attribution,
+    merge_plan_summary,
+    scaling_summary,
+    stage_summary,
+    validate_merge_plan_additivity,
+    validate_stage_additivity,
+)
 
 
 TRANSPORT_COLORS = {"tcp": "#0072B2", "libp2p": "#D55E00"}
 STAGE_COLORS = ("#56B4E9", "#0072B2", "#009E73", "#F0E442", "#E69F00", "#CC79A7")
+MERGE_PLAN_COLORS = ("#0072B2", "#009E73", "#F0E442", "#E69F00", "#CC79A7")
 
 
 def generate_all(experiment: ExperimentData, output_dir: str | Path) -> list[Path]:
@@ -28,6 +39,8 @@ def generate_all(experiment: ExperimentData, output_dir: str | Path) -> list[Pat
     generated: list[Path] = []
     generated.extend(_plot_scaling(experiment, output))
     generated.extend(_plot_stage_breakdown(experiment, output))
+    if has_merge_plan_attribution(experiment.runs):
+        generated.extend(_plot_merge_plan_breakdown(experiment, output))
     generated.extend(_plot_distribution(experiment, output))
     return generated
 
@@ -118,6 +131,34 @@ def _plot_distribution(experiment: ExperimentData, output: Path) -> list[Path]:
     fig.suptitle(f"Measured end-to-end latency distribution — {experiment.experiment_id}", y=1.02)
     fig.tight_layout()
     return _save(fig, output, "total-latency-distribution")
+
+
+def _plot_merge_plan_breakdown(experiment: ExperimentData, output: Path) -> list[Path]:
+    validate_merge_plan_additivity(experiment.runs)
+    summary = merge_plan_summary(experiment.runs)
+    networks = sorted(summary["network"].unique())
+    fig, axes = plt.subplots(1, len(networks), figsize=(7.0 * len(networks), 4.8), squeeze=False)
+
+    for axis, network in zip(axes[0], networks, strict=True):
+        panel = summary[summary["network"] == network].sort_values(["nodes", "batch_size"])
+        x = list(range(len(panel)))
+        bottoms = [0.0] * len(panel)
+        for (source, label), color in zip(MERGE_PLAN_STAGES, MERGE_PLAN_COLORS, strict=True):
+            column = source.removesuffix("_us") + "_ms"
+            values = panel[column].tolist()
+            axis.bar(x, values, bottom=bottoms, color=color, label=label, width=0.72)
+            bottoms = [bottom + value for bottom, value in zip(bottoms, values, strict=True)]
+        axis.set_xticks(x, [f"n={int(row.nodes)}\nb={int(row.batch_size)}" for row in panel.itertuples()])
+        axis.set_title(network)
+        axis.set_xlabel("Configuration")
+        axis.set_ylabel("Mean merge-plan latency (ms)")
+        axis.grid(axis="y", alpha=0.25)
+
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.suptitle(f"Mean merge-plan attribution — {experiment.experiment_id}", y=0.99)
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.93), ncol=3)
+    fig.tight_layout(rect=(0, 0, 1, 0.82))
+    return _save(fig, output, "merge-plan-breakdown")
 
 
 def _save(fig: plt.Figure, output: Path, stem: str) -> list[Path]:

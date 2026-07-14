@@ -1,6 +1,7 @@
 package inclusion
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,29 +50,36 @@ func NewAgreedSet(slot uint64, lists []InclusionList) AgreedInclusionSet {
 // Merge deduplicates agreed encrypted placeholders and applies the deterministic
 // ordering and blockspace limits that define the decrypted set.
 func Merge(slot uint64, lists []InclusionList, blockspace BlockspaceConfig, bmax int) MergedEncryptedSet {
-	unique := make(map[string]EncryptedPlaceholder)
+	unique := make(map[string]mergeCandidate)
+	validated := make(map[string]EncryptedPlaceholder)
 	for _, list := range lists {
 		for _, item := range list.Items {
-			normalized, ok := normalizePlaceholder(item)
+			claimedHash := strings.TrimPrefix(strings.ToLower(item.Hash), "0x")
+			if prior, exists := validated[claimedHash]; claimedHash != "" && exists && placeholdersEqual(prior, item) {
+				continue
+			}
+			normalized, fee, ok := normalizePlaceholder(item)
 			if !ok {
 				continue
 			}
 			if _, exists := unique[normalized.Hash]; exists {
 				continue
 			}
-			unique[normalized.Hash] = normalized
+			unique[normalized.Hash] = mergeCandidate{item: normalized, fee: fee}
+			validated[normalized.Hash] = item
 		}
 	}
-	candidates := make([]EncryptedPlaceholder, 0, len(unique))
-	for _, item := range unique {
-		candidates = append(candidates, item)
+	candidates := make([]mergeCandidate, 0, len(unique))
+	for _, candidate := range unique {
+		candidates = append(candidates, candidate)
 	}
-	sortPlaceholders(candidates)
+	sortCandidates(candidates)
 
 	maxTxs := EffectiveMaxDecryptedTxs(blockspace, bmax)
 	selected := make([]EncryptedPlaceholder, 0, minInt(maxTxs, len(candidates)))
 	var selectedGas uint64
-	for _, item := range candidates {
+	for _, candidate := range candidates {
+		item := candidate.item
 		if len(selected) >= maxTxs {
 			break
 		}
@@ -102,12 +110,18 @@ func EncryptedHashes(items []EncryptedPlaceholder) []string {
 	return out
 }
 
-func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, bool) {
+type mergeCandidate struct {
+	item EncryptedPlaceholder
+	fee  *big.Int
+}
+
+func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, *big.Int, bool) {
 	if len(item.Ciphertext) == 0 || item.Gas == 0 {
-		return EncryptedPlaceholder{}, false
+		return EncryptedPlaceholder{}, nil, false
 	}
-	if _, ok := parseBigInt(item.EffectiveFeePerGasWei); !ok {
-		return EncryptedPlaceholder{}, false
+	fee, ok := parseBigInt(item.EffectiveFeePerGasWei)
+	if !ok {
+		return EncryptedPlaceholder{}, nil, false
 	}
 	computedHash := hashHex(item.Ciphertext)
 	if item.Hash == "" {
@@ -115,7 +129,7 @@ func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, bool
 	}
 	normalizedHash := strings.TrimPrefix(strings.ToLower(item.Hash), "0x")
 	if normalizedHash != computedHash {
-		return EncryptedPlaceholder{}, false
+		return EncryptedPlaceholder{}, nil, false
 	}
 	item.Hash = normalizedHash
 	item.From = strings.ToLower(item.From)
@@ -125,24 +139,33 @@ func normalizePlaceholder(item EncryptedPlaceholder) (EncryptedPlaceholder, bool
 	if item.EffectiveFeePerGasWei == "" {
 		item.EffectiveFeePerGasWei = "0"
 	}
-	return item, true
+	return item, fee, true
 }
 
-func sortPlaceholders(items []EncryptedPlaceholder) {
-	sort.Slice(items, func(i, j int) bool {
-		feeI, _ := parseBigInt(items[i].EffectiveFeePerGasWei)
-		feeJ, _ := parseBigInt(items[j].EffectiveFeePerGasWei)
-		if cmp := feeI.Cmp(feeJ); cmp != 0 {
+func sortCandidates(candidates []mergeCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if cmp := candidates[i].fee.Cmp(candidates[j].fee); cmp != 0 {
 			return cmp > 0
 		}
-		if items[i].From != items[j].From {
-			return items[i].From < items[j].From
+		left, right := candidates[i].item, candidates[j].item
+		if left.From != right.From {
+			return left.From < right.From
 		}
-		if items[i].Nonce != items[j].Nonce {
-			return items[i].Nonce < items[j].Nonce
+		if left.Nonce != right.Nonce {
+			return left.Nonce < right.Nonce
 		}
-		return items[i].Hash < items[j].Hash
+		return left.Hash < right.Hash
 	})
+}
+
+func placeholdersEqual(left, right EncryptedPlaceholder) bool {
+	return left.Hash == right.Hash &&
+		bytes.Equal(left.Ciphertext, right.Ciphertext) &&
+		left.Gas == right.Gas &&
+		left.EffectiveFeePerGasWei == right.EffectiveFeePerGasWei &&
+		left.From == right.From &&
+		left.Nonce == right.Nonce &&
+		left.Kind == right.Kind
 }
 
 func hashMergedSet(merged MergedEncryptedSet) string {

@@ -384,9 +384,13 @@ go run ./cmd/bloc-node gen-ec2-config \
   --bmax 128
 ```
 
-The generated `cluster.ec2.json` contains prototype trusted-dealer shares and
-libp2p private keys. Do not commit it. Copy it to
-`/etc/bloc/cluster.json` on each operator host.
+The generated `cluster.ec2.json` and `cluster.ec2.crs` are public prototype
+material. `secrets.ec2/operator-<id>.json` contains only that operator's
+trusted-dealer share and libp2p private key. Copy each operator only its own
+secret file, store it as mode `0600`, do not commit it, and exclude all operator
+secret files from collected experiment artifacts. The CRS removes the shared
+setup seed but retains inherited insecure diagonal elements, so this remains a
+prototype rather than production-secure setup.
 
 Acceptance criteria for a first VM-distributed smoke:
 

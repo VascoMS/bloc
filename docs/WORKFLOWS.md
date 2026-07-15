@@ -213,9 +213,13 @@ go run ./cmd/bloc-node gen-ec2-config \
   --bmax 128
 ```
 
-Copy `cluster.ec2.json` to `/etc/bloc/cluster.json` on every operator, copy
-`deploy/ec2/operator-compose.yaml` to each operator, set the host's `NODE_ID`,
-and start the sidecar with `docker compose up -d`. On the controller, create
+The generator also writes public `cluster.ec2.crs` and one file under
+`secrets.ec2/` per operator. Copy the same JSON and CRS to every operator, but
+copy only `secrets.ec2/operator-<id>.json` to that operator as
+`/etc/bloc/operator.json` with mode `0600`. Never copy the secrets directory to
+the controller or include it in experiment artifacts. Copy
+`deploy/ec2/operator-compose.yaml`, set the host's `NODE_ID`, and start the
+sidecar with `docker compose up -d`. On the controller, create
 `prometheus.ec2.yml` from `prometheus.ec2.example.yml` using the operator
 private IPs, then start `deploy/ec2/controller-compose.yaml`.
 

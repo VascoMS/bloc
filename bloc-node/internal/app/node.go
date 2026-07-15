@@ -20,14 +20,20 @@ import (
 	"bloc-node/internal/app/inclusion"
 	"btd/be"
 	"github.com/anthdm/hbbft"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"go.dedis.ch/kyber/v4/share"
 )
 
-// newNode builds the full operator state from shared cluster config and the
-// requested node id. It validates that the node has both membership metadata and
-// a BTE secret share before creating ACS and transport instances.
-func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
+// newNode builds one operator from public cluster configuration plus that
+// operator's private BTE share and libp2p identity.
+func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultConfig) (*Node, error) {
 	normalizeConfig(&cfg)
+	if secrets.ClusterID != cfg.ClusterID {
+		return nil, fmt.Errorf("node secrets cluster %q does not match config cluster %q", secrets.ClusterID, cfg.ClusterID)
+	}
+	if secrets.OperatorID != id {
+		return nil, fmt.Errorf("node secrets operator %d does not match requested operator %d", secrets.OperatorID, id)
+	}
 	var self NodeConfig
 	foundSelf := false
 	peers := make(map[uint64]NodeConfig)
@@ -48,43 +54,43 @@ func newNode(cfg ConfigFile, id uint64, faults FaultConfig) (*Node, error) {
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	suite := newSuite()
-	crsSeed, err := hex.DecodeString(strings.TrimPrefix(cfg.CRSSeedHex, "0x"))
+	btd, err := be.NewBTDFromPublicCRS(suite, cfg.BMax, cfg.CRSBytes)
 	if err != nil {
-		return nil, fmt.Errorf("decode crs seed: %w", err)
+		return nil, fmt.Errorf("load public CRS: %w", err)
 	}
-	btd := be.NewBTDFromSeed(suite, cfg.BMax, crsSeed)
 	pk, err := unmarshalPointHex(suite, cfg.PublicKeyHex)
 	if err != nil {
 		return nil, err
 	}
-	var secret be.SecretShare
-	foundShare := false
-	for _, s := range cfg.Shares {
-		if s.OperatorID == int(id) {
-			scalar, err := unmarshalScalarHex(suite, s.ScalarHex)
-			if err != nil {
-				return nil, err
-			}
-			secret = be.SecretShare{OperatorID: s.OperatorID, Share: &share.PriShare{I: uint32(s.OperatorID), V: scalar}}
-			foundShare = true
-			break
-		}
+	scalar, err := unmarshalScalarHex(suite, secrets.BTEShareScalarHex)
+	if err != nil {
+		return nil, fmt.Errorf("decode BTE share for operator %d: %w", id, err)
 	}
-	if !foundShare {
-		return nil, fmt.Errorf("secret share for node %d not found", id)
+	secret := be.SecretShare{OperatorID: int(id), Share: &share.PriShare{I: uint32(id), V: scalar}}
+	privateKey, err := unmarshalLibP2PPrivateKey(secrets.P2PPrivateKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("decode libp2p private key for operator %d: %w", id, err)
+	}
+	derivedPeerID, err := peer.IDFromPrivateKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("derive libp2p peer id for operator %d: %w", id, err)
+	}
+	if derivedPeerID.String() != self.P2PPeerID {
+		return nil, fmt.Errorf("libp2p private key for operator %d derives peer id %s, expected %s", id, derivedPeerID, self.P2PPeerID)
 	}
 	cluster := be.NewNode(btd, pk, secret, cfg.N, cfg.Threshold)
 	node := &Node{
-		cfg:           cfg,
-		self:          self,
-		nodeIDs:       ids,
-		peers:         peers,
-		cluster:       cluster,
-		secret:        secret,
-		suite:         suite,
-		faults:        faults,
-		lastSlot:      cfg.Slot,
-		observability: newNodeMetrics(cfg.ClusterID, id),
+		cfg:              cfg,
+		self:             self,
+		nodeIDs:          ids,
+		peers:            peers,
+		cluster:          cluster,
+		secret:           secret,
+		p2pPrivateKeyHex: secrets.P2PPrivateKeyHex,
+		suite:            suite,
+		faults:           faults,
+		lastSlot:         cfg.Slot,
+		observability:    newNodeMetrics(cfg.ClusterID, id),
 	}
 	node.slotState = node.newSlotState(cfg.Slot)
 	node.transport = newLibP2PTransport(node, ProtoEnvelopeCodec{})

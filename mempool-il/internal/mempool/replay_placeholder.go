@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -102,12 +103,15 @@ func (c *ReplayPlaceholderClient) FetchSlot(_ context.Context, slot uint64) ([]T
 }
 
 type replayCluster struct {
+	Version      string `json:"version"`
 	ClusterID    string `json:"cluster_id"`
 	BMax         int    `json:"bmax"`
 	N            int    `json:"n"`
 	Threshold    int    `json:"threshold"`
-	CRSSeedHex   string `json:"crs_seed_hex"`
+	CRSFile      string `json:"crs_file"`
+	CRSSHA256    string `json:"crs_sha256"`
 	PublicKeyHex string `json:"public_key_hex"`
+	CRSBytes     []byte `json:"-"`
 }
 
 type targetCorpusEntry struct {
@@ -143,9 +147,24 @@ func readReplayCluster(path string) (replayCluster, error) {
 	if err := json.Unmarshal(data, &cluster); err != nil {
 		return replayCluster{}, err
 	}
-	if cluster.ClusterID == "" || cluster.BMax <= 0 || cluster.CRSSeedHex == "" || cluster.PublicKeyHex == "" {
-		return replayCluster{}, fmt.Errorf("cluster config missing cluster_id, bmax, crs_seed_hex, or public_key_hex")
+	if cluster.Version != "bloc-cluster-v2" {
+		return replayCluster{}, fmt.Errorf("unsupported cluster config version %q", cluster.Version)
 	}
+	if cluster.ClusterID == "" || cluster.BMax <= 0 || cluster.CRSFile == "" || cluster.CRSSHA256 == "" || cluster.PublicKeyHex == "" {
+		return replayCluster{}, fmt.Errorf("cluster config missing cluster_id, bmax, crs_file, crs_sha256, or public_key_hex")
+	}
+	crsPath := cluster.CRSFile
+	if !filepath.IsAbs(crsPath) {
+		crsPath = filepath.Join(filepath.Dir(path), crsPath)
+	}
+	crs, err := os.ReadFile(crsPath)
+	if err != nil {
+		return replayCluster{}, fmt.Errorf("read public CRS: %w", err)
+	}
+	if got := hashHex(crs); !strings.EqualFold(got, strings.TrimSpace(cluster.CRSSHA256)) {
+		return replayCluster{}, fmt.Errorf("public CRS hash mismatch: got %s, expected %s", got, cluster.CRSSHA256)
+	}
+	cluster.CRSBytes = crs
 	return cluster, nil
 }
 
@@ -222,11 +241,10 @@ func parseTargetRawTx(rawHex string) (parsedTargetTx, error) {
 
 func newReplayEncryptor(cluster replayCluster) (*be.ClusterBTE, error) {
 	suite := curves.NewSuite(kilic.NewBLS12381Suite())
-	seed, err := hex.DecodeString(strings.TrimPrefix(cluster.CRSSeedHex, "0x"))
+	btd, err := be.NewBTDFromPublicCRS(suite, cluster.BMax, cluster.CRSBytes)
 	if err != nil {
-		return nil, fmt.Errorf("decode crs seed: %w", err)
+		return nil, fmt.Errorf("load public CRS: %w", err)
 	}
-	btd := be.NewBTDFromSeed(suite, cluster.BMax, seed)
 	pkBytes, err := hex.DecodeString(strings.TrimPrefix(cluster.PublicKeyHex, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("decode public key: %w", err)

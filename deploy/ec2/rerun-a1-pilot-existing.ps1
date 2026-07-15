@@ -137,9 +137,13 @@ try {
   }
 
   $clusterConfig = Join-Path $artifactRootPath "generated\cluster.ec2.json"
+  $crsConfig = Join-Path $artifactRootPath "generated\cluster.ec2.crs"
+  $secretsDir = Join-Path $PSScriptRoot "secrets.ec2"
   $remoteEvalConfig = Join-Path $artifactRootPath "generated\remote-eval.ec2.json"
   if ($RegenerateConfig) {
     $clusterConfig = Join-Path $rerunRoot "generated\cluster.ec2.json"
+    $crsConfig = Join-Path $rerunRoot "generated\cluster.ec2.crs"
+    $secretsDir = Join-Path $rerunRoot "generated\secrets.ec2"
     $remoteEvalConfig = Join-Path $rerunRoot "generated\remote-eval.ec2.json"
     Push-Location (Join-Path $repoRoot "bloc-node")
     $env:GOCACHE = Join-Path (Get-Location) ".gocache"
@@ -162,12 +166,15 @@ try {
     # must also be the initial slot in both configs. Preserve all generated
     # keys and identities while changing only that slot boundary.
     $sourceClusterConfig = $clusterConfig
+    $sourceCRSConfig = $crsConfig
     $sourceRemoteEvalConfig = $remoteEvalConfig
     $clusterConfig = Join-Path $rerunRoot "generated\cluster.ec2.json"
+    $crsConfig = Join-Path $rerunRoot "generated\cluster.ec2.crs"
     $remoteEvalConfig = Join-Path $rerunRoot "generated\remote-eval.ec2.json"
     $cluster = Get-Content -Raw $sourceClusterConfig | ConvertFrom-Json
     $cluster.slot = $FirstSlot
     [System.IO.File]::WriteAllText($clusterConfig, ($cluster | ConvertTo-Json -Depth 100), [System.Text.UTF8Encoding]::new($false))
+    Copy-Item $sourceCRSConfig $crsConfig -Force
     $remote = Get-Content -Raw $sourceRemoteEvalConfig | ConvertFrom-Json
     $remote.initial_slot = $FirstSlot
     [System.IO.File]::WriteAllText($remoteEvalConfig, ($remote | ConvertTo-Json -Depth 100), [System.Text.UTF8Encoding]::new($false))
@@ -175,6 +182,9 @@ try {
 
   foreach ($node in ($inventory.nodes | Sort-Object id)) {
     Invoke-SCP @($clusterConfig, "ubuntu@$($node.public_ip):/etc/bloc/cluster.json") | Out-Null
+    Invoke-SCP @($crsConfig, "ubuntu@$($node.public_ip):/etc/bloc/cluster.crs") | Out-Null
+    Invoke-SCP @((Join-Path $secretsDir "operator-$($node.id).json"), "ubuntu@$($node.public_ip):/etc/bloc/operator.json") | Out-Null
+    Invoke-SSH $node.public_ip "sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json" | Out-Null
     Invoke-SCP @((Join-Path $PSScriptRoot "operator-compose.yaml"), "ubuntu@$($node.public_ip):/opt/bloc/ec2/operator-compose.yaml") | Out-Null
     Invoke-SSH $node.public_ip "set -e; aws ecr get-login-password --region '$awsRegion' | docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$($node.id)' BLOC_IMAGE='$imageUri' docker compose -f operator-compose.yaml pull" | Out-Null
   }

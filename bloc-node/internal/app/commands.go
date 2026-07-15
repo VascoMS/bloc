@@ -2,14 +2,13 @@ package app
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -36,7 +35,12 @@ func genConfig(args []string) error {
 	httpAdvertiseTemplate := fs.String("http-advertise-template", "", "HTTP advertised URL template for remote evaluators")
 	p2pListenTemplate := fs.String("p2p-listen-template", "", "libp2p listen multiaddr template")
 	p2pAdvertiseTemplate := fs.String("p2p-advertise-template", "", "libp2p advertised multiaddr template for peer dialing")
-	out := fs.String("out", "cluster.json", "output config")
+	out := fs.String("out", "cluster.json", "public cluster config output")
+	crsOut := fs.String("crs-out", "", "public CRS output; defaults to cluster.crs beside --out")
+	secretsDir := fs.String("secrets-dir", "", "operator secret directory; defaults to secrets beside --out")
+	secretPathTemplate := fs.String("secret-path-template", "", "optional operator secret path template containing {id}")
+	secretUID := fs.Int("secret-uid", -1, "optional numeric owner UID for generated secret files")
+	secretGID := fs.Int("secret-gid", -1, "optional numeric owner GID for generated secret files")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,24 +54,42 @@ func genConfig(args []string) error {
 	if *threshold < 1 || *threshold > *nodes {
 		return fmt.Errorf("threshold must be in [1,%d]", *nodes)
 	}
+	if *crsOut == "" {
+		*crsOut = filepath.Join(filepath.Dir(*out), "cluster.crs")
+	}
+	if *secretsDir == "" {
+		*secretsDir = filepath.Join(filepath.Dir(*out), "secrets")
+	}
+	if *secretPathTemplate != "" && !strings.Contains(*secretPathTemplate, "{id}") {
+		return fmt.Errorf("secret-path-template must contain {id}")
+	}
 	suite := newSuite()
-	crsSeed := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, crsSeed); err != nil {
+	crs, err := be.GeneratePublicCRS(suite, *bmax)
+	if err != nil {
 		return err
 	}
-	btd := be.NewBTDFromSeed(suite, *bmax, crsSeed)
+	btd, err := be.NewBTDFromPublicCRS(suite, *bmax, crs)
+	if err != nil {
+		return err
+	}
 	shares, pk := btd.KeyGen(*nodes, *threshold)
 	pkHex, err := marshalPointHex(pk)
 	if err != nil {
 		return err
 	}
+	crsRelative, err := filepath.Rel(filepath.Dir(*out), *crsOut)
+	if err != nil {
+		return fmt.Errorf("make CRS path relative to cluster config: %w", err)
+	}
 	cfg := ConfigFile{
+		Version:      clusterConfigVersion,
 		ClusterID:    *clusterID,
 		BMax:         *bmax,
 		N:            *nodes,
 		Threshold:    *threshold,
 		Slot:         *slot,
-		CRSSeedHex:   hex.EncodeToString(crsSeed),
+		CRSFile:      filepath.ToSlash(crsRelative),
+		CRSSHA256:    hashHex(crs),
 		PublicKeyHex: pkHex,
 		Blockspace: BlockspaceConfig{
 			MaxDecryptedGas: *maxDecryptedGas,
@@ -77,6 +99,7 @@ func genConfig(args []string) error {
 		Provider: ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL},
 		Network:  NetworkConfig{Mode: "libp2p"},
 	}
+	secrets := make([]NodeSecretConfig, 0, *nodes)
 	templates, err := resolveAddressTemplates(*addressMode, *httpListenTemplate, *httpAdvertiseTemplate, *p2pListenTemplate, *p2pAdvertiseTemplate)
 	if err != nil {
 		return err
@@ -101,24 +124,52 @@ func genConfig(args []string) error {
 			P2PListenAddr:    p2pListen,
 			P2PAdvertiseAddr: p2pAdvertise,
 			P2PPeerID:        p2pPeerID,
-			P2PPrivKeyHex:    p2pPrivHex,
 		})
 		scalarHex, err := marshalScalarHex(shares[i].V)
 		if err != nil {
 			return err
 		}
-		cfg.Shares = append(cfg.Shares, ShareConfig{OperatorID: int(shares[i].I), ScalarHex: scalarHex})
+		secrets = append(secrets, NodeSecretConfig{
+			Version:           nodeSecretVersion,
+			ClusterID:         *clusterID,
+			OperatorID:        uint64(shares[i].I),
+			BTEShareScalarHex: scalarHex,
+			P2PPrivateKeyHex:  p2pPrivHex,
+		})
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
+	if err := writeFileAtomic(*crsOut, crs, 0644); err != nil {
+		return fmt.Errorf("write public CRS: %w", err)
 	}
-	return os.WriteFile(*out, append(data, '\n'), 0644)
+	if err := writeJSONFileAtomic(*out, cfg, 0644); err != nil {
+		return fmt.Errorf("write public cluster config: %w", err)
+	}
+	for _, secret := range secrets {
+		path := filepath.Join(*secretsDir, fmt.Sprintf("operator-%d.json", secret.OperatorID))
+		if *secretPathTemplate != "" {
+			path = strings.ReplaceAll(*secretPathTemplate, "{id}", strconv.FormatUint(secret.OperatorID, 10))
+		}
+		if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("create operator %d secret directory: %w", secret.OperatorID, err)
+		}
+		if err := writeJSONFileAtomic(path, secret, 0600); err != nil {
+			return fmt.Errorf("write operator %d secrets: %w", secret.OperatorID, err)
+		}
+		if *secretUID >= 0 || *secretGID >= 0 {
+			if err := os.Chown(filepath.Dir(path), *secretUID, *secretGID); err != nil {
+				return fmt.Errorf("set operator %d secret directory owner: %w", secret.OperatorID, err)
+			}
+			if err := os.Chown(path, *secretUID, *secretGID); err != nil {
+				return fmt.Errorf("set operator %d secret owner: %w", secret.OperatorID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func runNode(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "cluster.json", "cluster config")
+	secretsPath := fs.String("secrets", "", "operator-local secret config")
 	idRaw := fs.String("id", "", "operator id; defaults to NODE_ID when unset")
 	slot := fs.Uint64("slot", 0, "slot to run; defaults to config slot")
 	startAfter := fs.Duration("start-after", 0, "start consensus after delay")
@@ -145,7 +196,11 @@ func runNode(args []string) error {
 	if *slot != 0 {
 		cfg.Slot = *slot
 	}
-	node, err := newNode(cfg, id, parseFaults(*fault, *delay))
+	secrets, err := readNodeSecrets(*secretsPath)
+	if err != nil {
+		return err
+	}
+	node, err := newNode(cfg, secrets, id, parseFaults(*fault, *delay))
 	if err != nil {
 		return err
 	}

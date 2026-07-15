@@ -130,6 +130,10 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-001 — Prototype PRF setup exposes setup secrets and insecure diagonal elements
 
 - Severity/category: **P0 — security/cryptography**
+- Remediation status (2026-07-15): **partially remediated**. Active production
+  consumers now receive a versioned public-point artifact and no setup seed or
+  scalar trapdoor. The artifact deliberately retains the inherited `j == i`
+  elements, so the finding remains open and no secure-CRS claim is justified.
 - Stage: BTE setup
 - Evidence: `PRFSetupFromSeed` in `prf/prf.go` derives `xi` and `zi` scalars from
   distributed `CRSSeedHex` and constructs every `g2zixj`, including `j == i`.
@@ -145,6 +149,10 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-002 — Shared cluster configuration contains every secret share and network private key
 
 - Severity/category: **P0 — security/key custody**
+- Remediation status (2026-07-15): **remediated for active prototype
+  workflows**. Local, Docker Compose, and EC2 now use public cluster/CRS files
+  plus one operator-local secret file; legacy combined config is rejected.
+  Trusted-dealer generation and hardened secret storage remain limitations.
 - Stage: cluster setup/deployment
 - Evidence: `ConfigFile` contains `Shares []ShareConfig` and every
   `P2PPrivKeyHex`; `genConfig` writes all entries into one file; `newNode`
@@ -175,6 +183,10 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-004 — Application quorum sender is not bound to authenticated libp2p peer
 
 - Severity/category: **P0 — security/consensus authentication**
+- Remediation status (2026-07-15): **remediated**. Inbound streams require a
+  configured authenticated peer, and envelope/share sender claims must match
+  its unique operator mapping. Outbound addressing is overwritten from local
+  transport state.
 - Stage: operator transport ingress
 - Evidence: the stream handler in `transport_libp2p.go` decodes
   `Envelope.From` and passes it to ACS/share handling without comparing it with
@@ -365,9 +377,9 @@ impact can be closed:
 | HoneyBadger `N` RBC + `N` ABA ACS | `rbc.go`, `bba.go`, `acs.go` | Implemented/adapted | Corrected ACS selection rule follows BBA decisions |
 | HoneyBadger erasure/Merkle RBC reconstruction | `RBC.tryDecodeValue` | Contradicted | Mixed-root filtering and root recomputation are missing |
 | Unpredictable common coin | `BBA.tryOutputAgreement` | Contradicted/deferred | Deterministic epoch parity is only a placeholder |
-| Authenticated asynchronous channels | libp2p plus protobuf envelope | Partially implemented | Connection authentication exists; application sender binding is missing |
+| Authenticated asynchronous channels | libp2p plus protobuf envelope | Implemented for configured prototype membership | Remote peer IDs are uniquely mapped to operators and bind envelope/share sender claims |
 | BEAT-MEV puncturable-PRF BTE | `prf`, `elgamal`, `be/btd.go` | Implemented at prototype level | Core operations and proof equations present |
-| BEAT-MEV secure setup/public parameters | seeded PRF setup | Contradicted | Seed/trapdoor and diagonal CRS shortcuts are insecure |
+| BEAT-MEV secure setup/public parameters | serialized public-point CRS | Contradicted | Seed/trapdoor distribution is removed, but inherited diagonal CRS elements remain insecure |
 | BEAT-MEV Opt-2 sub-batching | `arrangeBatchFor` | Adapted | `ceil(2*sqrt(B))`, collision-frequency raise, deterministic repair |
 | Threshold operator key custody/DKG | trusted-dealer config | Deferred/contradicted | All shares are present in one config; no DKG |
 | Raw Ethereum byte support | AES-GCM hybrid envelope | Adapted | Repository-specific context-bound extension around BTE capsule |

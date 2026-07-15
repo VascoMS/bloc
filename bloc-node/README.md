@@ -14,7 +14,8 @@ read [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md). For the
 validation matrix, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md). For the
 standard demo and experiment flow, read [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
 
-This module is a prototype harness, not a production DVT client. It still uses trusted-dealer configs and a local evaluation environment.
+This module is a prototype harness, not a production DVT client. It still uses
+a trusted setup/key generator and a local evaluation environment.
 
 ## Quick Local Run
 
@@ -28,16 +29,16 @@ go run ./cmd/bloc-node gen-config \
   --max-decrypted-gas 63000 \
   --base-http-port 18300 \
   --base-p2p-port 19300 \
-  --out bloc-cluster.local.json
+  --out cluster.json
 ```
 
 Start four operators:
 
 ```sh
-go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 0 --out results/manual/node-0.json
-go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 1 --out results/manual/node-1.json
-go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 2 --out results/manual/node-2.json
-go run ./cmd/bloc-node run --config bloc-cluster.local.json --id 3 --out results/manual/node-3.json
+go run ./cmd/bloc-node run --config cluster.json --secrets secrets/operator-0.json --id 0 --out results/manual/node-0.json
+go run ./cmd/bloc-node run --config cluster.json --secrets secrets/operator-1.json --id 1 --out results/manual/node-1.json
+go run ./cmd/bloc-node run --config cluster.json --secrets secrets/operator-2.json --id 2 --out results/manual/node-2.json
+go run ./cmd/bloc-node run --config cluster.json --secrets secrets/operator-3.json --id 3 --out results/manual/node-3.json
 ```
 
 Submit one transaction to each operator:
@@ -61,16 +62,20 @@ All correct operators should report the same `batch_id`, merged-set hash, select
 
 ## Config Notes
 
-`gen-config` writes:
+`gen-config` writes three kinds of files:
 
-- operator HTTP and libp2p addresses,
+- public `cluster.json` with operator HTTP/libp2p addresses and peer IDs,
 - explicit HTTP/libp2p listen and advertised addresses for container deployments,
-- the BTE public key,
-- one trusted-dealer secret share per operator,
-- a shared `crs_seed_hex`,
+- the BTE public key plus the path and SHA-256 of public `cluster.crs`,
+- one `secrets/operator-<id>.json` containing only that operator's
+  trusted-dealer BTE share and libp2p private key,
 - blockspace caps and defaults,
-- provider mode,
-- libp2p peer identity details.
+- provider mode.
+
+The clean v2 config boundary rejects legacy files that combine the CRS seed,
+all BTE shares, and all libp2p private keys. The public CRS does not contain the
+setup seed/scalars, but it still retains inherited insecure diagonal elements;
+it is not a production-secure setup.
 
 ACS and BTE share messages use protobuf envelopes over authenticated,
 multiplexed libp2p streams. The generated bindings live in
@@ -151,13 +156,16 @@ Build the sidecar image from the repository root:
 docker build -f bloc-node/Dockerfile -t bloc-node:local .
 ```
 
-Run a node inside a container with a mounted cluster config and `NODE_ID`:
+Run a node inside a container with public config/CRS mounts plus only that
+operator's secret file and `NODE_ID`:
 
 ```sh
 docker run --rm \
   -e NODE_ID=0 \
-  -v "$PWD/bloc-cluster.local.json:/config/cluster.json:ro" \
-  bloc-node:local
+  -v "$PWD/cluster.json:/config/cluster.json:ro" \
+  -v "$PWD/cluster.crs:/config/cluster.crs:ro" \
+  -v "$PWD/secrets/operator-0.json:/run/secrets/operator.json:ro" \
+  bloc-node:local run --config /config/cluster.json --secrets /run/secrets/operator.json
 ```
 
 The node exposes `/healthz`, `/metrics`, `/tx`, `/slot/prepare`,

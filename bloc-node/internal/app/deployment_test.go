@@ -225,6 +225,8 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 		},
 	}
 	options := ec2ConfigOptions{
+		ClusterOut:    "cluster.ec2.json",
+		CRSOut:        "cluster.ec2.crs",
 		ClusterID:     "bloc-ec2-test",
 		BMax:          128,
 		Slot:          7,
@@ -237,15 +239,18 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 		PrometheusURL: "http://controller:9090",
 		GrafanaURL:    "http://controller:3000",
 	}
-	cluster, remote, err := buildEC2Configs(inventory, options)
+	cluster, crs, secrets, remote, err := buildEC2Configs(inventory, options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cluster.N != 4 || cluster.Threshold != 3 || cluster.Slot != 7 {
 		t.Fatalf("unexpected cluster metadata: %+v", cluster)
 	}
-	if len(cluster.Nodes) != 4 || len(cluster.Shares) != 4 {
-		t.Fatalf("unexpected cluster node/share count: nodes=%d shares=%d", len(cluster.Nodes), len(cluster.Shares))
+	if len(cluster.Nodes) != 4 || len(secrets) != 4 || len(crs) == 0 {
+		t.Fatalf("unexpected generated material: nodes=%d secrets=%d crs_bytes=%d", len(cluster.Nodes), len(secrets), len(crs))
+	}
+	if secrets[2].OperatorID != 2 || secrets[2].ClusterID != cluster.ClusterID || secrets[2].BTEShareScalarHex == "" || secrets[2].P2PPrivateKeyHex == "" {
+		t.Fatalf("unexpected operator secret: %+v", secrets[2])
 	}
 	node := cluster.Nodes[2]
 	if node.HTTPListenAddr != "0.0.0.0:8000" || node.HTTPAdvertiseURL != "http://10.0.1.12:8000" {
@@ -281,7 +286,7 @@ func TestBuildEC2ConfigsRejectsMissingHostModeValue(t *testing.T) {
 		ProviderMode: "direct",
 		DefaultTxGas: 21000,
 	}
-	_, _, err := buildEC2Configs(inventory, options)
+	_, _, _, _, err := buildEC2Configs(inventory, options)
 	if err == nil || !strings.Contains(err.Error(), "missing private-dns") {
 		t.Fatalf("unexpected error: %v", err)
 	}

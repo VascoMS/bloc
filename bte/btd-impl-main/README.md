@@ -15,6 +15,10 @@ and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
 - The source groups `G_1` and `G_2` are swapped relative to the paper because `G_1` operations are more efficient in this implementation.
 - The cluster-facing `PlanBatch` path used by `bloc-node` enables BEAT-MEV-style `Opt-2` sub-batching by default: `alpha = ceil(2*sqrt(B))`, raised only when repeated indices require more sub-batches.
 - The integrated path does not currently expose runtime switches for normal combine, `Opt-1`, or parallel combine; use the inherited benchmark code for those comparisons.
+- Active cluster callers load a versioned public CRS artifact rather than a
+  shared setup seed. The artifact still contains inherited diagonal elements
+  marked insecure for a real setup, so this is only partial hardening and not a
+  production CRS.
 - [CLUSTER_BTE.md](/bloc/bte/btd-impl-main/CLUSTER_BTE.md) is retained only as a compatibility pointer to the canonical deep dive.
 
 ## Tests and Benchmarks

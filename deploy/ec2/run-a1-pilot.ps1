@@ -622,6 +622,7 @@ try {
   Pop-Location
 
   Copy-Item (Join-Path $PSScriptRoot "cluster.ec2.json") (Join-Path $artifactRoot "generated\cluster.ec2.json") -Force
+  Copy-Item (Join-Path $PSScriptRoot "cluster.ec2.crs") (Join-Path $artifactRoot "generated\cluster.ec2.crs") -Force
   Copy-Item (Join-Path $PSScriptRoot "remote-eval.ec2.json") (Join-Path $artifactRoot "generated\remote-eval.ec2.json") -Force
 
   $allHosts = @($inventory.controller.public_ip) + @($inventory.nodes | Sort-Object id | ForEach-Object { $_.public_ip })
@@ -670,6 +671,9 @@ try {
 
   foreach ($node in ($inventory.nodes | Sort-Object id)) {
     Invoke-SCP @((Join-Path $PSScriptRoot "cluster.ec2.json"), "ubuntu@$($node.public_ip):/etc/bloc/cluster.json")
+    Invoke-SCP @((Join-Path $PSScriptRoot "cluster.ec2.crs"), "ubuntu@$($node.public_ip):/etc/bloc/cluster.crs")
+    Invoke-SCP @((Join-Path $PSScriptRoot "secrets.ec2\operator-$($node.id).json"), "ubuntu@$($node.public_ip):/etc/bloc/operator.json")
+    Invoke-SSH $node.public_ip "sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json"
     Invoke-SCP @((Join-Path $PSScriptRoot "operator-compose.yaml"), "ubuntu@$($node.public_ip):/opt/bloc/ec2/operator-compose.yaml")
     Invoke-SSH $node.public_ip "set -e; aws ecr get-login-password --region '$AwsRegion' | docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$($node.id)' BLOC_IMAGE='$imageUri' docker compose -f operator-compose.yaml up -d"
   }

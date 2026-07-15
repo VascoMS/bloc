@@ -1,14 +1,12 @@
 package app
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,6 +16,8 @@ import (
 type ec2ConfigOptions struct {
 	InventoryPath   string
 	ClusterOut      string
+	CRSOut          string
+	SecretsDir      string
 	RemoteEvalOut   string
 	ClusterID       string
 	Nodes           int
@@ -64,14 +64,26 @@ func genEC2Config(args []string) error {
 	if err != nil {
 		return err
 	}
-	cluster, remote, err := buildEC2Configs(inventory, options)
+	cluster, crs, secrets, remote, err := buildEC2Configs(inventory, options)
 	if err != nil {
 		return err
 	}
-	if err := writeJSONFile(options.ClusterOut, cluster); err != nil {
+	if err := writeFileAtomic(options.CRSOut, crs, 0644); err != nil {
 		return err
 	}
-	if err := writeJSONFile(options.RemoteEvalOut, remote); err != nil {
+	if err := writeJSONFileAtomic(options.ClusterOut, cluster, 0644); err != nil {
+		return err
+	}
+	for _, secret := range secrets {
+		path := filepath.Join(options.SecretsDir, fmt.Sprintf("operator-%d.json", secret.OperatorID))
+		if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
+			return err
+		}
+		if err := writeJSONFileAtomic(path, secret, 0600); err != nil {
+			return err
+		}
+	}
+	if err := writeJSONFileAtomic(options.RemoteEvalOut, remote, 0644); err != nil {
 		return err
 	}
 	return nil
@@ -82,6 +94,8 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs := flag.NewFlagSet("gen-ec2-config", flag.ContinueOnError)
 	fs.StringVar(&options.InventoryPath, "inventory", "deploy/ec2/inventory.json", "EC2 inventory JSON from Terraform or scripts")
 	fs.StringVar(&options.ClusterOut, "cluster-out", "cluster.ec2.json", "output sidecar cluster config")
+	fs.StringVar(&options.CRSOut, "crs-out", "", "output public CRS artifact; defaults beside cluster config")
+	fs.StringVar(&options.SecretsDir, "secrets-dir", "", "output directory for per-operator secrets; defaults beside cluster config")
 	fs.StringVar(&options.RemoteEvalOut, "remote-eval-out", "remote-eval.ec2.json", "output remote evaluator config")
 	fs.StringVar(&options.ClusterID, "cluster-id", "bloc-ec2", "cluster identifier")
 	fs.IntVar(&options.Nodes, "nodes", 0, "expected operator count; defaults to inventory node count")
@@ -102,6 +116,12 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.StringVar(&options.ControllerURL, "controller-url", "", "optional controller URL or host label to record in metadata")
 	if err := fs.Parse(args); err != nil {
 		return ec2ConfigOptions{}, err
+	}
+	if options.CRSOut == "" {
+		options.CRSOut = filepath.Join(filepath.Dir(options.ClusterOut), "cluster.ec2.crs")
+	}
+	if options.SecretsDir == "" {
+		options.SecretsDir = filepath.Join(filepath.Dir(options.ClusterOut), "secrets.ec2")
 	}
 	if options.BMax < 1 || options.HTTPPort < 1 || options.P2PPort < 1 {
 		return ec2ConfigOptions{}, fmt.Errorf("bmax, http-port, and p2p-port must be positive")
@@ -128,21 +148,21 @@ func readEC2Inventory(path string) (ec2Inventory, error) {
 	return inventory, nil
 }
 
-func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFile, remoteEvalConfig, error) {
+func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFile, []byte, []NodeSecretConfig, remoteEvalConfig, error) {
 	nodes := len(inventory.Nodes)
 	if options.Nodes != 0 && options.Nodes != nodes {
-		return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("nodes=%d does not match %d inventory nodes", options.Nodes, nodes)
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("nodes=%d does not match %d inventory nodes", options.Nodes, nodes)
 	}
 	if nodes < 4 {
-		return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("inventory requires at least 4 operator nodes")
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("inventory requires at least 4 operator nodes")
 	}
 	seen := make(map[int]bool, nodes)
 	for _, node := range inventory.Nodes {
 		if node.ID < 0 || node.ID >= nodes {
-			return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("node id %d must be in [0,%d]", node.ID, nodes-1)
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("node id %d must be in [0,%d]", node.ID, nodes-1)
 		}
 		if seen[node.ID] {
-			return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("duplicate node id %d", node.ID)
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("duplicate node id %d", node.ID)
 		}
 		seen[node.ID] = true
 	}
@@ -152,28 +172,37 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		threshold = 2*f + 1
 	}
 	if threshold < 1 || threshold > nodes {
-		return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("threshold must be in [1,%d]", nodes)
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("threshold must be in [1,%d]", nodes)
 	}
 
 	suite := newSuite()
-	crsSeed := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, crsSeed); err != nil {
-		return ConfigFile{}, remoteEvalConfig{}, err
+	crs, err := be.GeneratePublicCRS(suite, options.BMax)
+	if err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 	}
-	btd := be.NewBTDFromSeed(suite, options.BMax, crsSeed)
+	btd, err := be.NewBTDFromPublicCRS(suite, options.BMax, crs)
+	if err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
+	}
 	shares, pk := btd.KeyGen(nodes, threshold)
 	pkHex, err := marshalPointHex(pk)
 	if err != nil {
-		return ConfigFile{}, remoteEvalConfig{}, err
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
+	}
+	crsRelative, err := filepath.Rel(filepath.Dir(options.ClusterOut), options.CRSOut)
+	if err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 	}
 
 	cluster := ConfigFile{
+		Version:      clusterConfigVersion,
 		ClusterID:    options.ClusterID,
 		BMax:         options.BMax,
 		N:            nodes,
 		Threshold:    threshold,
 		Slot:         options.Slot,
-		CRSSeedHex:   hex.EncodeToString(crsSeed),
+		CRSFile:      filepath.ToSlash(crsRelative),
+		CRSSHA256:    hashHex(crs),
 		PublicKeyHex: pkHex,
 		Blockspace: BlockspaceConfig{
 			MaxDecryptedGas: options.MaxDecryptedGas,
@@ -183,6 +212,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		Provider: ProviderConfig{Mode: options.ProviderMode, MempoolURL: options.MempoolURL},
 		Network:  NetworkConfig{Mode: "libp2p"},
 	}
+	secrets := make([]NodeSecretConfig, 0, nodes)
 	remote := remoteEvalConfig{
 		NodeCount:   nodes,
 		Threshold:   threshold,
@@ -207,20 +237,20 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 	for _, host := range inventory.Nodes {
 		httpHost, err := hostValue(host, options.HTTPHostMode)
 		if err != nil {
-			return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("node %d http host: %w", host.ID, err)
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("node %d http host: %w", host.ID, err)
 		}
 		p2pHost, err := hostValue(host, options.P2PHostMode)
 		if err != nil {
-			return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("node %d p2p host: %w", host.ID, err)
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("node %d p2p host: %w", host.ID, err)
 		}
 		p2pPrivHex, p2pPeerID, err := generateLibP2PIdentity()
 		if err != nil {
-			return ConfigFile{}, remoteEvalConfig{}, err
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 		}
 		httpAdvertise := fmt.Sprintf("http://%s:%d", httpHost, options.HTTPPort)
 		p2pAdvertise, err := p2pMultiaddr(p2pHost, options.P2PPort)
 		if err != nil {
-			return ConfigFile{}, remoteEvalConfig{}, fmt.Errorf("node %d p2p advertise: %w", host.ID, err)
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("node %d p2p advertise: %w", host.ID, err)
 		}
 		cluster.Nodes = append(cluster.Nodes, NodeConfig{
 			ID:               uint64(host.ID),
@@ -231,13 +261,18 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 			P2PListenAddr:    fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", options.P2PPort),
 			P2PAdvertiseAddr: p2pAdvertise,
 			P2PPeerID:        p2pPeerID,
-			P2PPrivKeyHex:    p2pPrivHex,
 		})
 		scalarHex, err := marshalScalarHex(shares[host.ID].V)
 		if err != nil {
-			return ConfigFile{}, remoteEvalConfig{}, err
+			return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 		}
-		cluster.Shares = append(cluster.Shares, ShareConfig{OperatorID: int(shares[host.ID].I), ScalarHex: scalarHex})
+		secrets = append(secrets, NodeSecretConfig{
+			Version:           nodeSecretVersion,
+			ClusterID:         options.ClusterID,
+			OperatorID:        uint64(host.ID),
+			BTEShareScalarHex: scalarHex,
+			P2PPrivateKeyHex:  p2pPrivHex,
+		})
 		remote.Nodes = append(remote.Nodes, remoteEvalNode{
 			ID:     host.ID,
 			URL:    httpAdvertise,
@@ -246,7 +281,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 			Zone:   host.Zone,
 		})
 	}
-	return cluster, remote, nil
+	return cluster, crs, secrets, remote, nil
 }
 
 func validateEC2HostMode(mode string) (string, error) {

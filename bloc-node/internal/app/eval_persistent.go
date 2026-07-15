@@ -47,6 +47,11 @@ type evalSubmission struct {
 }
 
 func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []evalScenario, record func(EvalRun) error) ([]EvalRun, []clusterMeasurement, error) {
+	configBase, err := os.MkdirTemp("", "bloc-eval-suite-config-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.RemoveAll(configBase)
 	groups := make(map[int][]evalScenario)
 	var nodeCounts []int
 	for _, scenario := range scenarios {
@@ -79,7 +84,7 @@ func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []e
 
 		startCluster := func(reason string) error {
 			generation++
-			started, measurement, err := startPersistentCluster(self, outDir, options, group[0], generation, nextSlot, reason)
+			started, measurement, err := startPersistentCluster(self, outDir, configBase, options, group[0], generation, nextSlot, reason)
 			measurements = append(measurements, measurement)
 			if err != nil {
 				consecutiveFailures++
@@ -216,10 +221,11 @@ func buildSubmissionCorpusForSource(scenario evalScenario, options suiteOptions)
 	}
 }
 
-func startPersistentCluster(self, outDir string, options suiteOptions, scenario evalScenario, generation int, initialSlot uint64, reason string) (*persistentCluster, clusterMeasurement, error) {
+func startPersistentCluster(self, outDir, configBase string, options suiteOptions, scenario evalScenario, generation int, initialSlot uint64, reason string) (*persistentCluster, clusterMeasurement, error) {
 	measurement := clusterMeasurement{Nodes: scenario.Nodes, Threshold: scenario.Threshold, Generation: generation, Reason: reason, StartedAt: time.Now().UTC()}
 	clusterRoot := filepath.Join(outDir, "clusters", fmt.Sprintf("n%d", scenario.Nodes))
-	configPath := filepath.Join(clusterRoot, "cluster.json")
+	configRoot := filepath.Join(configBase, fmt.Sprintf("n%d", scenario.Nodes))
+	configPath := filepath.Join(configRoot, "cluster.json")
 	if err := os.MkdirAll(clusterRoot, 0755); err != nil {
 		measurement.Error = err.Error()
 		return nil, measurement, err
@@ -256,7 +262,8 @@ func startPersistentCluster(self, outDir string, options suiteOptions, scenario 
 			return nil, measurement, err
 		}
 		cluster.logFiles = append(cluster.logFiles, logFile)
-		cmd := exec.CommandContext(ctx, self, "run", "--config", configPath, "--id", strconv.Itoa(id), "--slot", strconv.FormatUint(initialSlot, 10))
+		secretsPath := filepath.Join(configRoot, "secrets", fmt.Sprintf("operator-%d.json", id))
+		cmd := exec.CommandContext(ctx, self, "run", "--config", configPath, "--secrets", secretsPath, "--id", strconv.Itoa(id), "--slot", strconv.FormatUint(initialSlot, 10))
 		cmd.Stdout, cmd.Stderr = logFile, logFile
 		if err := cmd.Start(); err != nil {
 			cluster.close()

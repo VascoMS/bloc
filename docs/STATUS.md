@@ -28,12 +28,20 @@ boundary now lives in `docs/ARCHITECTURE.md`, with canonical implementation deep
 dives under `docs/modules/` and the reviewed findings in
 `docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`. The review identified
 correctness and security gaps below the previously exercised test surface,
-including mixed-root RBC reconstruction, unbound libp2p application sender IDs,
-the deterministic BBA placeholder coin, BBA equivocation/future-message
-handling, insecure prototype CRS/key distribution, and unbounded/unverified
-share admission. Existing local campaign results remain useful honest-path
-prototype measurements, but they are not evidence against these adversarial
-findings.
+including mixed-root RBC reconstruction, the deterministic BBA placeholder
+coin, BBA equivocation/future-message handling, insecure diagonal CRS elements,
+and unbounded/unverified share admission. Existing local campaign results remain
+useful honest-path prototype measurements, but they are not evidence against
+these adversarial findings.
+
+The BLOC-owned critical transport and key-distribution boundaries are now
+patched. Production consumers load a versioned, hash-checked public CRS instead
+of a shared setup seed; public cluster configuration is separate from one
+operator-local BTE share/libp2p key file; and inbound envelope/share identities
+must match the authenticated configured libp2p peer. PIR-002 and PIR-004 are
+remediated for the active prototype workflows. PIR-001 is only partially
+remediated because the inherited diagonal CRS elements remain intentionally in
+scope; no secure-CRS claim is made.
 
 The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred until after distributed sidecar deployment evidence exists.
 
@@ -48,7 +56,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   `eval-remote` from a separate controller instance.
 - Success criteria:
   - `bloc-node` can run as a containerized sidecar from mounted cluster config and `NODE_ID`,
-  - generated configs support local and container listen/advertise addresses without breaking old local configs,
+  - generated configs support local and container listen/advertise addresses
+    with a clean v2 public-config/per-operator-secret boundary,
   - each sidecar exposes Prometheus-compatible `/metrics` using counters, gauges, seconds-based histograms, and bounded labels for slot phase, latency stages, message/byte volume, selected tx/gas, HTTP traffic, and result availability,
   - Docker Compose can rehearse a local 4-node sidecar cluster with Prometheus/Grafana or direct `/metrics` visibility,
   - a remote evaluator can drive already-running sidecars and write chart-compatible latency outputs,
@@ -61,28 +70,29 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 1. Plan and implement correctness patches for mixed-root RBC reconstruction,
    conflicting BBA AUX messages, and multi-epoch delayed-message retention,
    with adversarial delivery schedules.
-2. Bind every inbound libp2p peer to its configured operator ID, cap envelope
-   sizes, and restrict share admission to configured sender/index identities.
+2. Cap inbound envelopes and bound retained share candidates; authenticated
+   sender/operator binding is complete.
 3. Run the resulting HBBFT, BTE, and `bloc-node` race suites on Linux.
 4. Implement and locally validate bounded parallel ciphertext decoding only
    after the corrected consensus/transport baseline is green.
 5. Rebuild one image, run a clean EC2 `n=4`, batch-128 recovery probe, and only
    then consider a new optimized cross-AZ `n=4/n=7` campaign.
-6. Design public-CRS generation and per-operator secret provisioning before any
-   production-confidentiality or key-isolation claim.
+6. Design removal of inherited diagonal CRS elements and an auditable setup/DKG
+   ceremony before any production-confidentiality claim.
 
 ## Current Blockers / Risks
 
-- The architecture review found critical unpatched gaps outside the existing
-  honest/reordered test corpus: RBC reconstruction uses ECHO shards from all
-  roots without recomputing the selected Merkle root, and libp2p's authenticated
-  remote peer is not bound to the application sender ID used in ACS quorum
-  counts. Do not treat current distributed results as Byzantine-safety evidence
-  until these findings and their adversarial tests are addressed.
-- The deterministic seeded PRF setup exposes setup exponents and includes
-  diagonal elements marked insecure by the implementation; the shared cluster
-  file also contains every secret share and libp2p private key. These are
-  prototype shortcuts, not a secure BTE setup or key-custody design.
+- The inherited critical RBC gap remains outside the existing honest/reordered
+  test corpus: reconstruction uses ECHO shards from all roots without
+  recomputing the selected Merkle root. Do not treat current distributed
+  results as Byzantine-safety evidence until that finding and its adversarial
+  tests are addressed. The BLOC-owned libp2p sender-binding finding is fixed.
+- The shared setup seed and all-secrets config are removed from active local,
+  Compose, and EC2 workflows. The public artifact still includes diagonal
+  elements marked insecure by the inherited implementation, and one trusted
+  generator still creates all shares. These remain prototype shortcuts, not a
+  secure BTE setup/DKG design. Kubernetes manifests are intentionally deferred
+  and incompatible with the clean v2 config boundary until separately migrated.
 
 - The Merge + Plan correctness patch passes both Go suites, bounded outer and
   capsule decoder fuzzing, and local n4 BMax-128 batches 8/32/128. Its Linux

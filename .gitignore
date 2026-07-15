@@ -31,12 +31,19 @@ pic-node/results/
 credentials.csv
 aws_access_keys.csv
 
-# Temporary local configs with threshold key material
+# Generated public configs/CRS artifacts and operator-local secrets
 cluster.json
+cluster.crs
+secrets/
+operator-*.json
 bloc-node/cluster*.json
+bloc-node/cluster*.crs
+bloc-node/secrets*/
 pic-cluster*.json
 !pic-node/pic-cluster.local.json
 deploy/ec2/cluster*.json
+deploy/ec2/cluster*.crs
+deploy/ec2/secrets*/
 deploy/ec2/remote-eval*.json
 deploy/ec2/inventory.json
 deploy/ec2/prometheus.ec2.yml

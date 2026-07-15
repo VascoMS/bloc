@@ -526,6 +526,7 @@ write_prometheus_config "$inventory_path" "$script_dir/prometheus.ec2.yml"
     --controller-url "$controller_private_ip"
 )
 cp "$script_dir/cluster.ec2.json" "$artifact_root/generated/cluster.ec2.json"
+cp "$script_dir/cluster.ec2.crs" "$artifact_root/generated/cluster.ec2.crs"
 cp "$script_dir/remote-eval.ec2.json" "$artifact_root/generated/remote-eval.ec2.json"
 cp "$script_dir/prometheus.ec2.yml" "$artifact_root/generated/prometheus.ec2.yml"
 
@@ -547,6 +548,9 @@ jq -c '.nodes | sort_by(.id)[]' "$inventory_path" | while read -r node; do
   node_id="$(jq -r '.id' <<< "$node")"
   public_ip="$(jq -r '.public_ip' <<< "$node")"
   scp_ec2 "$script_dir/cluster.ec2.json" "ubuntu@$public_ip:/etc/bloc/cluster.json"
+  scp_ec2 "$script_dir/cluster.ec2.crs" "ubuntu@$public_ip:/etc/bloc/cluster.crs"
+  scp_ec2 "$script_dir/secrets.ec2/operator-${node_id}.json" "ubuntu@$public_ip:/etc/bloc/operator.json"
+  ssh_ec2 "$public_ip" "sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json"
   scp_ec2 "$script_dir/operator-compose.yaml" "ubuntu@$public_ip:/opt/bloc/ec2/operator-compose.yaml"
   if [[ "$image_distribution" == "ecr" ]]; then
     ssh_ec2 "$public_ip" "set -e; aws ecr get-login-password --region '$aws_region' | docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$node_id' BLOC_IMAGE='$image_uri' docker compose -f operator-compose.yaml up -d"

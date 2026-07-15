@@ -160,3 +160,35 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: A layered structure lets thesis reviewers understand the complete protocol before drilling into source-backed implementation detail, while giving future changes one unambiguous documentation owner.
 - Consequences: Architecture work must update the affected module deep dive as well as the root document when a cross-module boundary changes. `CLUSTER_BTE.md` remains only as a compatibility pointer. Historical review findings live under `docs/archive/` and are not competing current architecture.
 - Related files: `docs/ARCHITECTURE.md`, `docs/modules/`, `docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`, `AGENTS.md`, `docs/CODEX_GUIDE.md`
+
+## 0014. Separate public setup material from operator-local secrets and bind transport identity
+
+- Date: 2026-07-15
+- Status: Accepted
+- Context: Active configuration distributed the deterministic PRF seed, every
+  BTE share, and every libp2p private key to every operator. The libp2p stream
+  authenticated a peer but did not bind it to the application sender used in
+  ACS thresholds and share admission.
+- Options considered: retain the combined file as a prototype shortcut; add an
+  unsafe compatibility mode; make a clean versioned break to public cluster/CRS
+  artifacts and one secret file per operator while binding sender claims to the
+  authenticated peer.
+- Decision: `bloc-cluster-v2` references a hash-checked, versioned public CRS
+  containing curve points but no setup seed/scalars. `bloc-node-secret-v1`
+  contains exactly one BTE share and libp2p private key and must match the
+  cluster, requested operator, and configured peer ID. Inbound and outbound
+  envelope identities are derived or checked against transport state. Legacy
+  combined configs are rejected.
+- Rationale: The prototype can enforce operator isolation and authenticated
+  membership without waiting for DKG. A clean break prevents silent fallback
+  to the insecure deployment shape.
+- Consequences: Local, Compose, and EC2 workflows are migrated; secret files
+  are excluded from experiment artifacts. Kubernetes remains deferred and is
+  not compatible with v2 until separately migrated. PIR-002 and PIR-004 are
+  addressed, but PIR-001 remains partially open because the public artifact
+  intentionally retains inherited diagonal elements. Setup is still a trusted
+  ceremony, not DKG/MPC or a production-secure BEAT-MEV CRS.
+- Related files: `bte/btd-impl-main/prf/prf.go`,
+  `bte/btd-impl-main/be/btd.go`, `bloc-node/internal/app/config.go`,
+  `bloc-node/internal/app/transport_libp2p.go`, `deploy/docker-compose/`,
+  `deploy/ec2/`

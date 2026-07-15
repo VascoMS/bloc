@@ -124,6 +124,45 @@ func TestHybridEncryptionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPublicCRSArtifactSupportsHybridRoundTrip(t *testing.T) {
+	suite := curves.NewSuite(kilic.NewBLS12381Suite())
+	encoded, err := GeneratePublicCRS(suite, 8)
+	require.NoError(t, err)
+	require.NotEmpty(t, encoded)
+
+	btd, err := NewBTDFromPublicCRS(suite, 8, encoded)
+	require.NoError(t, err)
+	shares, pk := btd.KeyGen(4, 3)
+	cluster := NewClusterBTE(btd, pk, shares)
+
+	ct, err := cluster.EncryptTx([]byte("public CRS round trip"), 3, "cluster-a", 9)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+	var decryptionShares []DecryptionShare
+	for _, secret := range cluster.Shares[:3] {
+		decShare, shareErr := cluster.MakeShare(secret, plan, 0)
+		require.NoError(t, shareErr)
+		decryptionShares = append(decryptionShares, decShare)
+	}
+	results, err := cluster.CombineShares(plan, decryptionShares)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Err)
+	require.Equal(t, []byte("public CRS round trip"), results[0].RawTx)
+
+	_, err = NewBTDFromPublicCRS(suite, 7, encoded)
+	require.ErrorContains(t, err, "does not match expected BMax")
+	_, err = NewBTDFromPublicCRS(suite, 8, append(append([]byte(nil), encoded...), 0))
+	require.ErrorContains(t, err, "trailing public CRS bytes")
+	_, err = NewBTDFromPublicCRS(suite, 8, encoded[:len(encoded)-1])
+	require.Error(t, err)
+	badMagic := append([]byte(nil), encoded...)
+	badMagic[0] ^= 1
+	_, err = NewBTDFromPublicCRS(suite, 8, badMagic)
+	require.ErrorContains(t, err, "invalid public CRS magic")
+}
+
 func TestCombineSharesAcceptsAnyValidThresholdSubset(t *testing.T) {
 	cluster := newTestCluster(t, 16, 4, 3)
 	rawTxs := make([][]byte, 8)

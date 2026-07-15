@@ -55,7 +55,7 @@ func TestNewNodeRejectsLegacyTCPMode(t *testing.T) {
 	_, err := newNode(ConfigFile{
 		Network: NetworkConfig{Mode: "tcp"},
 		Nodes:   []NodeConfig{{ID: 0, HTTPAddr: "127.0.0.1:1"}},
-	}, 0, FaultConfig{})
+	}, NodeSecretConfig{}, 0, FaultConfig{})
 	if err == nil || !strings.Contains(err.Error(), "only libp2p is supported") {
 		t.Fatalf("newNode error = %v, want unsupported network mode", err)
 	}

@@ -162,8 +162,8 @@ For every entry it:
 
 1. decodes a signed Ethereum transaction;
 2. requires a nonzero chain ID and recovers the sender;
-3. reconstructs the BTE public object from `CRSSeedHex`, `BMax`, and the public
-   key in cluster configuration;
+3. verifies the configured CRS SHA-256 and reconstructs the BTE public object
+   from the versioned public CRS artifact, `BMax`, and public key;
 4. calls `EncryptTx(raw, index % BMax, clusterID, slot)`;
 5. encodes calldata using the custom placeholder format;
 6. derives a deterministic mock private key from the corpus index;
@@ -265,8 +265,8 @@ Run the complete module suite with `go test ./...` from `mempool-il`.
 - Public and provider-backed sources are approximations of an execution
   client's complete mempool view.
 - `Loop` exists in replay configuration but is not used by the current source.
-- The replay service consumes a cluster file that also contains prototype
-  secret material, although the replay code reads only public-key/setup fields.
+- The replay service consumes only the public cluster JSON and CRS artifact; it
+  has no access to operator shares or libp2p private keys.
 - The service list hash does not include every placeholder metadata field and
   is not a cross-module protocol identity.
 - There is no authentication, pagination, response-size contract, persistence,

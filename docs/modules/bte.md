@@ -83,21 +83,25 @@ the paper's source-group roles because operations in `G1` are faster in this
 backend. Threshold ElGamal and proof commitments use `G1`; puncturable PRF
 support uses `G1`, `G2`, and the pairing target `GT`.
 
-PRF setup samples or derives per-index scalars `xi[i]` and `zi[i]`, then builds
-the public-style group elements needed by puncture and evaluation. The
-integrated node uses `PRFSetupFromSeed` so every process reconstructs identical
-state from `CRSSeedHex`.
+PRF setup samples per-index scalars `xi[i]` and `zi[i]`, builds the group
+elements needed by puncture and evaluation, serializes only public curve points
+with `MarshalPublicBinary`, and discards the generating scalars. The versioned
+artifact records suite identity, `BMax`, `G1xi`, `g2zi`, and the row-major
+`BMax * BMax` cross-index table. `PRFSetupFromPublic` rejects the wrong version,
+suite, domain, malformed points, truncation, and trailing bytes.
 
-This deterministic implementation is not a secure public CRS construction:
-the distributed seed reproduces the setup exponents, and the setup map includes
-the `j == i` elements that the source comment explicitly says must not be
-published in a real setup. The current setup is suitable only for reproducible
-prototype execution.
+Production `bloc-node` and replay-placeholder callers load this artifact via
+`NewBTDFromPublicCRS`; seeded constructors remain for generic compatibility.
+Removing the shared seed prevents nodes from recovering the setup scalars, but
+this is only a partial remediation: the artifact intentionally retains `j == i`
+elements that the inherited source says must not be published in a real setup.
+It is still prototype trusted setup, not a secure BEAT-MEV CRS.
 
 Threshold ElGamal `KeyGen(n,t)` samples one master scalar, creates a degree
 `t-1` Shamir polynomial, returns `n` private shares, and commits the polynomial
-to obtain the public key. Cluster generation serializes all shares into one
-prototype config; each node selects its own entry at runtime.
+to obtain the public key. The trusted generator writes the public key to
+`cluster.json` and one share to each `secrets/operator-<id>.json`; a node rejects
+a secret whose cluster or operator identity does not match.
 
 ### 2. BTE capsule encryption
 
@@ -347,10 +351,9 @@ Implementation-specific adaptations and deviations are:
 - deterministic binary encodings and `BatchID` are repository interfaces;
 - the integrated API fixes Opt-2 instead of exposing normal/Opt-1/parallel
   choices;
-- setup is reproduced from a distributed seed and includes insecure diagonal
+- setup uses a serialized public artifact but still includes insecure diagonal
   elements; and
-- key generation/configuration is a trusted-dealer prototype without DKG or
-  isolated share custody.
+- key generation/configuration is a trusted-dealer prototype without DKG.
 
 ## Test Evidence
 
@@ -378,9 +381,10 @@ in [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md).
 
 ## Known Limitations
 
-- The setup seed exposes setup exponents and the implementation includes CRS
-  elements explicitly marked insecure for real setup.
-- Generated cluster configuration contains every trusted-dealer secret share.
+- The public CRS no longer exposes setup scalars, but still includes elements
+  explicitly marked insecure for real setup.
+- Setup and threshold shares still come from one trusted generator rather than
+  an auditable MPC ceremony and DKG.
 - Decryption shares have no public correctness proof or attribution mechanism.
 - Combination may enumerate a large number of threshold subsets when invalid
   extras are admitted.

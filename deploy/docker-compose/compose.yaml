@@ -25,8 +25,18 @@ services:
       - bloc-compose
       - --out
       - /config/cluster.json
+      - --secret-path-template
+      - /operator-secrets/{id}/operator.json
+      - --secret-uid
+      - "10001"
+      - --secret-gid
+      - "10001"
     volumes:
       - bloc-config:/config
+      - bloc-secret-0:/operator-secrets/0
+      - bloc-secret-1:/operator-secrets/1
+      - bloc-secret-2:/operator-secrets/2
+      - bloc-secret-3:/operator-secrets/3
 
   bloc-node-0: &bloc-node
     image: bloc-node:local
@@ -35,9 +45,10 @@ services:
         condition: service_completed_successfully
     environment:
       NODE_ID: "0"
-    command: ["run", "--config", "/config/cluster.json"]
+    command: ["run", "--config", "/config/cluster.json", "--secrets", "/secrets/operator.json"]
     volumes:
       - bloc-config:/config:ro
+      - bloc-secret-0:/secrets:ro
     ports:
       - "18000:8000"
 
@@ -45,6 +56,9 @@ services:
     <<: *bloc-node
     environment:
       NODE_ID: "1"
+    volumes:
+      - bloc-config:/config:ro
+      - bloc-secret-1:/secrets:ro
     ports:
       - "18001:8001"
 
@@ -52,6 +66,9 @@ services:
     <<: *bloc-node
     environment:
       NODE_ID: "2"
+    volumes:
+      - bloc-config:/config:ro
+      - bloc-secret-2:/secrets:ro
     ports:
       - "18002:8002"
 
@@ -59,6 +76,9 @@ services:
     <<: *bloc-node
     environment:
       NODE_ID: "3"
+    volumes:
+      - bloc-config:/config:ro
+      - bloc-secret-3:/secrets:ro
     ports:
       - "18003:8003"
 
@@ -120,3 +140,7 @@ services:
 
 volumes:
   bloc-config:
+  bloc-secret-0:
+  bloc-secret-1:
+  bloc-secret-2:
+  bloc-secret-3:

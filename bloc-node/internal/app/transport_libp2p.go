@@ -22,9 +22,10 @@ const blocEnvelopeProtocol = protocol.ID("/bloc/envelope/1.0.0")
 // LibP2PTransport carries addressed ACS and share messages over authenticated,
 // multiplexed libp2p streams.
 type LibP2PTransport struct {
-	node  *Node
-	codec EnvelopeCodec
-	host  host.Host
+	node          *Node
+	codec         EnvelopeCodec
+	host          host.Host
+	peerOperators map[peer.ID]uint64
 }
 
 func newLibP2PTransport(node *Node, codec EnvelopeCodec) *LibP2PTransport {
@@ -34,7 +35,12 @@ func newLibP2PTransport(node *Node, codec EnvelopeCodec) *LibP2PTransport {
 // Start creates the libp2p host, installs the direct-envelope stream handler,
 // and begins static peer connection retries.
 func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) error {
-	priv, err := unmarshalLibP2PPrivateKey(t.node.self.P2PPrivKeyHex)
+	peerOperators, err := operatorByPeerID(t.node.peers)
+	if err != nil {
+		return err
+	}
+	t.peerOperators = peerOperators
+	priv, err := unmarshalLibP2PPrivateKey(t.node.p2pPrivateKeyHex)
 	if err != nil {
 		return err
 	}
@@ -49,6 +55,12 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 	t.host = h
 	h.SetStreamHandler(blocEnvelopeProtocol, func(s network.Stream) {
 		defer s.Close()
+		remotePeer := s.Conn().RemotePeer()
+		operatorID, known := t.peerOperators[remotePeer]
+		if !known {
+			log.Printf("reject libp2p stream from unconfigured peer_id=%s", remotePeer)
+			return
+		}
 		data, err := io.ReadAll(s)
 		if err != nil {
 			log.Printf("read libp2p stream: %v", err)
@@ -59,10 +71,8 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 			log.Printf("decode libp2p stream envelope: %v", err)
 			return
 		}
-		if env.From == t.node.self.ID {
-			return
-		}
-		if env.Direct && env.To != t.node.self.ID {
+		if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, env); err != nil {
+			log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
 			return
 		}
 		handler(env, len(data))
@@ -72,20 +82,59 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 	return nil
 }
 
+func validateAuthenticatedEnvelope(operatorID, selfID uint64, env WireEnvelope) error {
+	if env.From != operatorID {
+		return fmt.Errorf("authenticated operator=%d asserted_from=%d", operatorID, env.From)
+	}
+	if !env.Direct || env.To != selfID {
+		return fmt.Errorf("authenticated operator=%d direct=%t to=%d expected_to=%d", operatorID, env.Direct, env.To, selfID)
+	}
+	if env.Share != nil && env.Share.OperatorID != int(operatorID) {
+		return fmt.Errorf("authenticated operator=%d asserted_share_operator=%d", operatorID, env.Share.OperatorID)
+	}
+	return nil
+}
+
 // Send writes one addressed envelope to a fresh logical stream. libp2p
 // multiplexes these streams over persistent peer connections.
-func (t *LibP2PTransport) Send(ctx context.Context, _ uint64, env WireEnvelope) (int, error) {
+func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope) (int, error) {
+	if _, ok := t.node.peers[to]; !ok {
+		return 0, fmt.Errorf("unknown peer %d", to)
+	}
+	env = authenticatedOutboundEnvelope(t.node.self.ID, to, env)
 	data, err := t.codec.Encode(env)
 	if err != nil {
 		return 0, err
 	}
-	if !env.Direct {
-		return 0, fmt.Errorf("libp2p transport requires an addressed direct envelope")
-	}
-	if err := t.sendStream(ctx, env.To, data); err != nil {
+	if err := t.sendStream(ctx, to, data); err != nil {
 		return 0, err
 	}
 	return len(data), nil
+}
+
+func authenticatedOutboundEnvelope(from, to uint64, env WireEnvelope) WireEnvelope {
+	env.From = from
+	env.To = to
+	env.Direct = true
+	return env
+}
+
+func operatorByPeerID(peers map[uint64]NodeConfig) (map[peer.ID]uint64, error) {
+	operators := make(map[peer.ID]uint64, len(peers))
+	for operatorID, cfg := range peers {
+		if cfg.P2PPeerID == "" {
+			return nil, fmt.Errorf("operator %d has no configured libp2p peer id", operatorID)
+		}
+		peerID, err := peer.Decode(cfg.P2PPeerID)
+		if err != nil {
+			return nil, fmt.Errorf("decode libp2p peer id for operator %d: %w", operatorID, err)
+		}
+		if previous, duplicate := operators[peerID]; duplicate {
+			return nil, fmt.Errorf("libp2p peer id %s is assigned to operators %d and %d", peerID, previous, operatorID)
+		}
+		operators[peerID] = operatorID
+	}
+	return operators, nil
 }
 
 // Ready reports whether this host has a direct connection to every configured

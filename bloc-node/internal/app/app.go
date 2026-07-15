@@ -59,7 +59,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `usage:
   bloc-node gen-config --nodes 4 --threshold 3 --bmax 128 --out cluster.json
   bloc-node gen-ec2-config --inventory deploy/ec2/inventory.json --cluster-out cluster.ec2.json --remote-eval-out remote-eval.ec2.json
-  bloc-node run --config cluster.json --id 0 --slot 1 --start-after 3s
+  bloc-node run --config cluster.json --secrets secrets/operator-0.json --id 0 --slot 1 --start-after 3s
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results
   bloc-node eval-suite --profile m1-baseline --experiment-id m1-baseline --out-dir results/m1-local/baseline-persistent

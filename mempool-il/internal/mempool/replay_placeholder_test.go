@@ -65,8 +65,14 @@ func TestReplayPlaceholderSourceEncryptsCorpusTargets(t *testing.T) {
 func writeReplayFixture(t *testing.T, dir string) (*be.ClusterBTE, string, string, []byte) {
 	t.Helper()
 	suite := curves.NewSuite(kilic.NewBLS12381Suite())
-	seed := []byte("0123456789abcdef0123456789abcdef")
-	btd := be.NewBTDFromSeed(suite, 8, seed)
+	crs, err := be.GeneratePublicCRS(suite, 8)
+	if err != nil {
+		t.Fatalf("generate public CRS: %v", err)
+	}
+	btd, err := be.NewBTDFromPublicCRS(suite, 8, crs)
+	if err != nil {
+		t.Fatalf("load public CRS: %v", err)
+	}
 	shares, pk := btd.KeyGen(4, 3)
 	cluster := be.NewClusterBTE(btd, pk, shares)
 	pkBytes, err := pk.MarshalBinary()
@@ -74,12 +80,17 @@ func writeReplayFixture(t *testing.T, dir string) (*be.ClusterBTE, string, strin
 		t.Fatalf("marshal pk: %v", err)
 	}
 	clusterDoc := map[string]any{
+		"version":        "bloc-cluster-v2",
 		"cluster_id":     "replay-test",
 		"bmax":           8,
 		"n":              4,
 		"threshold":      3,
-		"crs_seed_hex":   hex.EncodeToString(seed),
+		"crs_file":       "cluster.crs",
+		"crs_sha256":     hashHex(crs),
 		"public_key_hex": hex.EncodeToString(pkBytes),
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cluster.crs"), crs, 0644); err != nil {
+		t.Fatalf("write CRS: %v", err)
 	}
 	clusterPath := filepath.Join(dir, "cluster.json")
 	data, _ := json.Marshal(clusterDoc)

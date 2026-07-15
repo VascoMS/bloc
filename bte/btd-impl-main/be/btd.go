@@ -90,6 +90,33 @@ func NewBTDFromSeed(suite curves.Suite, B int, seed []byte) *BTD {
 	}
 }
 
+// GeneratePublicCRS performs the prototype trusted setup and returns only the
+// reusable public parameters. The setup seed and scalars are not serialized.
+func GeneratePublicCRS(suite curves.Suite, B int) ([]byte, error) {
+	if B <= 0 {
+		return nil, fmt.Errorf("BMax must be positive")
+	}
+	setup := prf.PRFSetup(suite, B, true)
+	return setup.MarshalPublicBinary(defaultSuiteID)
+}
+
+// NewBTDFromPublicCRS constructs BTD state from the public setup artifact used
+// by production cluster participants.
+func NewBTDFromPublicCRS(suite curves.Suite, B int, encoded []byte) (*BTD, error) {
+	setup, err := prf.PRFSetupFromPublic(suite, defaultSuiteID, B, encoded)
+	if err != nil {
+		return nil, err
+	}
+	eg := elgamal.NewElGamal(suite.G1(), suite.RandomStream())
+	return &BTD{
+		suite: suite,
+		prf:   setup,
+		eg:    eg,
+		B:     B,
+		H:     &Hasher{hash: suite.Hash()},
+	}, nil
+}
+
 func (b *BTD) KeyGen(n, t int) ([]*share.PriShare, kyber.Point) {
 	// Key Generation is just ElGamal KeyGen
 	sk, pk := b.eg.KeyGen(n, t)

@@ -49,10 +49,12 @@ generated, but it is an independently configured value.
 The paper model assumes authenticated asynchronous channels, an unpredictable
 common coin, correctly generated cryptographic public parameters, and operators
 that hold only their own secret shares. The prototype only partially realizes
-those assumptions. libp2p authenticates connections, but the application sender
-field is not yet bound to the remote peer identity. BBA uses an epoch-parity
-placeholder coin. Generated cluster configuration contains the setup seed and
-all secret shares. These differences prevent a production-security claim.
+those assumptions. The active transport binds envelope and share sender claims
+to the authenticated configured libp2p peer, and generated configuration gives
+each operator only its own BTE share and libp2p private key. BBA still uses an
+epoch-parity placeholder coin, setup is trusted-dealer rather than DKG/MPC, and
+the public CRS deliberately retains inherited insecure diagonal elements.
+These differences prevent a production-security claim.
 
 ## System Components
 

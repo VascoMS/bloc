@@ -139,7 +139,12 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 		return run, err
 	}
 	run.Faults = faults
-	configPath := filepath.Join(runDir, "cluster.json")
+	configRoot, err := os.MkdirTemp("", "bloc-eval-config-*")
+	if err != nil {
+		return run, err
+	}
+	defer os.RemoveAll(configRoot)
+	configPath := filepath.Join(configRoot, "cluster.json")
 	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--out", configPath}
 	if out, err := exec.Command(self, args...).CombinedOutput(); err != nil {
 		return run, fmt.Errorf("gen-config: %w: %s", err, strings.TrimSpace(string(out)))
@@ -148,7 +153,8 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	defer cancel()
 	procs := make([]*exec.Cmd, 0, nodes)
 	for id := 0; id < nodes; id++ {
-		nodeArgs := []string{"run", "--config", configPath, "--id", strconv.Itoa(id), "--out", filepath.Join(runDir, fmt.Sprintf("node-%d-result.json", id))}
+		secretsPath := filepath.Join(configRoot, "secrets", fmt.Sprintf("operator-%d.json", id))
+		nodeArgs := []string{"run", "--config", configPath, "--secrets", secretsPath, "--id", strconv.Itoa(id), "--out", filepath.Join(runDir, fmt.Sprintf("node-%d-result.json", id))}
 		if fault, ok := faults[uint64(id)]; ok {
 			nodeArgs = append(nodeArgs, "--fault", fault)
 		}

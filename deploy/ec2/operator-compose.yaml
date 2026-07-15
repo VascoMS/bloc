@@ -4,9 +4,11 @@ services:
     restart: unless-stopped
     environment:
       NODE_ID: ${NODE_ID:?set NODE_ID for this EC2 operator}
-    command: ["run", "--config", "/config/cluster.json"]
+    command: ["run", "--config", "/config/cluster.json", "--secrets", "/run/secrets/operator.json"]
     volumes:
       - /etc/bloc/cluster.json:/config/cluster.json:ro
+      - /etc/bloc/cluster.crs:/config/cluster.ec2.crs:ro
+      - /etc/bloc/operator.json:/run/secrets/operator.json:ro
     ports:
       - "8000:8000"
       - "9000:9000"

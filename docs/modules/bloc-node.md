@@ -37,21 +37,18 @@ prototype control and evidence surface.
 `ConfigFile` contains:
 
 - cluster ID, slot, `N`, BTE threshold, and `BMax`;
-- deterministic PRF setup seed and BTE public key;
-- every node's HTTP/libp2p listen and advertise addresses, peer ID, and private
-  libp2p identity;
-- every operator's threshold secret share;
+- public CRS path and SHA-256 plus the BTE public key;
+- every node's HTTP/libp2p listen and advertise addresses and peer ID;
 - blockspace limits; and
 - provider/network modes.
 
 `gen-config` requires at least four nodes, derives `F = floor((N-1)/3)`, and
-defaults BTE threshold to `2F+1`. It creates one random setup seed, one
-trusted-dealer threshold key, static Ed25519 libp2p identities, and a single
-shared JSON file.
-
-At runtime a node selects its own BTE share and network identity, but the file
-still contains all operators' private material. This is convenient for local
-experiments and incompatible with production threshold isolation.
+defaults BTE threshold to `2F+1`. It creates a versioned `cluster.crs`, public
+`cluster.json`, one trusted-dealer threshold key, static Ed25519 libp2p
+identities, and `secrets/operator-<id>.json` files. Each secret file contains
+only that operator's share and private identity. `run` requires `--secrets` and
+rejects legacy combined config, cluster/operator mismatches, and a private key
+that does not derive the configured peer ID.
 
 `normalizeConfig` supplies compatibility defaults for old address fields,
 direct provider mode, libp2p, and default transaction gas. It does not fully
@@ -185,16 +182,14 @@ higher-ID peers; health becomes ready once every configured peer is connected.
 Each envelope uses a fresh logical stream over multiplexed persistent
 connections. `writeAll` handles short writes before `CloseWrite`.
 
-Inbound streams are read to EOF, decoded, and checked for self-claimed sender
-and addressed recipient. The current handler does not:
-
-- cap the bytes read from one stream;
-- reject connections from peers outside configured membership; or
-- bind `Envelope.From` to `stream.Conn().RemotePeer()`.
-
-libp2p authenticates the connection, but without that final mapping the
-`hbbft` sender ID used for quorum counts is still caller-controlled. This is a
-confirmed security/correctness finding.
+Before reading an inbound stream, the handler maps
+`stream.Conn().RemotePeer()` through the unique configured peer-ID membership
+map and rejects unknown peers. After decoding, it requires `Envelope.From` to
+match that authenticated operator, requires a direct envelope addressed to the
+local operator, and requires a share's operator ID to match the same identity.
+Outbound routing overwrites `From`, `To`, and `Direct` from local transport
+state rather than trusting caller-populated fields. Inbound stream bytes remain
+uncapped and are tracked as a separate resource-hardening issue.
 
 ### Node-level routing and serialization
 
@@ -412,7 +407,8 @@ metrics.
 
 Current `bloc-node` tests cover:
 
-- configuration compatibility and libp2p-only enforcement;
+- v2 public/secret config separation, legacy rejection, CRS loading, operator
+  binding, peer-key derivation, and libp2p-only enforcement;
 - protobuf round trips for every ACS/share payload and inclusion lists;
 - deterministic merge, bounds, invalid candidates, duplicates, conflicting
   first winner, and empty selection;
@@ -424,19 +420,22 @@ Current `bloc-node` tests cover:
 - share filtering, combine threshold admission, single-flight, retry on new
   shares, and successful-result finality;
 - deterministic signed Ethereum test transactions;
-- complete transport writes and HTTP connection reuse; and
+- authenticated envelope/share sender validation, complete transport writes,
+  and HTTP connection reuse; and
 - evaluator scheduling, consistency, metrics boundaries, and artifact policy.
 
-The suite does not currently test remote-peer-to-application-sender binding,
-unknown share identities, inbound stream size limits, terminal failure results,
-or a deterministic invalid-Ethereum fallback.
+The suite tests the sender-binding validation boundary directly but does not yet
+exercise a malicious remote stream end-to-end. It also does not cover inbound
+stream size limits, terminal failure results, or a deterministic
+invalid-Ethereum fallback.
 
 Run `go test ./...` from `bloc-node`.
 
 ## Known Limitations
 
-- Shared prototype config defeats production BTE share and libp2p key isolation.
-- Authenticated libp2p peer identity is not bound to quorum/share sender fields.
+- Setup and operator secrets still originate at one trusted generator; this is
+  isolation for the prototype deployment, not DKG or hardened key custody.
+- The public CRS still includes inherited insecure diagonal elements.
 - Inbound streams are unbounded and share admission can grow memory and combine
   work.
 - `mempool-http` proposal fetch has no explicit timeout.

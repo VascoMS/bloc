@@ -261,7 +261,11 @@ function Merge-PhaseOutputs {
 }
 
 Record-Command "git rev-parse --short=12 HEAD"
-$dirty = @(& git -C $repoRoot status --porcelain -- bloc-node bte sbc deploy/ec2 latency-charts)
+$dirty = @(& git -C $repoRoot status --porcelain -- `
+  ':(glob)bloc-node/**/*.go' bloc-node/go.mod bloc-node/go.sum bloc-node/Dockerfile `
+  bte sbc deploy/ec2/run-m3-cross-region.ps1 deploy/ec2/terraform-cross-region `
+  deploy/ec2/operator-compose.yaml deploy/ec2/controller-compose.yaml `
+  latency-charts/src latency-charts/tests latency-charts/README.md)
 if (-not $PlanOnly -and $dirty.Count -gt 0) { throw "relevant campaign sources are uncommitted: $($dirty -join '; ')" }
 Record-Command "aws sts get-caller-identity --profile $AwsProfile"
 Invoke-Checked { & $aws sts get-caller-identity --profile $AwsProfile --output json | Set-Content -Encoding utf8 (Join-Path $campaignRoot "aws-caller-identity.json") } "AWS identity preflight"

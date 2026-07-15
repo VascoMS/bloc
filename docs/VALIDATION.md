@@ -478,6 +478,43 @@ Acceptance criteria:
   leftover EC2 instances, EBS volumes, VPC, ECR repository, temporary key pair,
   IAM role, or instance profile.
 
+### Cross-Region Latency Campaign
+
+The initial cross-region campaign uses private VPC peering between `us-east-1`
+and `eu-west-1`, a `t3.medium` controller in the primary region, and
+round-robin `t3.medium` operators. Run a plan-only check first:
+
+```powershell
+.\deploy\ec2\run-m3-cross-region.ps1 `
+  -AdminCidrs "127.0.0.1/32" `
+  -AwsProfile bloc `
+  -PlanOnly `
+  -Unattended
+```
+
+Plan-only mode may record an unavailable quota check when the deploy identity
+lacks `servicequotas:GetServiceQuota`; it still validates the resource plans,
+but the runner refuses a real apply until quota is positively verified in both
+regions.
+
+Before the full matrix, run an `n=4`, batch-8 smoke with one warmup and three
+measurements. The accepted campaign uses `n=4,7`, batches `8,32,128`, five
+warmups, thirty measurements, and a 60-second timeout. Thirty samples support
+Type-7 p50/p95, not p99.
+
+The four-stage report must add to `total_slot_us` within 20 microseconds:
+
+1. Proposal: `proposal_preparation_us`.
+2. ACS: `acs_us`.
+3. Merge + Plan: `merge_plan_us`.
+4. Decryption + Materialization: `threshold_wait_us + combine_us + materialization_us`.
+
+Acceptance also requires exact sample counts, all successful and consistent
+slots, requested selected-ciphertext counts, finalized node metrics, all
+Prometheus targets up, correct placement and instance types, one image digest,
+and empty cleanup checks in both regions. Operator secrets and temporary SSH
+keys are excluded from campaign artifacts.
+
 ### EC2 Merge/Plan Attribution
 
 Run `deploy/ec2/run-merge-plan-attribution.ps1` only after the relevant

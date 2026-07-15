@@ -394,6 +394,28 @@ keeping private-IP BLOC traffic inside one VPC. Do not run a `t3.small` `n=10`
 EC2 phase unless the AWS account has enough vCPU quota for 10 operators plus
 the controller.
 
+For standalone two-region latency evidence, use the dedicated cross-region
+wrapper. It creates privately peered VPCs in `us-east-1` and `eu-west-1`, runs
+the controller in `us-east-1`, and places operators round-robin:
+
+```powershell
+.\deploy\ec2\run-m3-cross-region.ps1 `
+  -AdminCidrs "<your-ip>/32" `
+  -AwsProfile bloc `
+  -AutoApprovePlan
+```
+
+The canonical matrix is `n=4/7`, batches `8/32/128`, five warmups, and thirty
+measurements on `t3.medium`, with a 60-second slot timeout. `-PlanOnly` checks
+both regional Terraform plans without creating resources. The runner records
+pairwise operator HTTP timing and CPU-credit snapshots, rejects any failed or
+inconsistent measured slot, and destroys each node-count phase before
+continuing. A real apply requires `servicequotas:GetServiceQuota` in both
+regions so the Standard On-Demand vCPU ceiling can be verified. Its four-stage
+report groups the unchanged raw timings into
+Proposal, ACS, Merge + Plan, and Decryption + Materialization. Older topology
+campaigns remain historical context because they used earlier commits.
+
 Run `docker version --format '{{.Server.Version}}'` from the same PowerShell
 session before launching the pilot. If that command cannot talk to the Docker
 daemon, fix Docker Desktop access before creating AWS resources. A bash runner

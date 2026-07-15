@@ -36,6 +36,19 @@ The stage stack excludes `share_generation_us` and
 `commit_to_plaintext_us` because those intervals overlap the sequential
 critical path.
 
+For an accepted M3 cross-region campaign, generate the thesis-facing
+four-stage report with:
+
+```powershell
+python -m bloc_latency_charts.cross_region <campaign-directory>
+```
+
+This preserves the raw six-stage CSV and groups threshold wait, combine, and
+materialization into Decryption + Materialization. It writes p50/p95 summaries,
+four-stage attribution, distributions, PNG/SVG figures, and `REPORT.md`; it
+also rejects incomplete samples, invalid placement, unhealthy Prometheus
+targets, or non-empty cleanup evidence.
+
 ## Test
 
 ```powershell

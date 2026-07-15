@@ -64,6 +64,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - EC2 inventory can be converted into sidecar cluster config and remote-evaluator config for one-sidecar-per-EC2 deployments,
   - a first 4-operator EC2 smoke can be launched, observed through Prometheus, driven by `eval-remote`, and destroyed after artifact collection,
   - VM/EC2-per-sidecar deployment can run repeated distributed metric-gathering campaigns.
+  - a dedicated two-region path can plan and collect standalone `t3.medium`
+    evidence across privately peered `us-east-1`/`eu-west-1` VPCs.
 
 ## Immediate Next Actions
 
@@ -115,6 +117,10 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 - Prometheus `/metrics` now uses native collectors and histogram-safe PromQL is required for Grafana p50/p95 panels; evaluator CSV/JSON remains the offline chart artifact format.
 - Realistic transaction-source evidence now requires the mock-placeholder path: public mempool transactions are target payloads, not native BLOC placeholders, so they must be encrypted once by a mock external submitter before sidecars include them.
 - Builder API compatibility, SSV signing enforcement, and PBS-specific validation are intentionally out of scope for this milestone.
+- The cross-region `n=4/n=7` Terraform plans pass their exact resource/type
+  allowlists and both regional quotas are readable. The current quotas are 16
+  Standard On-Demand vCPUs in `us-east-1` and 5 in `eu-west-1`: `n=4` fits,
+  while the round-robin `n=7` phase needs 6 EU vCPUs and remains quota-blocked.
 
 ## Last Known Good State
 
@@ -144,7 +150,10 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 ## Current M3 Target
 
 - Run repeated remote-evaluator campaigns against VM/EC2-per-sidecar deployments, using Compose only as a local deployment rehearsal, then produce thesis-ready distributed latency/performance artifacts.
-- Current target campaign: analyze EC2 same-AZ versus cross-AZ synthetic baselines for `n=4` and `n=7`, then decide the quota/cost path for comparable `n=10` evidence.
+- Current target campaign: plan-check and smoke the two-region deployment, then
+  collect the standalone `n=4/n=7`, batch `8/32/128`, 30-sample cross-region
+  latency matrix. Older same-AZ/cross-AZ data is historical context because it
+  predates the current evidence candidate.
 
 ## Deferred Later Milestones
 

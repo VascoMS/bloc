@@ -53,6 +53,11 @@ deploy/ec2/terraform/*.tfstate.*
 deploy/ec2/terraform/*.tfvars
 deploy/ec2/terraform/tfplan
 deploy/ec2/terraform/*.tfplan
+deploy/ec2/terraform-cross-region/.terraform/
+deploy/ec2/terraform-cross-region/*.tfstate
+deploy/ec2/terraform-cross-region/*.tfstate.*
+deploy/ec2/terraform-cross-region/*.tfvars
+deploy/ec2/terraform-cross-region/*.tfplan
 deploy/ec2/artifacts/
 
 bloc-node/DOCUMENTATION.md

@@ -199,14 +199,19 @@ the image/deploy/evaluator part:
 .\deploy\ec2\rerun-a1-pilot-existing.ps1 `
   -ArtifactRoot .\results\ec2\<experiment-id> `
   -AwsProfile bloc `
+  -BatchSizesCsv "128" `
   -FirstSlot 1000
 ```
 
-Use a fresh `-FirstSlot` range for every rerun against the same long-running
-sidecars, because each `eval-remote` invocation runs sequential slots and old
-slot IDs remain resident in the sidecars. Destroy the Terraform workdir once
-the kept-alive environment has either produced a clean pilot or is no longer
-being actively debugged:
+The recovery runner is unattended. It pulls the selected image on every
+operator, stops the full sidecar cluster before restarting any node, clones the
+existing generated configs with `FirstSlot` as the new initial slot, writes
+Linux-compatible UTF-8 JSON, performs bounded health/metrics checks, validates
+measured-run counts and consistency, and collects operator logs. Use
+`BatchSizesCsv` when invoking it through `powershell -File`; this avoids native
+PowerShell array coercion. Destroy the Terraform workdir once the kept-alive
+environment has either produced a clean pilot or is no longer being actively
+debugged:
 
 ```powershell
 terraform -chdir=.\results\ec2\<experiment-id>\generated\terraform-work destroy `

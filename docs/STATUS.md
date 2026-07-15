@@ -38,8 +38,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Run the optimized-image cross-AZ `n=4/n=7` campaign through the unattended M3 wrapper and generate its matched comparison against the 2026-07-06 baseline.
-2. Inspect the automatic p50/p95 comparison before deciding whether any further Merge and Batch Planning optimization is justified.
+1. Reproduce and fix the cross-AZ `n=4`, batch-128 ACS agreement divergence before collecting more thesis latency samples.
+2. Require a clean unattended batch-128 recovery probe before rerunning the optimized cross-AZ `n=4/n=7` campaign.
 3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
@@ -47,6 +47,12 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Current Blockers / Risks
 
+- The optimized 2026-07-14 cross-AZ campaign is invalid: after 7 clean
+  batch-128 measurements, three `n=4` operators decided 3 inclusion lists/96
+  transactions while the fourth decided 4 lists/128 transactions. A clean
+  restart probe reproduced the divergence on its first slot with a different
+  operator as the outlier. The `n=7` phase was not launched, and all AWS
+  resources were destroyed and verified absent.
 - The previous 315-run libp2p-only campaign remains invalid historical evidence: result timeouts were concentrated in 7/10-node scenarios.
 - The diagnosed cause was BBA/ACS liveness, not BTE combination: lagging nodes had all RBC outputs and peer decryption shares but were waiting for one or more BBA instances to terminate.
 - A corrected 30-run 7/10-node stress matrix passed; the complete 315-sample M1 campaign is still required before reporting final baseline figures.
@@ -66,6 +72,7 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 3 --out-dir results/acs-bba-self-vote-matrix`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 5 --out-dir results/acs-all-rbc-stress`
 - Evidence location:
+  - `results/ec2/m3-cross-az-synthetic-optimized-20260714-v2/` (ignored invalid optimized cross-AZ attempt, clean reproduction probe, operator logs, run report, and authenticated empty cleanup verification; batches 8/32 passed 30/30 but batch 128 exposed divergent ACS decisions, so no thesis-grade before/after campaign was accepted)
   - `results/ec2/merge-plan-attribution-free-20260714/` (ignored accepted Compute Flex `n=4/n=7` measurements, analysis tables/charts/report, and separately labeled invalid T3 diagnostic artifacts)
   - `results/local/merge-plan-optimization/merge-plan-opt-20260713/` (ignored local baseline/optimized benchmarks, profiles, evaluator outputs, charts, comparison CSVs, and report; 60/60 measured runs succeeded and were consistent in each phase)
   - `results/ec2/m3-cross-az-synthetic-20260706t122922z/` and `results/charts/m3-cross-az-synthetic-20260706t122922z/` (ignored local artifact collection and generated charts from the M3 cross-AZ synthetic campaign: `n=4` and `n=7` `t3.small` operators plus one `t3.small` controller per phase in `us-east-1` across `us-east-1a/b/c`; batches 8/32/128; 5 warmups and 30 measured repetitions per batch; 180/180 measured runs had `success=true` and `consistent=true`; Prometheus saw 4/4 and 7/7 targets up; Terraform destroy completed for both phases; cleanup verification and follow-up AWS checks found no tagged EC2 instances, volumes, VPC, ECR repository, temporary key pair, IAM role, or instance profile)

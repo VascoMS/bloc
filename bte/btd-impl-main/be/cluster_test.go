@@ -2,6 +2,7 @@ package be
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -252,6 +253,209 @@ func TestPlanDecodedBatchRejectsEmptyBatch(t *testing.T) {
 	require.ErrorContains(t, err, "empty batch")
 }
 
+func TestDecodeBatchRejectsUnsupportedVersionBeforeCapsuleDecode(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	ct.Version = "bte-tx-v2"
+	encoded, err := ct.MarshalBinary()
+	require.NoError(t, err)
+	// Corrupt the capsule after serialization to prove version rejection occurs
+	// before any curve decoding.
+	encoded[len(encoded)-1] ^= 0xff
+	_, err = cluster.DecodeBatch([][]byte{encoded})
+	require.ErrorContains(t, err, "unsupported ciphertext version")
+}
+
+func TestDecodeBatchReportsFirstMalformedCiphertext(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	valid, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	badVersion := cloneCiphertext(valid)
+	badVersion.Version = "bte-tx-v2"
+	badVersionBytes, err := badVersion.MarshalBinary()
+	require.NoError(t, err)
+	badNonce := cloneCiphertext(valid)
+	badNonce.Nonce = []byte{1}
+	badNonceBytes, err := badNonce.MarshalBinary()
+	require.NoError(t, err)
+
+	_, err = cluster.DecodeBatch([][]byte{badVersionBytes, badNonceBytes})
+	require.ErrorContains(t, err, "decode ciphertext 0")
+	require.ErrorContains(t, err, "unsupported ciphertext version")
+	_, err = cluster.DecodeBatch([][]byte{badNonceBytes, badVersionBytes})
+	require.ErrorContains(t, err, "decode ciphertext 0")
+	require.ErrorContains(t, err, "nonce length")
+}
+
+func TestScopedBatchAPIsRejectForeignContext(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("scoped tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	encoded, err := ct.MarshalBinary()
+	require.NoError(t, err)
+
+	scope := CiphertextScope{ClusterID: "cluster-a", Slot: 123}
+	decoded, err := cluster.DecodeBatchFor([][]byte{encoded}, scope)
+	require.NoError(t, err)
+	scopedPlan, err := cluster.PlanDecodedBatch(decoded)
+	require.NoError(t, err)
+	directScopedPlan, err := cluster.PlanBatchFor([]Ciphertext{ct}, scope)
+	require.NoError(t, err)
+	_, oneCallPlan, err := cluster.DecodeAndPlanBatchFor([][]byte{encoded}, scope)
+	require.NoError(t, err)
+	genericPlan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+	requirePlansEquivalent(t, genericPlan, scopedPlan)
+	requirePlansEquivalent(t, genericPlan, directScopedPlan)
+	requirePlansEquivalent(t, genericPlan, oneCallPlan)
+
+	_, err = cluster.DecodeBatchFor([][]byte{encoded}, CiphertextScope{ClusterID: "cluster-b", Slot: 123})
+	require.ErrorContains(t, err, "expected cluster")
+	_, err = cluster.DecodeBatchFor([][]byte{encoded}, CiphertextScope{ClusterID: "cluster-a", Slot: 124})
+	require.ErrorContains(t, err, "expected slot")
+	_, err = cluster.PlanBatchFor([]Ciphertext{ct}, CiphertextScope{ClusterID: "cluster-b", Slot: 123})
+	require.ErrorContains(t, err, "expected cluster")
+	_, err = cluster.PlanBatchFor([]Ciphertext{ct}, CiphertextScope{ClusterID: "cluster-a", Slot: 122})
+	require.ErrorContains(t, err, "expected slot")
+
+	_, err = cluster.DecodeBatch([][]byte{encoded})
+	require.NoError(t, err, "generic batch decoding must remain compatible")
+}
+
+func TestDecodeBatchRejectsOversizedBatchBeforeParsing(t *testing.T) {
+	cluster := newTestCluster(t, 2, 10, 5)
+	_, err := cluster.DecodeBatch([][]byte{[]byte("malformed"), []byte("malformed"), []byte("malformed")})
+	require.ErrorContains(t, err, "exceeds BMax")
+	require.NotContains(t, err.Error(), "decode ciphertext")
+}
+
+func TestCiphertextAEADShapeValidation(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	valid, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		mutate func(*Ciphertext)
+		want   string
+	}{
+		{name: "nonce", mutate: func(ct *Ciphertext) { ct.Nonce = bytes.Repeat([]byte{1}, aeadNonceSize-1) }, want: "nonce length"},
+		{name: "payload", mutate: func(ct *Ciphertext) { ct.EncryptedTx = bytes.Repeat([]byte{1}, aeadTagSize-1) }, want: "AEAD tag size"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mutated := cloneCiphertext(valid)
+			test.mutate(&mutated)
+			_, err := cluster.PlanBatch([]Ciphertext{mutated})
+			require.ErrorContains(t, err, test.want)
+
+			encoded, err := mutated.MarshalBinary()
+			require.NoError(t, err)
+			_, err = cluster.DecodeBatch([][]byte{encoded})
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+}
+
+func TestCombineSharesRejectsMutatedNonceWithoutPanic(t *testing.T) {
+	cluster := newTestCluster(t, 8, 4, 3)
+	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+
+	shares := make([]DecryptionShare, 0, cluster.btd.T)
+	for _, secret := range cluster.Shares[:cluster.btd.T] {
+		decShare, err := cluster.MakeShare(secret, plan, 0)
+		require.NoError(t, err)
+		shares = append(shares, decShare)
+	}
+	plan.SubBatches[0][0].Ciphertext.Nonce = []byte{1}
+
+	var combineErr error
+	require.NotPanics(t, func() {
+		_, combineErr = cluster.CombineShares(plan, shares)
+	})
+	require.ErrorContains(t, combineErr, "nonce length")
+}
+
+func TestDecodedBatchFreezesCanonicalIdentity(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("identity"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	encoded, err := ct.MarshalBinary()
+	require.NoError(t, err)
+	wantBatchID := computeBatchIDFromEncoded([][]byte{encoded})
+
+	decoded, err := cluster.DecodeBatch([][]byte{encoded})
+	require.NoError(t, err)
+	encoded[len(encoded)-1] ^= 0xff
+	plan, err := cluster.PlanDecodedBatch(decoded)
+	require.NoError(t, err)
+	require.Equal(t, wantBatchID, plan.BatchID)
+}
+
+func TestDecodedBatchCiphertextsAreDeepCopies(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("owned"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	encoded, err := ct.MarshalBinary()
+	require.NoError(t, err)
+	decoded, err := cluster.DecodeBatch([][]byte{encoded})
+	require.NoError(t, err)
+	require.Equal(t, 1, decoded.Len())
+
+	first := decoded.Ciphertexts()
+	first[0].Nonce[0] ^= 0xff
+	first[0].EncryptedTx[0] ^= 0xff
+	first[0].Capsule.Context[0] ^= 0xff
+	first[0].Capsule.Gamma.Null()
+	first[0].Capsule.Pi.KHat.Zero()
+
+	second := decoded.Ciphertexts()
+	reencoded, err := second[0].MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, encoded, reencoded)
+	_, err = cluster.PlanDecodedBatch(decoded)
+	require.NoError(t, err)
+}
+
+func TestUnmarshalCTRejectsInvalidPointAndScalar(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	encoded, err := ct.Capsule.MarshalBinary()
+	require.NoError(t, err)
+
+	_, err = cluster.btd.UnmarshalCT(overwriteCTField(t, encoded, 1))
+	require.Error(t, err, "invalid GT point must be rejected")
+	_, err = cluster.btd.UnmarshalCT(overwriteCTField(t, encoded, 8))
+	require.Error(t, err, "out-of-range scalar must be rejected")
+}
+
+func overwriteCTField(t *testing.T, encoded []byte, target int) []byte {
+	t.Helper()
+	out := append([]byte(nil), encoded...)
+	offset := 8 // capsule index
+	for field := 0; field <= target; field++ {
+		require.GreaterOrEqual(t, len(out)-offset, 8)
+		size := int(binary.BigEndian.Uint64(out[offset : offset+8]))
+		start := offset + 8
+		end := start + size
+		require.LessOrEqual(t, end, len(out))
+		if field == target {
+			for i := start; i < end; i++ {
+				out[i] = 0xff
+			}
+			return out
+		}
+		offset = end
+	}
+	t.Fatalf("field %d not found", target)
+	return nil
+}
+
 func FuzzCiphertextDecoderCanonical(f *testing.F) {
 	cluster := newTestCluster(f, 8, 10, 5)
 	ct, err := cluster.EncryptTx([]byte("canonical-seed"), 0, "cluster-a", 123)
@@ -272,6 +476,31 @@ func FuzzCiphertextDecoderCanonical(f *testing.F) {
 		}
 		if !bytes.Equal(raw, reencoded) {
 			t.Fatalf("decoder accepted a noncanonical encoding")
+		}
+	})
+}
+
+func FuzzCTDecoderCanonical(f *testing.F) {
+	cluster := newTestCluster(f, 8, 10, 5)
+	ct, err := cluster.EncryptTx([]byte("canonical-capsule"), 0, "cluster-a", 123)
+	require.NoError(f, err)
+	encoded, err := ct.Capsule.MarshalBinary()
+	require.NoError(f, err)
+	f.Add(encoded)
+	f.Add(append(append([]byte(nil), encoded...), 0))
+	f.Add([]byte("malformed"))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		decoded, err := cluster.btd.UnmarshalCT(raw)
+		if err != nil {
+			return
+		}
+		reencoded, err := decoded.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(raw, reencoded) {
+			t.Fatalf("capsule decoder accepted a noncanonical encoding")
 		}
 	})
 }
@@ -316,6 +545,95 @@ func TestPlanBatchSeparatesDuplicateIndices(t *testing.T) {
 			seen[idx] = true
 		}
 	}
+}
+
+func TestPlanBatchUsesDeterministicCollisionFallback(t *testing.T) {
+	cluster := newTestCluster(t, 16, 10, 5)
+	indexes := []int{0, 1, 2, 1, 2, 3, 0, 3}
+	rawTxs := make([][]byte, len(indexes))
+	ciphertexts := make([]Ciphertext, len(indexes))
+	for i, index := range indexes {
+		rawTxs[i] = []byte(fmt.Sprintf("fallback-tx-%d", i))
+		ct, err := cluster.EncryptTx(rawTxs[i], index, "cluster-a", 123)
+		require.NoError(t, err)
+		ciphertexts[i] = ct
+	}
+
+	plan, err := cluster.PlanBatch(ciphertexts)
+	require.NoError(t, err)
+	require.Equal(t, 6, plan.Alpha)
+	require.Equal(t, [][]int{{0, 7}, {1, 6}, {2}, {3}, {4}, {5}}, planPositions(plan))
+	require.NoError(t, validateSubBatchIndices(plan.SubBatches))
+
+	second, err := cluster.PlanBatch(ciphertexts)
+	require.NoError(t, err)
+	require.Equal(t, planPositions(plan), planPositions(second))
+
+	shares := make([]DecryptionShare, 0, cluster.btd.T*plan.Alpha)
+	for subBatchID := range plan.SubBatches {
+		for _, secret := range cluster.Shares[:cluster.btd.T] {
+			decShare, err := cluster.MakeShare(secret, plan, subBatchID)
+			require.NoError(t, err)
+			shares = append(shares, decShare)
+		}
+	}
+	results, err := cluster.CombineShares(plan, shares)
+	require.NoError(t, err)
+	for i, result := range results {
+		require.NoError(t, result.Err)
+		require.Equal(t, rawTxs[i], result.RawTx)
+	}
+}
+
+func TestPlanBatchPreservesExistingRoundRobinMembership(t *testing.T) {
+	cluster := newTestCluster(t, 16, 10, 5)
+	ciphertexts := make([]Ciphertext, 8)
+	for i := range ciphertexts {
+		ct, err := cluster.EncryptTx([]byte(fmt.Sprintf("golden-%d", i)), i%3, "cluster-a", 123)
+		require.NoError(t, err)
+		ciphertexts[i] = ct
+	}
+	plan, err := cluster.PlanBatch(ciphertexts)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{0, 2}, {1, 5}, {3}, {4}, {6}, {7}}, planPositions(plan))
+}
+
+func TestArrangeBatchAlwaysSeparatesIndexesUpToBMax(t *testing.T) {
+	cluster := newTestCluster(t, 128, 10, 5)
+	for size := 1; size <= cluster.Params.BMax; size++ {
+		ciphertexts := make([]Ciphertext, size)
+		for i := range ciphertexts {
+			index := (i*i + size) % 17
+			ciphertexts[i] = structuralCiphertext(index, "cluster-a", 123)
+		}
+		alpha, subBatches, err := cluster.arrangeBatch(ciphertexts)
+		require.NoError(t, err, "size %d", size)
+		require.Positive(t, alpha)
+		require.NoError(t, validateSubBatchIndices(subBatches), "size %d", size)
+	}
+}
+
+func structuralCiphertext(index int, clusterID string, slot uint64) Ciphertext {
+	return Ciphertext{
+		Version:     LibraryVersion,
+		ClusterID:   clusterID,
+		Slot:        slot,
+		Index:       index,
+		Capsule:     CT{I: index, Context: aeadAAD(clusterID, slot, index)},
+		Nonce:       make([]byte, aeadNonceSize),
+		EncryptedTx: make([]byte, aeadTagSize),
+	}
+}
+
+func planPositions(plan BatchPlan) [][]int {
+	out := make([][]int, len(plan.SubBatches))
+	for subBatchID, subBatch := range plan.SubBatches {
+		out[subBatchID] = make([]int, len(subBatch))
+		for i, item := range subBatch {
+			out[subBatchID][i] = item.OriginalPosition
+		}
+	}
+	return out
 }
 
 func TestBatchDecRejectsDuplicateIndices(t *testing.T) {

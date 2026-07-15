@@ -42,18 +42,17 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 				b.Run(name+"/pipeline", func(b *testing.B) {
 					b.ReportAllocs()
 					for range b.N {
-						lists, err := decodeAcceptedLists(fixture.batches)
+						lists, err := decodeAcceptedLists(1, fixture.batches)
 						if err != nil {
 							b.Fatal(err)
 						}
 						agreed := inclusion.NewAgreedSet(1, lists)
 						merged := inclusion.Merge(1, lists, BlockspaceConfig{}, 128)
 						encoded := encodedBenchmarkCiphertexts(merged.Items)
-						decoded, err := fixture.cluster.DecodeBatch(encoded)
+						decoded, err := fixture.cluster.DecodeBatchFor(encoded, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
 						if err != nil {
 							b.Fatal(err)
 						}
-						ciphertexts := decoded.Ciphertexts()
 						plan, err := fixture.cluster.PlanDecodedBatch(decoded)
 						if err != nil {
 							b.Fatal(err)
@@ -61,7 +60,7 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 						benchmarkListsSink = lists
 						benchmarkAgreedSink = agreed
 						benchmarkMergedSink = merged
-						benchmarkCiphertextSink = ciphertexts
+						benchmarkCiphertextSink = nil
 						benchmarkPlanSink = plan
 					}
 				})
@@ -69,7 +68,7 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 				b.Run(name+"/proposal-decode", func(b *testing.B) {
 					b.ReportAllocs()
 					for range b.N {
-						lists, err := decodeAcceptedLists(fixture.batches)
+						lists, err := decodeAcceptedLists(1, fixture.batches)
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -94,11 +93,13 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 				b.Run(name+"/ciphertext-decode", func(b *testing.B) {
 					b.ReportAllocs()
 					for range b.N {
-						decoded, err := fixture.cluster.DecodeBatch(fixture.encoded)
+						decoded, err := fixture.cluster.DecodeBatchFor(fixture.encoded, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
 						if err != nil {
 							b.Fatal(err)
 						}
-						benchmarkCiphertextSink = decoded.Ciphertexts()
+						if decoded.Len() == 0 {
+							b.Fatal("decoded batch is empty")
+						}
 					}
 				})
 
@@ -161,13 +162,13 @@ func newMergePlanBenchmarkFixture(tb testing.TB, nodes, batch int, overlap bool)
 		}
 		batches = append(batches, hbbft.AcceptedBatch{ProposerID: uint64(nodeID), Batch: encoded})
 	}
-	lists, err := decodeAcceptedLists(batches)
+	lists, err := decodeAcceptedLists(1, batches)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	merged := inclusion.Merge(1, lists, BlockspaceConfig{}, 128)
 	encodedCiphertexts := encodedBenchmarkCiphertexts(merged.Items)
-	decoded, err := cluster.DecodeBatch(encodedCiphertexts)
+	decoded, err := cluster.DecodeBatchFor(encodedCiphertexts, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
 	if err != nil {
 		tb.Fatal(err)
 	}

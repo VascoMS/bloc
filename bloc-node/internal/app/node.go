@@ -527,8 +527,13 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	if out == nil {
 		return
 	}
+	if out.Slot != n.id {
+		log.Printf("decode ACS output: slot %d does not match active slot %d", out.Slot, n.id)
+		n.markSlotFailed("decode")
+		return
+	}
 	decisionAt := time.Now()
-	lists, err := decodeAcceptedLists(out.OrderedBatches)
+	lists, err := decodeAcceptedLists(n.id, out.OrderedBatches)
 	if err != nil {
 		log.Printf("%v", err)
 		n.markSlotFailed("decode")
@@ -543,15 +548,14 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	for _, item := range merged.Items {
 		encodedCiphertexts = append(encodedCiphertexts, item.Ciphertext)
 	}
-	decodedBatch, err := n.cluster.DecodeBatch(encodedCiphertexts)
+	decodedBatch, err := n.cluster.DecodeBatchFor(encodedCiphertexts, be.CiphertextScope{ClusterID: n.cfg.ClusterID, Slot: n.id})
 	if err != nil {
 		log.Printf("decode ciphertext batch: %v", err)
 		n.markSlotFailed("decode")
 		return
 	}
-	encrypted := decodedBatch.Ciphertexts()
 	ciphertextsAt := time.Now()
-	if len(encrypted) == 0 {
+	if decodedBatch.Len() == 0 {
 		n.finishEmptyMaterializedSet(decisionAt, decodedAt, agreedAt, mergedAt, ciphertextsAt, agreed, merged)
 		return
 	}
@@ -596,7 +600,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	n.metrics.SubBatches = len(plan.SubBatches)
 	n.refreshMetricsLocked()
 	n.mu.Unlock()
-	log.Printf("event=acs_decision node_id=%d slot=%d agreed_lists=%d agreed_candidates=%d selected_txs=%d selected_gas=%d batch_id=%s sub_batches=%d", n.self.ID, n.id, len(agreed.Lists), agreed.TotalItems, len(encrypted), merged.SelectedGas, hex.EncodeToString(plan.BatchID[:]), len(plan.SubBatches))
+	log.Printf("event=acs_decision node_id=%d slot=%d agreed_lists=%d agreed_candidates=%d selected_txs=%d selected_gas=%d batch_id=%s sub_batches=%d", n.self.ID, n.id, len(agreed.Lists), agreed.TotalItems, decodedBatch.Len(), merged.SelectedGas, hex.EncodeToString(plan.BatchID[:]), len(plan.SubBatches))
 	for subBatchID := range plan.SubBatches {
 		if n.faults.WithholdShare {
 			continue
@@ -639,12 +643,18 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	n.tryCombine()
 }
 
-func decodeAcceptedLists(batches []hbbft.AcceptedBatch) ([]InclusionList, error) {
+func decodeAcceptedLists(expectedSlot uint64, batches []hbbft.AcceptedBatch) ([]InclusionList, error) {
 	lists := make([]InclusionList, 0, len(batches))
 	for _, accepted := range batches {
 		list, err := inclusion.DecodeList(accepted.Batch)
 		if err != nil {
 			return nil, fmt.Errorf("decode accepted inclusion list from %d: %w", accepted.ProposerID, err)
+		}
+		if list.Slot != expectedSlot {
+			return nil, fmt.Errorf("accepted inclusion list from %d has slot %d, expected %d", accepted.ProposerID, list.Slot, expectedSlot)
+		}
+		if list.OperatorID != accepted.ProposerID {
+			return nil, fmt.Errorf("accepted inclusion list from proposer %d claims operator %d", accepted.ProposerID, list.OperatorID)
 		}
 		lists = append(lists, list)
 	}

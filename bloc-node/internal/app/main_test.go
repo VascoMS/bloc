@@ -263,7 +263,7 @@ func TestDecodeAcceptedListsHashesOnlyDuringCanonicalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lists, err := decodeAcceptedLists([]hbbft.AcceptedBatch{{ProposerID: 2, Batch: encoded}})
+	lists, err := decodeAcceptedLists(3, []hbbft.AcceptedBatch{{ProposerID: 2, Batch: encoded}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +274,51 @@ func TestDecodeAcceptedListsHashesOnlyDuringCanonicalization(t *testing.T) {
 	want := inclusion.HashInclusionList(list)
 	if agreed.Lists[0].Hash != want {
 		t.Fatalf("canonical hash = %s, want %s", agreed.Lists[0].Hash, want)
+	}
+}
+
+func TestDecodeAcceptedListsRejectsWrongSlotAndOperator(t *testing.T) {
+	tests := []struct {
+		name       string
+		list       InclusionList
+		proposerID uint64
+		want       string
+	}{
+		{
+			name:       "slot",
+			list:       InclusionList{Slot: 4, OperatorID: 2, Items: []EncryptedPlaceholder{testPlaceholder("slot", 21000, "7", "0x1", 0)}},
+			proposerID: 2,
+			want:       "slot 4, expected 3",
+		},
+		{
+			name:       "operator",
+			list:       InclusionList{Slot: 3, OperatorID: 1, Items: []EncryptedPlaceholder{testPlaceholder("operator", 21000, "7", "0x1", 0)}},
+			proposerID: 2,
+			want:       "proposer 2 claims operator 1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := inclusion.EncodeList(test.list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = decodeAcceptedLists(3, []hbbft.AcceptedBatch{{ProposerID: test.proposerID, Batch: encoded}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("decode error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestHandleACSOutputRejectsWrongSlot(t *testing.T) {
+	node := &Node{slotState: &slotState{id: 7}}
+	node.handleACSOutput(&hbbft.SlotOutput{Slot: 6})
+	if node.failedSlots != 1 {
+		t.Fatalf("failed slots = %d, want 1", node.failedSlots)
+	}
+	if node.planned {
+		t.Fatal("wrong-slot ACS output was planned")
 	}
 }
 

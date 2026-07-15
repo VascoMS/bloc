@@ -270,6 +270,10 @@ func (b *BBA) handleBvalRequest(senderID uint64, val bool) error {
 		if wasEmptyBinValues {
 			b.addMessage(NewAgreementMessage(int(b.epoch), &AuxRequest{val}))
 			b.handleAuxRequest(b.ID, val)
+		} else {
+			// AUX messages may arrive before their value is admitted to binValues.
+			// Re-evaluate them now that the value has BV-broadcast support.
+			b.tryOutputAgreement()
 		}
 		return nil
 	}
@@ -298,7 +302,9 @@ func (b *BBA) tryOutputAgreement() {
 	if len(b.binValues) == 0 {
 		return
 	}
-	// Wait longer till eventually receive (N - F) aux messages.
+	// Wait until (N-F) AUX messages carry values admitted to binValues. Counting
+	// an AUX value before BV-broadcast validates it can make reordered delivery
+	// produce different singleton sets at different correct nodes.
 	lenOutputs, values := b.countOutputs()
 	if lenOutputs < b.N-b.F {
 		return
@@ -365,17 +371,26 @@ func (b *BBA) advanceEpoch() {
 // countOutputs returns the number of received (aux) messages, the corresponding
 // values that where also in our inputs.
 func (b *BBA) countOutputs() (int, []bool) {
-	m := map[bool]int{}
-	for i, val := range b.recvAux {
-		m[val] = int(i)
-	}
-	vals := []bool{}
+	accepted := map[bool]bool{}
 	for _, val := range b.binValues {
-		if _, ok := m[val]; ok {
-			vals = append(vals, val)
+		accepted[val] = true
+	}
+	validOutputs := 0
+	seen := map[bool]bool{}
+	for _, val := range b.recvAux {
+		if accepted[val] {
+			validOutputs++
+			seen[val] = true
 		}
 	}
-	return len(b.recvAux), vals
+	vals := make([]bool, 0, 2)
+	if seen[false] {
+		vals = append(vals, false)
+	}
+	if seen[true] {
+		vals = append(vals, true)
+	}
+	return validOutputs, vals
 }
 
 // countBvals counts all the received Bval inputs matching b.

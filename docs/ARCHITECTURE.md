@@ -112,7 +112,19 @@ The BLOC path intentionally does not use the original `HoneyBadger` epoch driver
 - orders accepted proposer batches deterministically,
 - leaves post-agreement decryption/materialization outside the ACS core.
 
-This keeps mempool logic, ordering, and decryption concerns separated.
+RBC establishes availability and consistency for each proposer payload; it does
+not decide common-subset membership. Each proposer has a BBA instance, and ACS
+completes only after at least `N-F` instances decided true, all `N` BBA results
+are present, and every true decision has its RBC payload. The output contains
+exactly those true proposers. Within BBA, only AUX messages whose values have
+already entered the local BV-broadcast `binValues` set count toward the `N-F`
+advance threshold. These rules make reordered delivery change timing, not the
+subset selected by correct operators.
+
+The slot status endpoint exposes sorted RBC output IDs, completed BBA decisions,
+truthy BBA proposer IDs, and an explicit waiting reason. These fields are
+diagnostic only and never drive protocol decisions. This keeps consensus,
+mempool logic, deterministic ordering, and decryption concerns separated.
 
 ## Repeated Slot Lifecycle
 

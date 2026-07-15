@@ -110,8 +110,23 @@ go run ./cmd/bloc-node eval-suite \
   --out-dir results/m1-smoke
 ```
 
-After changes that can affect ACS/BBA liveness, run the targeted 7/10-node
-stress before refreshing M1:
+After changes that affect ACS/BBA safety or liveness, run the local safety
+campaign before collecting distributed latency evidence:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\bloc-node\scripts\run-acs-safety-campaign.ps1
+```
+
+The campaign requires 1,000 fixed reordered RBC/BBA delivery schedules, Linux
+race validation, a persistent n4/batch-128 gate with 5 warmups and 100 measured
+slots, and an n4/n7 matrix over batches `8,32,128` with 3 warmups and 30 measured
+slots per scenario. Every measured slot must succeed and be cross-node
+consistent. Failed runs retain `slot-status.json`, including RBC output IDs,
+the BBA decision map, truthy BBA proposer IDs, and the ACS waiting reason. Results
+are ignored under `results/local/acs-common-subset-safety/<campaign-id>/`.
+
+For a shorter liveness-only diagnostic, use:
 
 ```sh
 go run ./cmd/bloc-node eval-suite \

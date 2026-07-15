@@ -104,6 +104,24 @@ func TestBBAKeepsBothBvalValuesFromSameSender(t *testing.T) {
 	assert.Equal(t, 3, bba.countBvals(false)) // includes the node's relayed false BVAL.
 }
 
+func TestBBAWaitsForValidatedAuxValues(t *testing.T) {
+	bba := NewBBA(Config{N: 4, F: 1, ID: 0})
+	bba.binValues = []bool{true}
+	bba.recvAux = map[uint64]bool{0: true, 1: false, 2: false}
+
+	count, values := bba.countOutputs()
+	assert.Equal(t, 1, count)
+	assert.Equal(t, []bool{true}, values)
+	bba.tryOutputAgreement()
+	assert.Equal(t, uint32(0), bba.epoch)
+	assert.Nil(t, bba.decision)
+
+	bba.binValues = append(bba.binValues, false)
+	count, values = bba.countOutputs()
+	assert.Equal(t, 3, count)
+	assert.Equal(t, []bool{false, true}, values)
+}
+
 func TestAdvanceEpochInBBA(t *testing.T) {
 	cfg := Config{N: 4}
 	bba := NewBBA(cfg)
@@ -193,7 +211,6 @@ func makeBBAInstances(n int) []*BBA {
 	bbas := make([]*BBA, n)
 	for i := 0; i < n; i++ {
 		bbas[i] = NewBBA(Config{N: n, ID: uint64(i)})
-		go bbas[i].run()
 	}
 	return bbas
 }

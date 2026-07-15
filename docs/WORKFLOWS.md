@@ -224,6 +224,20 @@ timing against each operator's `/healthz` endpoint, not ICMP ping. ICMP is not
 opened in the default security groups, so ping loss is not a meaningful BLOC
 traffic signal unless the security groups are intentionally changed.
 
+Before returning an ACS/BBA change to EC2, run the complete local safety gate:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\bloc-node\scripts\run-acs-safety-campaign.ps1
+```
+
+The runner is AWS-free and writes an ignored manifest, fixed-seed scheduler
+description, command logs, evaluator outputs, failed slot status, and
+`REPORT.md` under `results/local/acs-common-subset-safety/<campaign-id>/`. If a
+tooling or evaluator stage stops after an earlier stage passed, resume without
+repeating completed work by supplying the same `-CampaignId`, `-Resume`, and an
+explicit `-StartAt race|gate|matrix|identity`.
+
 For the first thesis-grade M3 same-AZ synthetic baseline, use the M3 wrapper.
 It runs the EC2 phase runner sequentially for 4, 7, and 10 operators, using
 batch sizes `8,32,128`, 5 warmups, and 30 measured repetitions:

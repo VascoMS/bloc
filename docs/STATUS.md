@@ -38,8 +38,8 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Reproduce and fix the cross-AZ `n=4`, batch-128 ACS agreement divergence before collecting more thesis latency samples.
-2. Require a clean unattended batch-128 recovery probe before rerunning the optimized cross-AZ `n=4/n=7` campaign.
+1. Run a clean optimized-image EC2 `n=4`, batch-128 recovery probe against the corrected ACS/BBA implementation.
+2. If that probe is consistent, rerun the optimized cross-AZ `n=4/n=7` campaign and generate the matched comparison.
 3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
 4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
 5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
@@ -47,14 +47,16 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Current Blockers / Risks
 
-- The optimized 2026-07-14 cross-AZ campaign is invalid: after 7 clean
+- The optimized 2026-07-14 cross-AZ campaign remains invalid historical evidence: after 7 clean
   batch-128 measurements, three `n=4` operators decided 3 inclusion lists/96
   transactions while the fourth decided 4 lists/128 transactions. A clean
   restart probe reproduced the divergence on its first slot with a different
-  operator as the outlier. The `n=7` phase was not launched, and all AWS
-  resources were destroyed and verified absent.
+  operator as the outlier. The local ACS/BBA correction passed its full safety
+  campaign, but the optimized image has not yet been revalidated on EC2. The
+  `n=7` phase was not launched, and all AWS resources were destroyed and
+  verified absent.
 - The previous 315-run libp2p-only campaign remains invalid historical evidence: result timeouts were concentrated in 7/10-node scenarios.
-- The diagnosed cause was BBA/ACS liveness, not BTE combination: lagging nodes had all RBC outputs and peer decryption shares but were waiting for one or more BBA instances to terminate.
+- The disagreement was not caused by BTE or Merge + Plan. Its two safety defects were a project-added all-RBC ACS completion shortcut and imported BBA logic that counted AUX values before BV-broadcast admitted them locally. Both are corrected; EC2 confirmation remains pending.
 - A corrected 30-run 7/10-node stress matrix passed; the complete 315-sample M1 campaign is still required before reporting final baseline figures.
 - Local-host scheduling noise means Compose timing output is diagnostic only. Distributed thesis metrics should come from the VM/EC2-per-sidecar deployment, where each operator has an independent machine and network identity.
 - Prometheus `/metrics` now uses native collectors and histogram-safe PromQL is required for Grafana p50/p95 panels; evaluator CSV/JSON remains the offline chart artifact format.
@@ -63,15 +65,17 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Last Known Good State
 
-- Date: `2026-07-14`
-- Meaning: the optimized image completed accepted same-AZ Compute Flex `n=4/n=7` attribution phases with 30 measured runs per batch. At `n=7`, batch-128 ciphertext decoding was 195.1 ms p50 and 98.0% of Merge + Plan; Merge + Plan was only 5% slower than `n=4`, and batch-128 block drift was 1.02x. The contextual 457 ms local decoder median was not reproduced on isolated EC2 operators. The T3 `n=7` phase is retained only as invalid diagnostic evidence: 55/60 measured runs succeeded, batch-128 total-slot p50 worsened 2.27x between completed blocks, and the phase then timed out. All phases destroyed their AWS resources and reported empty cleanup checks; a later redundant live sweep could not run because the temporary AWS profile was no longer loaded.
+- Date: `2026-07-15`
+- Meaning: the corrected ACS/BBA path passed 1,000 fixed reordered-delivery schedules across 20 repeated module runs, Linux race validation, a persistent n4/batch-128 gate with 100/100 successful consistent measurements, and an n4/n7 batch `8/32/128` matrix with 180/180 successful consistent measurements. The optimized same-AZ Compute Flex `n=4/n=7` attribution evidence from 2026-07-14 remains the latest accepted cloud performance baseline, but the corrected implementation still requires a clean EC2 recovery probe before new cross-AZ latency samples are accepted.
 - Data-realism addendum: `mempool-il` now has a corpus-backed `replay-placeholder` mode that validates real signed Ethereum target transactions, encrypts them once using BLOC public cluster material, and exposes mock placeholder candidates through the existing inclusion-list API. `bloc-node` can consume these encrypted payloads via the mempool provider without changing synthetic evaluator defaults.
 - Baseline commands:
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bloc-node\scripts\run-acs-safety-campaign.ps1`
   - `cd bloc-node && go test ./...`
   - `cd sbc/hbbft && go test ./...`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 3 --out-dir results/acs-bba-self-vote-matrix`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 5 --out-dir results/acs-all-rbc-stress`
 - Evidence location:
+  - `results/local/acs-common-subset-safety/acs-common-subset-20260715/` (ignored local safety campaign: repeated 1,000-seed reordered-delivery tests and Linux race validation passed; persistent n4/batch-128 gate passed 100/100 measured slots; n4/n7 batches 8/32/128 matrix passed 180/180 measured slots; bloc-node/BTE identity suites and focused Merge + Plan benchmarks passed; no AWS resources were allocated)
   - `results/ec2/m3-cross-az-synthetic-optimized-20260714-v2/` (ignored invalid optimized cross-AZ attempt, clean reproduction probe, operator logs, run report, and authenticated empty cleanup verification; batches 8/32 passed 30/30 but batch 128 exposed divergent ACS decisions, so no thesis-grade before/after campaign was accepted)
   - `results/ec2/merge-plan-attribution-free-20260714/` (ignored accepted Compute Flex `n=4/n=7` measurements, analysis tables/charts/report, and separately labeled invalid T3 diagnostic artifacts)
   - `results/local/merge-plan-optimization/merge-plan-opt-20260713/` (ignored local baseline/optimized benchmarks, profiles, evaluator outputs, charts, comparison CSVs, and report; 60/60 measured runs succeeded and were consistent in each phase)

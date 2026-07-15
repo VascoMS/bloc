@@ -127,3 +127,14 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: VM-per-operator deployment maps directly to the protocol model: one operator, one machine, one network identity. It reduces orchestration-specific confounders and is easier to explain when reporting ACS/BTE latency under distributed network conditions.
 - Consequences: M3 distributed campaigns should target VM/EC2-per-sidecar clusters and clearly separate those results from local M1 baselines and local deployment rehearsals. Orchestrated-container deployment is out of scope for the current roadmap and should not appear in metric collection plans unless explicitly revived later.
 - Related files: `docs/STATUS.md`, `docs/VALIDATION.md`, `docs/ROADMAP.md`, `docs/WORKFLOWS.md`, `docs/ARCHITECTURE.md`
+
+## 0011. Complete ACS only from validated BBA decisions
+
+- Date: 2026-07-15
+- Status: Accepted
+- Context: An optimized cross-AZ n4 campaign produced three-list and four-list ACS outputs at different correct operators. A project-added shortcut completed ACS from all RBC outputs before every BBA result existed, while the imported BBA implementation counted AUX messages whose values had not entered the local BV-broadcast set. Reordered delivery could therefore produce different apparent singleton decisions.
+- Options considered: retain the all-RBC shortcut for liveness; repair only ACS completion; restore ACS completion and also enforce BBA AUX validity.
+- Decision: RBC output alone never selects common-subset membership. ACS waits for all BBA results and every true result's RBC payload, and returns exactly the true proposers. BBA counts only AUX messages carrying values already admitted to `binValues` and re-evaluates pending AUX messages when a new value is admitted.
+- Rationale: RBC proves proposal availability and consistency, while BBA decides inclusion. Mixing those responsibilities weakens common-subset agreement under reordered asynchronous delivery.
+- Consequences: Safety is tested over 1,000 fixed delivery schedules plus a 100-slot batch-128 gate and a complete n4/n7 matrix. Any future liveness repair must preserve these completion and validity rules; the all-RBC shortcut cannot return as a workaround.
+- Related files: `sbc/hbbft/acs.go`, `sbc/hbbft/bba.go`, `bloc-node/scripts/run-acs-safety-campaign.ps1`, `docs/VALIDATION.md`

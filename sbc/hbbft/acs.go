@@ -2,6 +2,7 @@ package hbbft
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -84,13 +85,17 @@ type (
 
 // ACSProgress is a read-only diagnostic snapshot of ACS/RBC/BBA state.
 type ACSProgress struct {
-	Decided          bool                   `json:"decided"`
-	QueuedMessages   int                    `json:"queued_messages"`
-	RBCOutputs       int                    `json:"rbc_outputs"`
-	BBAResults       int                    `json:"bba_results"`
-	TruthyBBAResults int                    `json:"truthy_bba_results"`
-	RBC              map[uint64]RBCProgress `json:"rbc,omitempty"`
-	BBA              map[uint64]BBAProgress `json:"bba,omitempty"`
+	Decided              bool                   `json:"decided"`
+	QueuedMessages       int                    `json:"queued_messages"`
+	RBCOutputs           int                    `json:"rbc_outputs"`
+	RBCOutputIDs         []uint64               `json:"rbc_output_ids,omitempty"`
+	BBAResultCount       int                    `json:"bba_results"`
+	BBAResults           map[uint64]bool        `json:"bba_result_map,omitempty"`
+	TruthyBBAResults     int                    `json:"truthy_bba_results"`
+	TruthyBBAProposerIDs []uint64               `json:"truthy_bba_proposer_ids,omitempty"`
+	WaitingReason        string                 `json:"waiting_reason,omitempty"`
+	RBC                  map[uint64]RBCProgress `json:"rbc,omitempty"`
+	BBA                  map[uint64]BBAProgress `json:"bba,omitempty"`
 }
 
 // RBCProgress is a compact diagnostic snapshot for one reliable-broadcast
@@ -285,11 +290,24 @@ func (a *ACS) progress() ACSProgress {
 		Decided:          a.decided,
 		QueuedMessages:   a.messageQue.len(),
 		RBCOutputs:       len(a.rbcResults),
-		BBAResults:       len(a.bbaResults),
+		BBAResultCount:   len(a.bbaResults),
+		BBAResults:       make(map[uint64]bool, len(a.bbaResults)),
 		TruthyBBAResults: a.countTruthyAgreements(),
+		WaitingReason:    a.waitingReason(),
 		RBC:              make(map[uint64]RBCProgress, len(a.rbcInstances)),
 		BBA:              make(map[uint64]BBAProgress, len(a.bbaInstances)),
 	}
+	for id := range a.rbcResults {
+		p.RBCOutputIDs = append(p.RBCOutputIDs, id)
+	}
+	sort.Slice(p.RBCOutputIDs, func(i, j int) bool { return p.RBCOutputIDs[i] < p.RBCOutputIDs[j] })
+	for id, result := range a.bbaResults {
+		p.BBAResults[id] = result
+		if result {
+			p.TruthyBBAProposerIDs = append(p.TruthyBBAProposerIDs, id)
+		}
+	}
+	sort.Slice(p.TruthyBBAProposerIDs, func(i, j int) bool { return p.TruthyBBAProposerIDs[i] < p.TruthyBBAProposerIDs[j] })
 	for id, rbc := range a.rbcInstances {
 		p.RBC[id] = rbc.progress()
 		if _, ok := a.rbcResults[id]; ok {
@@ -392,15 +410,6 @@ func (a *ACS) tryCompleteAgreement() {
 	if a.decided || a.countTruthyAgreements() < a.N-a.F {
 		return
 	}
-	if len(a.rbcResults) == a.N {
-		bcResults := make(map[uint64][]byte, len(a.rbcResults))
-		for id, val := range a.rbcResults {
-			bcResults[id] = val
-		}
-		a.output = bcResults
-		a.decided = true
-		return
-	}
 	if len(a.bbaResults) < a.N {
 		return
 	}
@@ -411,6 +420,7 @@ func (a *ACS) tryCompleteAgreement() {
 			nodesThatProvidedTrue = append(nodesThatProvidedTrue, id)
 		}
 	}
+	sort.Slice(nodesThatProvidedTrue, func(i, j int) bool { return nodesThatProvidedTrue[i] < nodesThatProvidedTrue[j] })
 	bcResults := make(map[uint64][]byte)
 	for _, id := range nodesThatProvidedTrue {
 		val, ok := a.rbcResults[id]
@@ -421,6 +431,26 @@ func (a *ACS) tryCompleteAgreement() {
 	}
 	a.output = bcResults
 	a.decided = true
+}
+
+func (a *ACS) waitingReason() string {
+	if a.decided {
+		return ""
+	}
+	if a.countTruthyAgreements() < a.N-a.F {
+		return "waiting_for_n_minus_f_true_bba_results"
+	}
+	if len(a.bbaResults) < a.N {
+		return "waiting_for_all_bba_results"
+	}
+	for id, result := range a.bbaResults {
+		if result {
+			if _, ok := a.rbcResults[id]; !ok {
+				return "waiting_for_truthy_rbc_outputs"
+			}
+		}
+	}
+	return "ready_to_complete"
 }
 
 func (a *ACS) addMessage(from uint64, msg interface{}) {

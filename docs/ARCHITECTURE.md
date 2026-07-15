@@ -2,250 +2,196 @@
 
 ## Purpose
 
-BLOC is a thesis prototype that explores a pipeline where operators agree on encrypted transaction placeholders, then deterministically decrypt and materialize a shared transaction set after agreement.
+BLOC is a thesis prototype for agreeing on encrypted transaction placeholders
+before revealing their plaintexts. Operators construct slot-scoped proposals,
+run an Asynchronous Common Subset (ACS) protocol, derive the same bounded and
+ordered ciphertext batch, and release threshold-decryption shares only for that
+agreed batch.
 
-## Module Boundaries
+This document owns the system-level view: module boundaries, end-to-end
+handoffs, trust assumptions, protocol identities, and cross-module invariants.
+Implementation details live in the module deep dives:
 
-- `bloc-node/`
-  - Integrates slot-scoped ACS, inclusion-list handling, batched threshold decryption, local evaluation, and transport.
-  - Owns the main CLI, local cluster config generation, node runtime, evaluator, and report generation.
-- `mempool-il/`
-  - Builds deterministic bounded inclusion lists from a live Ethereum mempool view.
-  - Stays independent from consensus and threshold cryptography.
-- `bte/btd-impl-main/`
-  - Provides the cluster-facing batched threshold encryption library.
-  - Owns ciphertext encoding, batch planning, share generation, and share combination.
-- `sbc/hbbft/`
-  - Provides Reliable Broadcast, Binary Byzantine Agreement, and Asynchronous Common Subset.
-  - Includes the BLOC-specific slot adapter that bypasses the original recurring HoneyBadger driver.
+- [`mempool-il`](/bloc/docs/modules/mempool-il.md)
+- [`hbbft` and the BLOC slot adapter](/bloc/docs/modules/hbbft.md)
+- [Batched threshold encryption](/bloc/docs/modules/bte.md)
+- [`bloc-node` integration](/bloc/docs/modules/bloc-node.md)
 
-## End-to-End Flow
+Operational commands, evaluator behavior, deployment, and measurement
+definitions remain in [WORKFLOWS.md](/bloc/docs/WORKFLOWS.md) and
+[VALIDATION.md](/bloc/docs/VALIDATION.md).
 
-1. A transaction source provides raw transaction bytes and scheduling metadata.
-2. `bloc-node` encrypts payloads into placeholder ciphertexts using the BTE library.
-3. Each operator proposes one slot-scoped inclusion list into ACS.
-4. ACS outputs a common subset of proposer batches.
-5. `bloc-node` deterministically merges the accepted lists and computes a shared `BatchPlan`.
-6. Operators publish one decryption share per sub-batch.
-7. Once threshold shares exist for every sub-batch, the BTE library combines them and recovers the agreed plaintexts in consensus order.
-8. `bloc-node` emits a materialized transaction set and evaluation artifacts.
+## Implemented Boundary
 
-For synthetic/local evaluator runs, the evaluator submits raw signed Ethereum
-transactions directly to each sidecar and the sidecar performs step 2. For
-realistic mock-mempool runs, the transaction source is split into two layers:
-real signed Ethereum transactions are treated as target payloads, and
-`mempool-il` acts as a mock external submitter that encrypts those targets once
-into BLOC encrypted payloads and exposes mock placeholder candidates. Sidecars
-then include the encrypted payloads; they do not independently re-encrypt the
-same public transaction.
+The implemented path provides:
 
-## Post-ACS Merge And Batch Planning
+- deterministic construction of encrypted inclusion-list proposals;
+- one slot-scoped ACS instance per operator;
+- deterministic post-ACS canonicalization, merge, and BTE batch planning;
+- one threshold-decryption share per planned sub-batch;
+- reconstruction of raw signed Ethereum transaction bytes; and
+- JSON results plus bounded Prometheus and evaluator measurements.
 
-The Merge and Batch Planning phase is the deterministic bridge between an ACS
-decision and share generation. Every correct operator executes the same five
-stages locally over the same ordered ACS output. No network exchange occurs
-inside this phase.
+The prototype does not provide a production DVT or block-building system. It
+does not implement DKG, isolated production key custody, a cryptographic common
+coin, public decryption-share verification, execution-client validation,
+Builder API compatibility, proposer signing, slashing, or PBS enforcement.
+The current security and protocol-completeness gaps are recorded in the
+[implementation review](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
-1. **ACS output decoding.** ACS returns accepted
-   proposer payloads as protobuf bytes because consensus treats proposals as
-   opaque application data. `DecodeList` parses each payload into an inclusion
-   list and validates its basic structure. It does not hash the list.
-2. **Agreed-set construction.** `NewAgreedSet` computes each
-   accepted inclusion-list hash exactly once using the existing canonical JSON
-   definition. It sorts lists by hash and then operator ID, counts their items,
-   and hashes that canonical list sequence into the slot's agreed-set identity.
-3. **Deterministic merge.** The merge validates
-   ciphertext presence, gas, decimal effective fee, and the claimed SHA-256
-   ciphertext hash. It parses each effective fee once and carries the parsed
-   integer through sorting. An exact repeated placeholder with the same claimed
-   hash, ciphertext, and metadata uses a fast path after the first validation;
-   conflicting duplicates still take the full validation path. Unique
-   candidates are ordered by effective fee descending, sender, nonce, and hash,
-   then bounded by `BMax`, transaction-count, and gas limits. The selected order,
-   gas total, skipped count, and merged-set hash are protocol outputs.
-4. **Ciphertext decoding.** `DecodeBatch`
-   serially parses each selected outer ciphertext and its BTE capsule. The
-   capsule contains seven encoded curve points and two encoded scalars, which
-   are reconstructed through the Kyber/Kilic suite. The result is a
-   `DecodedBatch` pairing decoded objects with the accepted canonical wire
-   encodings. Structural, length, and trailing-byte errors fail the slot; no
-   partially decoded batch is planned.
-5. **Batch planning.** `PlanDecodedBatch` validates the
-   decoded metadata, chooses deterministic Opt-2 sub-batches, and separates
-   repeated puncture indices. It derives `BatchID` directly from the already
-   accepted ordered encodings, including each encoding's length, instead of
-   serializing every curve object a second time. The resulting `BatchID`,
-   `alpha`, original positions, and sub-batch membership must match at every
-   operator before share generation begins.
+## Trust And Fault Model
 
-The retained implementation deliberately preserves the original wire formats,
-JSON hash definitions, first-winner merge behavior, ordering rules, gas limits,
-and BTE plan identities. The optimizations remove repeated work within those
-boundaries; they do not change the protocol algorithm. Ciphertext decoding is
-currently serial, with no worker pool, object pooling, unsafe byte conversion,
-or decoded-ciphertext cache. Empty selected sets complete the list and merge
-boundaries, record zero ciphertext-planning duration, and materialize an empty
-result without constructing a `BatchPlan`.
+The ACS code is configured for `N` operators and `F = floor((N-1)/3)`, with the
+intended asynchronous Byzantine assumption `3F < N`. Each proposer owns one RBC
+and one BBA instance. The BTE threshold defaults to `2F+1` when configuration is
+generated, but it is an independently configured value.
 
-For observability, these stages map respectively to the exported
-`acs_output_decode_us`, `agreed_set_us`, `merge_us`, `ciphertext_decode_us`, and
-`batch_plan_us` fields. Those integer fields record microseconds in evaluator
-artifacts; Prometheus exposes the same bounded stage concepts using seconds.
-Their durations must add up to the enclosing Merge and Batch Planning duration
-within the measurement tolerance documented in `docs/VALIDATION.md`.
+The paper model assumes authenticated asynchronous channels, an unpredictable
+common coin, correctly generated cryptographic public parameters, and operators
+that hold only their own secret shares. The prototype only partially realizes
+those assumptions. libp2p authenticates connections, but the application sender
+field is not yet bound to the remote peer identity. BBA uses an epoch-parity
+placeholder coin. Generated cluster configuration contains the setup seed and
+all secret shares. These differences prevent a production-security claim.
+
+## System Components
+
+```mermaid
+flowchart LR
+    source["External submitter or evaluator"]
+    mempool["mempool-il\nsource normalization and list building"]
+    nodes["bloc-node operators\nslot lifecycle and integration"]
+    acs["sbc/hbbft\nRBC + BBA + ACS"]
+    bte["bte/btd-impl-main\nencrypt, plan, share, combine"]
+    result["Materialized slot result"]
+
+    source -->|"raw signed target txs"| mempool
+    source -->|"direct test submissions"| nodes
+    mempool -->|"encrypted placeholder candidates"| nodes
+    nodes -->|"proposal bytes and ACS messages"| acs
+    nodes -->|"ciphertexts and decryption shares"| bte
+    acs -->|"accepted proposer batches"| nodes
+    bte -->|"ordered raw transaction bytes"| nodes
+    nodes --> result
+```
+
+`mempool-il` is an external candidate-data service, not a consensus
+participant. `hbbft` treats application proposals as opaque bytes. The BTE
+library does not decide transaction inclusion or order. `bloc-node` owns the
+cross-module protocol and is the only component that turns an ACS result into a
+materialized slot result.
+
+## End-To-End Protocol
+
+```mermaid
+sequenceDiagram
+    participant S as Submitter or evaluator
+    participant M as mempool-il
+    participant N as bloc-node operator
+    participant A as SlotACS
+    participant B as ClusterBTE
+    participant P as Peer operators
+
+    alt replay-placeholder source
+        S->>M: signed target transaction corpus
+        M->>B: EncryptTx(raw, index, cluster, slot)
+        M-->>N: encrypted placeholder candidates
+    else direct evaluator source
+        S->>N: raw signed transaction and metadata
+        N->>B: EncryptTx(raw, index, cluster, slot)
+    end
+    N->>A: protobuf inclusion-list proposal
+    A->>P: slot-scoped RBC and BBA messages
+    P-->>A: slot-scoped RBC and BBA messages
+    A-->>N: ordered accepted proposer batches
+    N->>N: validate, canonicalize, merge, and bound
+    N->>B: DecodeBatchFor and PlanDecodedBatch
+    N->>B: MakeShare for each sub-batch
+    N->>P: BatchID-scoped decryption shares
+    P-->>N: BatchID-scoped decryption shares
+    N->>B: CombineShares at threshold
+    B-->>N: plaintexts in consensus order
+    N->>N: parse Ethereum transactions and publish result
+```
+
+### Stage Handoffs
+
+| Stage | Owner | Input | Output and identity | Network activity | Failure behavior |
+| --- | --- | --- | --- | --- | --- |
+| Source ingestion | `mempool-il` or `bloc-node` | RPC candidates, corpus entries, or direct raw bytes | Normalized candidate metadata | RPC/HTTP outside consensus | Source errors prevent proposal construction or polling refresh |
+| Hybrid encryption | BTE | Raw bytes, index, cluster ID, slot | Canonical `Ciphertext`; AEAD and proof context bind cluster, slot, and index | None inside BTE | Encryption or serialization error rejects the item/request |
+| Proposal construction | `bloc-node` | Local encrypted candidates | Protobuf `InclusionList(slot, operator, items)`; local canonical JSON hash is diagnostic before ACS | Proposal becomes RBC input | Provider/encoding failure marks the active slot failed |
+| Reliable broadcast | `hbbft` RBC | One opaque proposal per proposer | Available proposal bytes associated with proposer ID | PROOF, ECHO, and READY messages | Invalid/duplicate messages are rejected; no timeout exists in the asynchronous core |
+| Binary agreement and ACS | `hbbft` BBA/ACS | RBC completion signals and BBA messages | Common subset of proposer IDs and proposal bytes | BVAL and AUX messages | ACS waits for all BBA decisions and every truthy RBC result |
+| Accepted-list decoding | `bloc-node` | Proposer-tagged ACS output | Lists whose slot equals the active slot and operator equals proposer | None | Any malformed or mismatched accepted list fails the slot closed |
+| Agreed-set construction | `bloc-node` inclusion package | Accepted lists | Canonically sorted lists and `AgreedSetHash` | None | Pure deterministic transformation |
+| Merge and bounds | `bloc-node` inclusion package | Canonical accepted lists | Ordered unique ciphertext prefix, `MergedSetHash`, gas and count totals | None | Invalid candidates are skipped; malformed selected BTE data fails later decoding |
+| Ciphertext decode and plan | BTE | Ordered canonical ciphertext bytes and active scope | Immutable decoded batch, `BatchID`, `alpha`, and deterministic sub-batches | None | Any selected structural/context error fails the slot; empty selection completes successfully |
+| Share generation | BTE plus `bloc-node` | Secret share and one planned sub-batch | `DecryptionShare(operator, BatchID, subBatchID, point)` | Direct share envelopes | Proof/share generation error fails the slot; configured withholding sends nothing |
+| Threshold combine | BTE | Plan and candidate shares | Raw plaintext bytes restored to original positions | None | Requires threshold candidates per sub-batch and searches for a reconstructing subset |
+| Materialization | `bloc-node` | Ordered raw bytes | `MaterializedTransactionSet` and `Result` | HTTP result/metrics only | Invalid Ethereum bytes are currently reported per item while the slot still completes |
+
+## Canonical Identities And Ordering
+
+Several different hashes exist and are not interchangeable:
+
+| Identity | Definition | Owner |
+| --- | --- | --- |
+| Placeholder hash | SHA-256 of canonical BTE ciphertext bytes in `bloc-node` | Proposal and merge input |
+| Inclusion-list hash | SHA-256 of canonical JSON containing slot, operator, and items; the hash field itself is excluded | `bloc-node/internal/app/inclusion` |
+| Agreed-set hash | SHA-256 of canonical JSON over lists sorted by list hash then operator ID | `bloc-node/internal/app/inclusion` |
+| Merged-set hash | SHA-256 of canonical JSON over slot, selected ordered items, and selected gas | `bloc-node/internal/app/inclusion` |
+| `BatchID` | SHA-256 over library version and length-prefixed canonical ciphertext encodings in selected order | BTE |
+| Plaintext hash | SHA-256 of raw transaction bytes, stored inside each BTE ciphertext | BTE and materialized result |
+
+ACS output is first ordered by proposer ID by the slot adapter. `bloc-node` then
+recomputes list identities and sorts accepted lists by list hash and operator ID
+before merge. Merge orders valid unique candidates by effective fee descending,
+sender ascending, nonce ascending, and ciphertext hash ascending, then applies
+the configured transaction, gas, and `BMax` bounds. The resulting order is the
+only input order used to compute `BatchID` and original positions.
 
 ## Cross-Module Invariants
 
-- The accepted encrypted set must be deterministic across honest operators.
-- Batch planning must be deterministic for a fixed ordered ciphertext list.
-- Decryption shares must be scoped to the agreed `BatchID` and sub-batch.
-- Module-local artifacts such as demo outputs and benchmark results are not canonical documentation.
-- `mempool-il` is a source of candidate data, not a consensus participant.
+- **Slot and proposer binding:** network envelopes, `SlotMessage`, `SlotOutput`,
+  accepted inclusion lists, and BTE ciphertexts must all match the active slot;
+  each accepted list's operator must equal its ACS proposer.
+- **Cluster binding:** production ciphertext decoding uses `DecodeBatchFor` with
+  the active cluster ID and slot. The same context is present in AEAD associated
+  data and the BTE proof transcript.
+- **Opaque consensus payload:** ACS decides bytes and proposer membership. It
+  does not parse inclusion lists, merge candidates, plan BTE batches, or release
+  shares.
+- **Deterministic selected set:** every correct operator must derive identical
+  agreed-list order, merge order, blockspace prefix, canonical ciphertext bytes,
+  and `BatchID` before releasing shares.
+- **Distinct puncture indices:** no BTE sub-batch may contain the same index
+  twice. `alpha` is at least `ceil(2*sqrt(B))` and at least the maximum index
+  frequency; the deterministic fallback repairs round-robin collisions.
+- **Share scope:** only shares matching the local `BatchID` and a valid
+  sub-batch count toward threshold reconstruction.
+- **Ownership:** successful decoding fixes `BatchID` from accepted wire bytes;
+  later caller mutation cannot change decoded ciphertexts or planning identity.
+- **Fail-closed selected data:** malformed accepted lists or selected BTE
+  ciphertexts do not get filtered or refilled. The node records a slot failure
+  and does not publish a successful result.
+- **One active slot:** a process replaces slot state only after the previous
+  slot completes and the new slot identifier is strictly greater. Old envelopes
+  are discarded before active-slot metrics are updated.
 
-## ACS Adaptation
+## Supporting Systems
 
-The BLOC path intentionally does not use the original `HoneyBadger` epoch driver as the top-level integration boundary. Instead, `sbc/hbbft` exposes a slot-scoped adapter that:
-
-- runs one ACS instance per slot,
-- accepts externally prepared candidate batch bytes,
-- wraps traffic in slot-bound messages,
-- orders accepted proposer batches deterministically,
-- leaves post-agreement decryption/materialization outside the ACS core.
-
-RBC establishes availability and consistency for each proposer payload; it does
-not decide common-subset membership. Each proposer has a BBA instance, and ACS
-completes only after at least `N-F` instances decided true, all `N` BBA results
-are present, and every true decision has its RBC payload. The output contains
-exactly those true proposers. Within BBA, only AUX messages whose values have
-already entered the local BV-broadcast `binValues` set count toward the `N-F`
-advance threshold. These rules make reordered delivery change timing, not the
-subset selected by correct operators.
-
-The slot status endpoint exposes sorted RBC output IDs, completed BBA decisions,
-truthy BBA proposer IDs, and an explicit waiting reason. These fields are
-diagnostic only and never drive protocol decisions. This keeps consensus,
-mempool logic, deterministic ordering, and decryption concerns separated.
-
-## Repeated Slot Lifecycle
-
-An operator process owns long-lived membership, BTE key material, HTTP state,
-and its libp2p mesh. Its active `slotState` owns the ACS instance, pending
-transactions, decryption shares, result, and measurements for exactly one slot.
-Only one slot may be active at a time. Replacing a completed slot drains current
-handlers and sends, closes ACS/RBC/BBA goroutines, and installs a clean state
-with a strictly increasing slot identifier. Envelopes for older slots are
-discarded before they can affect active-slot metrics.
-
-The M1 evaluator exploits this boundary to measure many steady-state slots per
-cluster without rebuilding cryptographic and network setup around every sample.
-The isolated evaluator remains available for lifecycle smoke testing.
-
-## Operator Transport
-
-Operators exchange addressed ACS and decryption-share protobuf envelopes over
-direct libp2p streams. Local configurations use TCP multiaddresses underneath,
-while libp2p supplies peer identity, authenticated connections, and stream
-multiplexing. gRPC and the former raw socket-per-envelope TCP transport are not
-part of the active prototype.
-
-## Distributed Sidecar Deployment
-
-The deployment-ready path treats `bloc-node` as the BLOC sidecar process that
-can run beside a future DVT operator. For this milestone, the sidecar remains
-responsible only for the BLOC protocol path and measurement surface:
-
-- HTTP control API for transaction submission, slot preparation/start, result
-  polling, health checks, and Prometheus metrics.
-- libp2p operator mesh for ACS and decryption-share traffic.
-- mounted trusted-dealer cluster config for prototype key material.
-- remote evaluator access through advertised HTTP URLs.
-
-Cluster config supports both legacy local addresses and explicit
-listen-vs-advertise fields. Local runs default to loopback addresses. Container
-rehearsal runs listen on container interfaces while advertising dialable
-addresses that other sidecars and evaluators can reach.
-
-The primary distributed thesis evaluation shape is VM/EC2-per-sidecar rather
-than an orchestrated container cluster. In that shape, each BLOC operator runs
-on an independent VM with its own network identity, and a separate controller
-machine runs `eval-remote`, artifact collection, and optional metrics
-collection. This better matches the protocol model and keeps orchestration
-behavior out of the main distributed latency results.
-
-Prometheus-compatible `/metrics` is the live operational visibility interface.
-It uses the official Go Prometheus client with bounded labels, counters for
-events, gauges for current state, and seconds-based histograms for slot and HTTP
-latency. Grafana dashboards query histogram buckets for p50/p95 panels.
-
-Evaluator CSV/JSON files remain the offline experiment artifact format used for
-chart generation and thesis tables. They intentionally preserve microsecond
-columns such as `total_slot_us` for backwards compatibility with the existing
-chart module; they are not mirrored one-to-one into Prometheus.
-
-Builder API compatibility is not part of this deployment milestone. The later
-Builder-boundary milestone may adapt the materialized transaction set into a
-Builder-facing development API, but the current sidecar does not claim to build
-valid Ethereum execution payloads.
-
-## Cluster BTE Design
-
-The BTE module exposes a cluster-facing API for raw transaction bytes:
-
-- `EncryptTx` produces a public ciphertext that carries:
-  - BTE capsule metadata,
-  - AEAD-encrypted raw transaction bytes,
-  - committed plaintext hash,
-  - cluster and slot context.
-- `PlanBatch` computes a deterministic `BatchPlan` over the agreed ciphertext order.
-- `MakeShare` emits one threshold share per sub-batch.
-- `CombineShares` recovers plaintexts once threshold shares are available.
-
-`PlanBatch` uses the BEAT-MEV sub-batching optimization by default. For a
-batch with `B` ciphertexts, it chooses `alpha = ceil(2*sqrt(B))`, corresponding
-to the paper's `Opt-2` setting, then raises `alpha` if repeated puncture indices
-require more sub-batches. This deterministic layout is part of the integrated
-`bloc-node` path, including M1 evaluator runs.
-
-The integrated prototype does not currently expose runtime switches for the
-paper's normal/unoptimized combine path, `Opt-1` (`alpha = sqrt(B)`), or
-parallel sub-batch combination. Those remain benchmark or future M2 comparison
-dimensions, not M1 profile dimensions.
-
-The current implementation is prototype-grade:
-
-- trusted-dealer key generation is still used,
-- public share-verifiability is not implemented,
-- Ethereum execution, Builder API compatibility, and proposer signing are still
-  out of scope.
-
-## Mempool Inclusion-List Service
-
-`mempool-il` is designed as a separate service with two internal responsibilities:
-
-- mempool ingestion and classification,
-- deterministic inclusion-list construction.
-
-It reads pending transactions from configured RPC-backed sources, normalizes them into an in-memory indexed store, and exposes deterministic snapshots and bounded inclusion lists over HTTP.
-
-For thesis data-realism tests, `mempool-il` also supports a
-`replay-placeholder` source. This mode reads a deterministic corpus of real raw
-signed Ethereum target transactions, validates them with `go-ethereum`,
-encrypts each target once using BLOC public cluster material, signs a mock
-placeholder Ethereum transaction, then parses that placeholder transaction's
-calldata as the source of truth. The parsed inclusion-list items include:
-
-- `target_tx_hash` and target size/type metadata,
-- `encrypted_payload_hex`, derived from the placeholder calldata and consumed by sidecars,
-- mock placeholder transaction hash/calldata/gas metadata.
-
-The inclusion-list API does not expose raw target transaction bytes. The
-sidecar-facing encrypted payload is extracted from an Ethereum-shaped
-placeholder transaction rather than supplied as a parallel source field.
-Execution-client validation and Builder API compatibility remain later
-milestones.
+The HTTP control API, persistent evaluator, remote evaluator, Prometheus
+collectors, Docker/VM deployment files, and latency charts measure or operate
+the protocol but do not define its identities or decisions. Metric intervals
+and experiment acceptance rules are specified in
+[VALIDATION.md](/bloc/docs/VALIDATION.md). Local, container, and VM execution
+procedures are specified in [WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
 
 ## Canonical References
 
-- Local developer workflow: [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- Validation matrix: [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-- Major design history: [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
+- Module implementation details: [`docs/modules/`](/bloc/docs/modules/)
+- Current milestone and evidence posture: [STATUS.md](/bloc/docs/STATUS.md)
+- Major design rationale: [DECISIONS.md](/bloc/docs/DECISIONS.md)
+- Shared terminology: [GLOSSARY.md](/bloc/docs/GLOSSARY.md)
+- Source research: [`papers/`](/bloc/papers/)

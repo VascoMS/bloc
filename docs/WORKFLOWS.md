@@ -41,7 +41,8 @@ Update docs based on the kind of change:
 
 - Milestone state or next-step changes: update `docs/STATUS.md`
 - Workflow or developer process changes: update `docs/WORKFLOWS.md` or `docs/DEVELOPMENT.md`
-- Architecture or protocol boundary changes: update `docs/ARCHITECTURE.md` and `docs/DECISIONS.md`
+- Architecture or protocol boundary changes: update `docs/ARCHITECTURE.md`, the
+  affected `docs/modules/` deep dive, and `docs/DECISIONS.md`
 - Validation command or acceptance-criteria changes: update `docs/VALIDATION.md`
 - Small implementation changes: update `docs/CHANGELOG.md` and link the entry to the milestone it advanced
 
@@ -51,6 +52,68 @@ Local demos, local evaluator runs, and Docker Compose runs are preflight tools.
 Use them to catch regressions before deployment. `eval-local` and `eval-suite`
 also provide the clean local protocol baseline. The real distributed target for
 current thesis metrics is VM/EC2-per-sidecar evidence.
+
+### Experiment and Result Naming
+
+Use one campaign ID for the complete logical run. The same ID must name the
+top-level result directory, chart directory, manifest `experiment_id`, and any
+comparison input. Do not invent a second human-facing name for a phase or for
+the generated charts.
+
+Campaign IDs use this grammar:
+
+```text
+<milestone>-<topology>-<workload>[-<variant>]-<utc-timestamp>
+```
+
+Use lowercase ASCII, digits, and hyphens only. Format the UTC timestamp as
+`yyyyMMdd't'HHmmss'z'`, for example `20260715t095117z`. Use the following
+controlled terms where they apply:
+
+- milestone: `m1`, `m2`, `m3`, `m4`, or `m5`;
+- topology: `local`, `compose`, `same-az`, or `cross-az`;
+- workload: `synthetic`, `replay`, `libp2p`, `bte`, or a short fault name;
+- variant: `baseline`, `opt`, `probe`, or another short protocol variant that
+  is meaningful in the final analysis.
+
+Examples:
+
+```text
+m3-cross-az-synthetic-opt-20260715t095117z
+m3-cross-az-synthetic-probe-20260715t093849z
+m1-local-libp2p-baseline-20260715t081500z
+m5-local-omit-proposal-20260715t140000z
+```
+
+Do not use suffixes such as `v2`, `fixed`, `final`, `free`, or `step1`. A rerun
+gets a new timestamp. Record its relationship to an earlier run in the
+manifest or comparison metadata. Reuse an existing campaign ID only when a
+runner explicitly supports resuming that same incomplete campaign.
+
+Store artifacts using this layout:
+
+```text
+results/<environment>/<campaign-id>/
+  manifest.json
+  run_measurements.csv
+  n4/
+  n7/
+  comparison/
+results/charts/<campaign-id>/
+```
+
+`<environment>` is `local`, `distributed`, or `ec2`. Node-count and scenario
+directories are children of the campaign; they are not separate top-level
+campaigns. Temporary low-level EC2 experiment IDs may include the required
+`bloc-ec2-` prefix, but the wrapper's `-CampaignId` remains the canonical name.
+For M3 wrappers, retain their full standard prefix (for example
+`m3-cross-az-synthetic-`) and keep the optional variant short. The wrapper
+removes that prefix when constructing AWS names, which keeps IAM role and
+instance-profile names within AWS's 64-character limit.
+
+Before starting any recorded run, choose the campaign ID once and pass it
+unchanged to the runner. When reporting results, link the canonical campaign
+root rather than any temporary phase-staging directory.
 
 Use the `bloc-node` demo flow when you need a fast end-to-end prototype check:
 

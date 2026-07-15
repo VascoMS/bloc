@@ -518,6 +518,7 @@ go run bench/main.go
 ### bloc-node
 
 - deterministic inclusion-list merge behavior,
+- accepted inclusion lists and ACS outputs are bound to the active slot and proposer,
 - wire/protobuf round-trips,
 - deterministic signed Ethereum transaction generation for the evaluator,
 - wrong-batch share filtering before threshold combination.
@@ -525,8 +526,11 @@ go run bench/main.go
 ### BTE
 
 - ciphertext verification rejects mutations,
+- scope-bound decoding rejects foreign cluster/slot ciphertexts while generic APIs remain compatible,
+- malformed AEAD envelopes return errors without panicking during combine,
+- decoded batch identity and exported ciphertext ownership resist caller mutation,
 - hybrid encryption/decryption round-trip works,
-- deterministic `BatchPlan` behavior,
+- deterministic `BatchPlan` behavior, including collision-free fallback for interleaved repeated indices,
 - BEAT-MEV-style `2*sqrt(B)` sub-batching is the default cluster planning mode,
 - threshold enforcement and duplicate-share handling,
 - full-path benchmark coverage for several batch sizes.

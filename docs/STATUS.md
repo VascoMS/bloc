@@ -15,6 +15,26 @@ The local optimization campaign removed repeated inclusion-list hashing,
 repeated fee parsing during sort, exact-placeholder duplicate validation, and
 BTE batch-ID reserialization while preserving protocol identities.
 
+The post-ACS correctness boundary now binds production BTE decoding to the
+active cluster and slot, rejects malformed AEAD envelopes without panicking,
+freezes decoded batch identity and ownership, verifies accepted-list
+slot/proposer metadata, and deterministically repairs the rare repeated-index
+layouts that the original round-robin assignment rejected. Existing wire
+formats, hashes, `BatchID`, `alpha`, and previously successful plans are
+unchanged.
+
+The source-led protocol architecture review is complete. The top-down system
+boundary now lives in `docs/ARCHITECTURE.md`, with canonical implementation deep
+dives under `docs/modules/` and the reviewed findings in
+`docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`. The review identified
+correctness and security gaps below the previously exercised test surface,
+including mixed-root RBC reconstruction, unbound libp2p application sender IDs,
+the deterministic BBA placeholder coin, BBA equivocation/future-message
+handling, insecure prototype CRS/key distribution, and unbounded/unverified
+share admission. Existing local campaign results remain useful honest-path
+prototype measurements, but they are not evidence against these adversarial
+findings.
+
 The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred until after distributed sidecar deployment evidence exists.
 
 ## Active Milestone
@@ -38,14 +58,37 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Run a clean optimized-image EC2 `n=4`, batch-128 recovery probe against the corrected ACS/BBA implementation.
-2. If that probe is consistent, rerun the optimized cross-AZ `n=4/n=7` campaign and generate the matched comparison.
-3. Treat Docker Compose as a local deployment-mechanics rehearsal only.
-4. Inspect and compare the completed EC2 M3 synthetic `n=4/n=7` same-AZ and cross-AZ charts/tables before adding mock-placeholder realism, p99, or fault campaigns.
-5. Decide whether to request an AWS vCPU quota increase for comparable `t3.small` `n=10` EC2 phases, or document `n=10` as deferred until the account quota is raised.
-6. Keep the bash runner as an optional Linux/WSL path once the distro/tooling issue is resolved.
+1. Plan and implement correctness patches for mixed-root RBC reconstruction,
+   conflicting BBA AUX messages, and multi-epoch delayed-message retention,
+   with adversarial delivery schedules.
+2. Bind every inbound libp2p peer to its configured operator ID, cap envelope
+   sizes, and restrict share admission to configured sender/index identities.
+3. Run the resulting HBBFT, BTE, and `bloc-node` race suites on Linux.
+4. Implement and locally validate bounded parallel ciphertext decoding only
+   after the corrected consensus/transport baseline is green.
+5. Rebuild one image, run a clean EC2 `n=4`, batch-128 recovery probe, and only
+   then consider a new optimized cross-AZ `n=4/n=7` campaign.
+6. Design public-CRS generation and per-operator secret provisioning before any
+   production-confidentiality or key-isolation claim.
 
 ## Current Blockers / Risks
+
+- The architecture review found critical unpatched gaps outside the existing
+  honest/reordered test corpus: RBC reconstruction uses ECHO shards from all
+  roots without recomputing the selected Merkle root, and libp2p's authenticated
+  remote peer is not bound to the application sender ID used in ACS quorum
+  counts. Do not treat current distributed results as Byzantine-safety evidence
+  until these findings and their adversarial tests are addressed.
+- The deterministic seeded PRF setup exposes setup exponents and includes
+  diagonal elements marked insecure by the implementation; the shared cluster
+  file also contains every secret share and libp2p private key. These are
+  prototype shortcuts, not a secure BTE setup or key-custody design.
+
+- The Merge + Plan correctness patch passes both Go suites, bounded outer and
+  capsule decoder fuzzing, and local n4 BMax-128 batches 8/32/128. Its Linux
+  race gate is still pending because this Windows host has no gcc toolchain,
+  WSL distribution, or locally cached Go Docker image. Do not begin EC2
+  evidence collection from this patch until that race gate passes.
 
 - The optimized 2026-07-14 cross-AZ campaign remains invalid historical evidence: after 7 clean
   batch-128 measurements, three `n=4` operators decided 3 inclusion lists/96

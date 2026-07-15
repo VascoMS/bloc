@@ -18,6 +18,7 @@ This file explains how Codex should read this repository efficiently and how dur
 - Architecture or protocol changes:
   - `docs/STATUS.md`
   - `docs/ARCHITECTURE.md`
+  - the affected canonical document under `docs/modules/`
   - `docs/DECISIONS.md`
   - `docs/WORKFLOWS.md`
   - `docs/VALIDATION.md`
@@ -45,6 +46,7 @@ Stable context belongs in:
 - `docs/STATUS.md`
 - `README.md`
 - root `docs/`
+- canonical protocol deep dives under `docs/modules/`
 - short module READMEs
 
 Temporary or task-scoped context belongs in:
@@ -66,3 +68,6 @@ Temporary or task-scoped context belongs in:
 - No new standalone `.md` notes unless they are a temporary scratchpad, a task artifact, or a historical note intended for archive.
 - Durable content must be merged into canonical docs.
 - Update one clear source of truth instead of adding parallel explanations.
+- Keep cross-module handoffs and invariants in `docs/ARCHITECTURE.md`; keep
+  stage algorithms, state, wire details, and module limitations in the matching
+  `docs/modules/` deep dive.

@@ -2,7 +2,12 @@
 
 Practical implementation of the Honey Badger Byzantine Fault Tolerance consensus algorithm written in Go.
 
-In this repository, the ACS core is also used by the BLOC prototype through a separate slot-scoped adapter. For the cross-module BLOC boundary, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For validation expectations, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+In this repository, the ACS core is also used by the BLOC prototype through a
+separate slot-scoped adapter. For the cross-module BLOC boundary, read
+[docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For the RBC/BBA/ACS state
+machines, slot adapter, paper deviations, and known limitations, read
+[docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md). For validation
+expectations, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
 
 ## Summary
 

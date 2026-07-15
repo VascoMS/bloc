@@ -4,14 +4,18 @@ Proof-of-concept implementation of the BEAT-MEV batched threshold encryption sch
 
 This module is still prototype-grade and should not be treated as production cryptography.
 
-For the system role of this module, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For test coverage and benchmarks, read [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md) and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+For the system role of this module, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+For the cryptographic construction, hybrid envelope, wire format, planner, and
+known security limitations, read [docs/modules/bte.md](/bloc/docs/modules/bte.md).
+For test coverage and benchmarks, read [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md)
+and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
 
 ## Notes
 
 - The source groups `G_1` and `G_2` are swapped relative to the paper because `G_1` operations are more efficient in this implementation.
 - The cluster-facing `PlanBatch` path used by `bloc-node` enables BEAT-MEV-style `Opt-2` sub-batching by default: `alpha = ceil(2*sqrt(B))`, raised only when repeated indices require more sub-batches.
 - The integrated path does not currently expose runtime switches for normal combine, `Opt-1`, or parallel combine; use the inherited benchmark code for those comparisons.
-- [CLUSTER_BTE.md](/bloc/bte/btd-impl-main/CLUSTER_BTE.md) remains the module-local deep dive on the cluster-facing library boundary.
+- [CLUSTER_BTE.md](/bloc/bte/btd-impl-main/CLUSTER_BTE.md) is retained only as a compatibility pointer to the canonical deep dive.
 
 ## Tests and Benchmarks
 

@@ -31,6 +31,7 @@
 - `README.md`: repo entry point
 - `AGENTS.md`: task router and agent operating contract
 - `docs/ARCHITECTURE.md`: canonical system design
+- `docs/modules/*.md`: canonical protocol implementation details by module
 - `docs/WORKFLOWS.md`: implementation and documentation process
 - `docs/VALIDATION.md`: what to run and why
 - `docs/DECISIONS.md`: major design decisions
@@ -41,6 +42,7 @@
 Create a new standalone Markdown file only if it is:
 
 - a canonical root doc under `docs/`,
+- a canonical protocol deep dive under `docs/modules/`,
 - a module entry-point README,
 - a temporary scratchpad for one task,
 - or a historical note that will live under `docs/archive/`.

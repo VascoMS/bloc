@@ -26,6 +26,7 @@ For the current implementation status, active milestone, next steps, and last kn
 Start here depending on what you need:
 
 - System design and protocol boundaries: [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- Protocol implementation deep dives: [docs/modules/](/bloc/docs/modules/)
 - Current status and next development step: [docs/STATUS.md](/bloc/docs/STATUS.md)
 - Validation commands and evidence model: [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
 - Roadmap and milestone sequence: [docs/ROADMAP.md](/bloc/docs/ROADMAP.md)

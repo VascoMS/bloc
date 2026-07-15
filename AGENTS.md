@@ -34,6 +34,10 @@ Most source code lives under `cmd/` and `internal/` inside each module. Tests ar
 - [docs/ROADMAP.md](/bloc/docs/ROADMAP.md)
 - [docs/GLOSSARY.md](/bloc/docs/GLOSSARY.md)
 - [docs/CODEX_GUIDE.md](/bloc/docs/CODEX_GUIDE.md)
+- [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md)
+- [docs/modules/mempool-il.md](/bloc/docs/modules/mempool-il.md)
+- [docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md)
+- [docs/modules/bte.md](/bloc/docs/modules/bte.md)
 
 ## Task Routing
 
@@ -43,6 +47,7 @@ Read:
 
 - [docs/STATUS.md](/bloc/docs/STATUS.md)
 - [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- the affected canonical document under [docs/modules/](/bloc/docs/modules/)
 - [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
 - [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
 - [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
@@ -54,6 +59,7 @@ Read:
 - [docs/STATUS.md](/bloc/docs/STATUS.md)
 - [bloc-node/README.md](/bloc/bloc-node/README.md)
 - [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md)
 - [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
 - [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
 
@@ -64,6 +70,7 @@ Read:
 - [docs/STATUS.md](/bloc/docs/STATUS.md)
 - [mempool-il/README.md](/bloc/mempool-il/README.md)
 - [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/modules/mempool-il.md](/bloc/docs/modules/mempool-il.md)
 - [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
 
 ### BTE changes
@@ -74,6 +81,7 @@ Read:
 - [bte/btd-impl-main/README.md](/bloc/bte/btd-impl-main/README.md)
 - [bte/btd-impl-main/TESTING.md](/bloc/bte/btd-impl-main/TESTING.md)
 - [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/modules/bte.md](/bloc/docs/modules/bte.md)
 - [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
 - [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
 
@@ -84,6 +92,7 @@ Read:
 - [docs/STATUS.md](/bloc/docs/STATUS.md)
 - [sbc/hbbft/README.md](/bloc/sbc/hbbft/README.md)
 - [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
+- [docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md)
 - [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
 - [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
 

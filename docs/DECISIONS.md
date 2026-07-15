@@ -26,7 +26,7 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Add a dedicated slot-scoped adapter that wraps one ACS instance per slot and leaves post-agreement processing outside the ACS core.
 - Rationale: This preserves the consensus core while giving `bloc-node` a clean boundary for externally supplied candidate batches and deterministic post-agreement processing.
 - Consequences: The repo now has two conceptual top-level paths in `hbbft`: the original driver and the BLOC slot path. Documentation must make that distinction explicit.
-- Related files: `sbc/hbbft/bloc_slot.go`, `docs/archive/BLOC_HoneyBadger_Implementation_Note.md`
+- Related files: `sbc/hbbft/bloc_slot.go`, `docs/modules/hbbft.md`
 
 ## 0002. Use deterministic batch planning and proposer ordering after consensus
 
@@ -48,7 +48,7 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Use a hybrid design where BTE encrypts a capsule secret and AES-GCM protects the raw transaction bytes.
 - Rationale: This keeps timing-of-release in the threshold cryptography while allowing realistic byte payloads for the prototype.
 - Consequences: Payload integrity depends on both successful threshold reconstruction and the committed plaintext hash check.
-- Related files: `bte/btd-impl-main/be/cluster.go`, `bte/btd-impl-main/CLUSTER_BTE.md`
+- Related files: `bte/btd-impl-main/be/cluster.go`, `docs/modules/bte.md`
 
 ## 0004. Combine any valid threshold share subset instead of depending on a fixed share order
 
@@ -59,7 +59,7 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Filter by the local agreed batch and sub-batch, then combine any valid threshold subset rather than targeting a fixed operator set.
 - Rationale: Threshold correctness should not depend on one hard-coded operator ordering, and wrong-batch shares must never count toward reconstruction.
 - Consequences: Share combination logic is more defensive, and public share-verifiability remains a future hardening step.
-- Related files: `bloc-node/internal/app/main_test.go`, `docs/archive/THRESHOLD_SHARE_ISSUE.md`
+- Related files: `bloc-node/internal/app/node.go`, `bte/btd-impl-main/be/cluster.go`, `docs/modules/bloc-node.md`, `docs/modules/bte.md`
 
 ## 0005. Standardize operator messaging on libp2p streams
 
@@ -138,3 +138,25 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: RBC proves proposal availability and consistency, while BBA decides inclusion. Mixing those responsibilities weakens common-subset agreement under reordered asynchronous delivery.
 - Consequences: Safety is tested over 1,000 fixed delivery schedules plus a 100-slot batch-128 gate and a complete n4/n7 matrix. Any future liveness repair must preserve these completion and validity rules; the all-RBC shortcut cannot return as a workaround.
 - Related files: `sbc/hbbft/acs.go`, `sbc/hbbft/bba.go`, `bloc-node/scripts/run-acs-safety-campaign.ps1`, `docs/VALIDATION.md`
+
+## 0012. Bind post-ACS BTE decoding to slot context and repair collision planning
+
+- Date: 2026-07-15
+- Status: Accepted
+- Context: Post-ACS processing accepted internally consistent ciphertexts without requiring the active cluster and slot, retained mutable canonical-byte aliases until planning, and could reject a valid repeated-index batch when frequency ties made the default round-robin layout collide.
+- Options considered: validate only after decoding in `bloc-node`; break every generic BTE API by requiring runtime context; add scope-bound APIs while preserving generic callers, freeze batch identity during decode, and use a fallback only when the existing layout collides.
+- Decision: Production `bloc-node` uses additive scope-bound BTE APIs and fails the slot on any selected metadata or structural mismatch. `DecodedBatch` owns its `BatchID` and returns independently owned ciphertext copies. Planning preserves every existing collision-free layout and otherwise assigns each item to the least-loaded eligible sub-batch, breaking ties by sub-batch ID.
+- Rationale: The application must prevent cross-slot or cross-cluster replay without removing useful generic library operations. Preserving the current fast path keeps existing protocol identities stable, while a deterministic fallback accepts layouts that satisfy the BTE distinct-index invariant but were previously rejected accidentally.
+- Consequences: No wire, hash, `BatchID`, or `alpha` definition changes. Formerly successful plans remain identical; formerly rejected collision layouts now require all operators to run the corrected implementation. Operators must be upgraded as one image before processing new slots.
+- Related files: `bte/btd-impl-main/be/cluster.go`, `bloc-node/internal/app/node.go`, `docs/modules/bte.md`, `docs/modules/bloc-node.md`
+
+## 0013. Separate the system architecture from canonical module deep dives
+
+- Date: 2026-07-15
+- Status: Accepted
+- Context: `docs/ARCHITECTURE.md` mixed system boundaries with detailed merge/planner internals, deployment topology, evaluator metrics, and module-specific limitations. `hbbft` and `bloc-node` had no canonical implementation deep dives, while the BTE note duplicated and eventually contradicted the root document.
+- Options considered: continue expanding the root architecture; put internals in module READMEs; keep one top-down root architecture and centralized canonical module documents under `docs/modules/`.
+- Decision: `docs/ARCHITECTURE.md` owns the trust model, module boundaries, end-to-end handoffs, identities, and cross-module invariants. `docs/modules/{bloc-node,mempool-il,hbbft,bte}.md` own stage algorithms, state, wire formats, concurrency, failure semantics, paper mapping, tests, and limitations. Module READMEs remain operational entry points.
+- Rationale: A layered structure lets thesis reviewers understand the complete protocol before drilling into source-backed implementation detail, while giving future changes one unambiguous documentation owner.
+- Consequences: Architecture work must update the affected module deep dive as well as the root document when a cross-module boundary changes. `CLUSTER_BTE.md` remains only as a compatibility pointer. Historical review findings live under `docs/archive/` and are not competing current architecture.
+- Related files: `docs/ARCHITECTURE.md`, `docs/modules/`, `docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`, `AGENTS.md`, `docs/CODEX_GUIDE.md`

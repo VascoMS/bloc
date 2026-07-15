@@ -8,7 +8,11 @@
 - protobuf operator messaging over libp2p streams,
 - evaluation and reporting commands.
 
-For the cross-module system design, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For the validation matrix, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md). For the standard demo and experiment flow, read [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
+For the cross-module system design, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+For the node's protocol state machine, merge/share path, and failure semantics,
+read [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md). For the
+validation matrix, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md). For the
+standard demo and experiment flow, read [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
 
 This module is a prototype harness, not a production DVT client. It still uses trusted-dealer configs and a local evaluation environment.
 

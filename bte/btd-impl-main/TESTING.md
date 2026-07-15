@@ -1,6 +1,9 @@
 # Testing Coverage
 
-Supplemental module note. The cross-repo validation matrix now lives in [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+Supplemental module note. The cross-repo validation matrix now lives in
+[docs/VALIDATION.md](/bloc/docs/VALIDATION.md), and the canonical construction,
+wire-format, planning, and security discussion lives in
+[docs/modules/bte.md](/bloc/docs/modules/bte.md).
 
 This document explains what the current test and benchmark suite checks after the cluster-facing BTE integration.
 
@@ -95,6 +98,21 @@ Why it matters:
 - Confirms encrypted placeholder payloads can be serialized and recovered by cluster nodes.
 - Confirms group elements/scalars survive binary round-trip.
 
+### Scoped decoding, AEAD shape, and decoded-batch ownership
+
+`TestScopedBatchAPIsRejectForeignContext`, `TestCiphertextAEADShapeValidation`,
+`TestCombineSharesRejectsMutatedNonceWithoutPanic`,
+`TestDecodedBatchFreezesCanonicalIdentity`, and
+`TestDecodedBatchCiphertextsAreDeepCopies` check the post-ACS safety boundary.
+
+They confirm that:
+
+- scope-bound decoding rejects a foreign cluster or slot while generic APIs remain compatible;
+- malformed nonce and authenticated-payload lengths are rejected during decode and planning;
+- defensive decryption returns an error rather than allowing GCM to panic;
+- caller mutation of canonical input bytes cannot change a decoded batch's `BatchID`;
+- exported ciphertext copies do not alias internal bytes, points, or scalars.
+
 ### `TestPlanBatchSeparatesDuplicateIndices`
 
 Checks deterministic sub-batching for repeated puncture indices.
@@ -110,6 +128,14 @@ Why it matters:
 
 - Confirms the BEAT-MEV index collision constraint is handled by planning.
 - Confirms repeated indices can be distributed across sub-batches rather than immediately failing the entire batch.
+
+`TestPlanBatchUsesDeterministicCollisionFallback` covers the interleaved index
+layout `[0,1,2,1,2,3,0,3]` that made the original round-robin assignment
+collide. It checks the exact fallback membership and a complete
+encrypt/share/combine round trip. `TestPlanBatchPreservesExistingRoundRobinMembership`
+locks the prior collision-free membership, while
+`TestArrangeBatchAlwaysSeparatesIndexesUpToBMax` exercises deterministic index
+patterns through the full configured batch bound.
 
 ### `TestBatchDecRejectsDuplicateIndices`
 
@@ -302,13 +328,12 @@ The current suite does not test:
 - Cross-language serialization stability.
 - Backward compatibility of serialized ciphertexts across future versions.
 - Security against adaptive adversaries beyond the local mutation/rejection tests.
-- Fuzzing of decoders, malformed binary encodings, or group element edge cases.
+- Exhaustive malformed-group coverage beyond the retained canonical decoder fuzz corpora.
 
 ## Recommended Next Tests
 
 Before integrating with a real cluster, add:
 
-- Decoder fuzz tests for `UnmarshalCiphertext` and `BTD.UnmarshalCT`.
 - Tests for duplicate operator shares in `CombineShares`.
 - Tests for wrong `BatchID` and wrong `SubBatchID` shares.
 - Tests for tampered AEAD ciphertext and nonce.

@@ -49,4 +49,9 @@ bash deploy/ec2/run-a1-pilot.sh --admin-cidr >/dev/null 2>&1
 status=$?
 set -e
 [[ "$status" -eq 2 ]] || { echo "missing option value returned $status, expected 2" >&2; exit 1; }
+set +e
+bash deploy/ec2/run-m3-three-region.sh --admin-cidr 127.0.0.1/32 --keep-resources-on-failure --validate-only >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" -eq 2 ]] || { echo "three-region preserve-on-failure option returned $status, expected 2" >&2; exit 1; }
 printf 'campaign runner portability checks passed\n'

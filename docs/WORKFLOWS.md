@@ -433,8 +433,7 @@ bash deploy/ec2/run-m3-three-region.sh \
   --unattended
 ```
 
-After committing the validated source and receiving administrator confirmation
-of Free Tier plan/credit coverage, run the probe:
+After committing the validated source, run the probe:
 
 ```sh
 bash deploy/ec2/run-m3-three-region.sh \
@@ -443,30 +442,27 @@ bash deploy/ec2/run-m3-three-region.sh \
   --node-counts 4 \
   --batch-sizes 8,128 \
   --warmups 1 \
-  --repetitions 3 \
-  --confirm-credit-coverage
+  --repetitions 3
 ```
 
-If the probe and its teardown are accepted, run the full defaults with the same
-credit confirmation:
+If the probe and its teardown are accepted, run the full defaults:
 
 ```sh
 bash deploy/ec2/run-m3-three-region.sh \
   --admin-cidr "<your-ip>/32" \
-  --aws-profile bloc \
-  --confirm-credit-coverage
+  --aws-profile bloc
 ```
 
 The canonical matrix is `n=4/7`, batches `8/32/128`, five warmups, and thirty
 measurements on `t3.small`, with a 60-second slot timeout. Placement is `2/1/1`
 for `n=4` and `3/2/2` for `n=7`. `--plan-only` checks both node-count plans and
 the exact three-VPC/three-peering/six-peer-route allowlist without creating
-resources. Before a real apply, an administrator must verify Free Tier
-plan/credit coverage; then add `--confirm-credit-coverage`. The runner verifies
-8/4/4 vCPU headroom, records pre/post five-attempt pairwise health matrices,
+resources. Real applies may be billable and require operator authorization.
+The runner verifies 8/4/4 vCPU headroom, records pre/post five-attempt pairwise health matrices,
 CPU/T3 credit metrics, resource samples, region/AZ attribution, and one image
-digest. It destroys and authenticates empty cleanup for each node-count phase
-before continuing. The report includes protocol p50/p95, four-stage, four
+digest. It always destroys, retries Terraform teardown, removes regional keys,
+and authenticates empty cleanup for each node-count phase before continuing.
+There is no preserve-on-failure mode. The report includes protocol p50/p95, four-stage, four
 region-pair classes, and critical-node-region attribution. Inter-region data
 transfer and T3 Unlimited surplus credits may be billable.
 

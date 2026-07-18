@@ -537,10 +537,9 @@ three measurements. The accepted campaign uses `n=4,7`, batches `8,32,128`, five
 warmups, thirty measurements, and a 60-second timeout. Thirty samples support
 Type-7 p50/p95, not p99.
 
-Both real commands require a committed source tree and
-`--confirm-credit-coverage`. The confirmation is an operator attestation that
-an administrator checked the current plan/credit balance before allocation; it
-is not inferred from EC2's instance-type `FreeTierEligible` flag.
+Both real commands require a committed source tree. Campaign authorization
+accepts potentially billable usage; EC2's instance-type `FreeTierEligible` flag
+is recorded as context but is not treated as a zero-cost guarantee.
 
 The four-stage report must add to `total_slot_us` within 20 microseconds:
 
@@ -557,6 +556,8 @@ after; correct region/AZ placement; one image digest; no restart/OOM evidence;
 and authenticated empty cleanup of instances, volumes, three VPCs, all three
 peering connections, ECR, regional keys, IAM role, and instance profile.
 Operator secrets and temporary SSH private keys are excluded from artifacts.
+Cleanup is mandatory on success and failure, retries Terraform destroy up to
+three times, and has no preserve-resources option.
 Generate the report with `python -m bloc_latency_charts.three_region`; it emits
 protocol p50/p95, four-stage, pairwise-network, and critical-node-region
 summaries. Inter-region transfer and T3 Unlimited surplus credits are

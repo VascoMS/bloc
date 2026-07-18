@@ -265,11 +265,12 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Rationale: `n=7` requires 8/4/4 vCPUs, which fits the verified 16/5/5 limits,
   and the full mesh exposes intra-region, both transatlantic, and EU–EU paths.
   A direct mesh is mandatory because VPC peering is non-transitive.
-- Consequences: A quota increase is not currently required, but Free Tier
-  plan/credit eligibility remains an administrator check and inter-region
-  transfer or T3 Unlimited surplus credits may be billed. Campaign evidence
-  must retain one image digest, placement/AZ attribution, complete five-attempt
-  pairwise health matrices, and authenticated empty three-region teardown.
+- Consequences: A quota increase is not currently required. Campaign
+  authorization accepts that inter-region transfer or T3 Unlimited surplus
+  credits may be billed. Campaign evidence must retain one image digest,
+  placement/AZ attribution, complete five-attempt pairwise health matrices, and
+  authenticated empty three-region teardown. Teardown is mandatory on success
+  and failure; the runner provides no preserve-resources mode.
   Historical two-region artifacts remain readable but are not the active
   evidence target.
 - Related files: `deploy/ec2/terraform-three-region/`,

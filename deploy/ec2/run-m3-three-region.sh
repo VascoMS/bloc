@@ -11,9 +11,9 @@ Usage: bash deploy/ec2/run-m3-three-region.sh --admin-cidr CIDR [options]
   --primary-availability-zone AZ --secondary-availability-zone AZ --tertiary-availability-zone AZ
   --operator-instance-type TYPE --controller-instance-type TYPE --cpu-credits standard|unlimited
   --node-counts LIST --batch-sizes LIST --warmups N --repetitions N
-  --eval-timeout DURATION --campaign-id ID --confirm-credit-coverage
+  --eval-timeout DURATION --campaign-id ID
   --auto-approve-plan --auto-approve-phases --unattended
-  --keep-resources-on-failure --skip-chart-generation --plan-only --validate-only
+  --skip-chart-generation --plan-only --validate-only
 EOF
 }
 
@@ -24,8 +24,8 @@ primary_region=us-east-1; secondary_region=eu-west-1; tertiary_region=eu-central
 primary_az=us-east-1a; secondary_az=eu-west-1a; tertiary_az=eu-central-1a
 operator_type=t3.small; controller_type=t3.small; cpu_credits=unlimited
 node_counts_csv=4,7; batch_sizes_csv=8,32,128; warmups=5; repetitions=30; eval_timeout=60s
-campaign_id=""; confirm_credits=0; auto_plan=0; auto_phases=0; unattended=0
-keep_failure=0; skip_charts=0; plan_only=0; validate_only=0
+campaign_id=""; auto_plan=0; auto_phases=0; unattended=0
+skip_charts=0; plan_only=0; validate_only=0
 
 bloc_validate_flag_values "$@"
 while [[ $# -gt 0 ]]; do
@@ -47,11 +47,9 @@ while [[ $# -gt 0 ]]; do
     --repetitions) repetitions="$2"; shift 2 ;;
     --eval-timeout) eval_timeout="$2"; shift 2 ;;
     --campaign-id) campaign_id="$2"; shift 2 ;;
-    --confirm-credit-coverage) confirm_credits=1; shift ;;
     --auto-approve-plan) auto_plan=1; shift ;;
     --auto-approve-phases) auto_phases=1; shift ;;
     --unattended) unattended=1; auto_plan=1; auto_phases=1; shift ;;
-    --keep-resources-on-failure) keep_failure=1; shift ;;
     --skip-chart-generation) skip_charts=1; shift ;;
     --plan-only) plan_only=1; shift ;;
     --validate-only) validate_only=1; shift ;;
@@ -76,7 +74,6 @@ bloc_validate_go_duration "$eval_timeout" EvalTimeout
 for command in aws terraform docker git jq ssh scp go python3; do bloc_require_cmd "$command"; done
 bloc_require_dir "$script_dir/terraform-three-region"
 if [[ "$validate_only" -eq 1 ]]; then bloc_validate_only_message "run-m3-three-region.sh"; exit 0; fi
-if [[ "$plan_only" -ne 1 && "$confirm_credits" -ne 1 ]]; then bloc_die "real applies require --confirm-credit-coverage after an administrator checks Billing"; fi
 if [[ "$skip_charts" -ne 1 && "$plan_only" -ne 1 && ! -x "$repo_root/latency-charts/.venv/bin/python" ]]; then bloc_die "chart generation requires latency-charts/.venv/bin/python or --skip-chart-generation"; fi
 if [[ "$plan_only" -ne 1 ]]; then
   dirty="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all -- bloc-node bte sbc deploy/ec2 latency-charts scripts | sed -n '1p')"
@@ -229,7 +226,7 @@ run_phase() (
   key_dir="$(mktemp -d "${TMPDIR:-/tmp}/bloc-three-region-keys.XXXXXX")"
   primary_key_name="$phase_id-primary-key"; secondary_key_name="$phase_id-secondary-key"; tertiary_key_name="$phase_id-tertiary-key"
   primary_key="$key_dir/$primary_key_name.pem"; secondary_key="$key_dir/$secondary_key_name.pem"; tertiary_key="$key_dir/$tertiary_key_name.pem"
-  primary_key_created=0; secondary_key_created=0; tertiary_key_created=0; apply_attempted=0; phase_ok=0; phase_record_ready=0
+  apply_attempted=0; phase_ok=0; phase_record_ready=0
 
   key_for() {
     case "$(jq -r .region <<<"$1")" in
@@ -252,9 +249,16 @@ run_phase() (
     trap - EXIT
     [[ "$phase_ok" -eq 1 ]] || collect_failure_logs
     if [[ -d "$phase_root/generated/secrets.ec2" ]]; then rm -rf "$phase_root/generated/secrets.ec2"; fi
-    if [[ "$apply_attempted" -eq 1 && !( "$keep_failure" -eq 1 && "$phase_ok" -ne 1 ) ]]; then
-      (cd "$work" && AWS_PROFILE="$aws_profile" terraform destroy -auto-approve -var-file=campaign.tfvars >"$phase_root/terraform-destroy.log" 2>&1)
-      destroy_status=$?
+    if [[ "$apply_attempted" -eq 1 ]]; then
+      : >"$phase_root/terraform-destroy.log"
+      destroy_status=1
+      for destroy_attempt in 1 2 3; do
+        printf 'destroy attempt %s/3\n' "$destroy_attempt" >>"$phase_root/terraform-destroy.log"
+        (cd "$work" && AWS_PROFILE="$aws_profile" terraform destroy -auto-approve -var-file=campaign.tfvars >>"$phase_root/terraform-destroy.log" 2>&1)
+        destroy_status=$?
+        [[ "$destroy_status" -ne 0 ]] || break
+        sleep 15
+      done
       [[ "$destroy_status" -eq 0 ]] || status=1
     fi
     if [[ "$plan_only" -eq 1 ]]; then
@@ -262,11 +266,20 @@ run_phase() (
       jq -n '{status:"not-applied",resources:[]}' >"$phase_root/cleanup-verification.json"
       exit "$status"
     fi
-    if [[ !( "$keep_failure" -eq 1 && "$phase_ok" -ne 1 ) ]]; then
-      if [[ "$primary_key_created" -ne 0 ]] && ! aws ec2 delete-key-pair --profile "$aws_profile" --region "$primary_region" --key-name "$primary_key_name" >>"$verification_errors" 2>&1; then status=1; fi
-      if [[ "$secondary_key_created" -ne 0 ]] && ! aws ec2 delete-key-pair --profile "$aws_profile" --region "$secondary_region" --key-name "$secondary_key_name" >>"$verification_errors" 2>&1; then status=1; fi
-      if [[ "$tertiary_key_created" -ne 0 ]] && ! aws ec2 delete-key-pair --profile "$aws_profile" --region "$tertiary_region" --key-name "$tertiary_key_name" >>"$verification_errors" 2>&1; then status=1; fi
-    fi
+    delete_campaign_key() {
+      local region="$1" key_name="$2" present="" attempt
+      for attempt in 1 2 3; do
+        present="$(aws ec2 describe-key-pairs --profile "$aws_profile" --region "$region" --filters "Name=key-name,Values=$key_name" --query 'length(KeyPairs)' --output text 2>>"$verification_errors")" || present="query-failed"
+        [[ "$present" == 0 ]] && return 0
+        if [[ "$present" != query-failed ]] && aws ec2 delete-key-pair --profile "$aws_profile" --region "$region" --key-name "$key_name" >>"$verification_errors" 2>&1; then continue; fi
+        sleep 5
+      done
+      present="$(aws ec2 describe-key-pairs --profile "$aws_profile" --region "$region" --filters "Name=key-name,Values=$key_name" --query 'length(KeyPairs)' --output text 2>>"$verification_errors")" || return 1
+      [[ "$present" == 0 ]]
+    }
+    delete_campaign_key "$primary_region" "$primary_key_name" || status=1
+    delete_campaign_key "$secondary_region" "$secondary_key_name" || status=1
+    delete_campaign_key "$tertiary_region" "$tertiary_key_name" || status=1
     rm -f "$primary_key" "$secondary_key" "$tertiary_key"; rmdir "$key_dir" 2>/dev/null || true
     cleanup_query() {
       local value query_status
@@ -294,7 +307,7 @@ run_phase() (
       --arg iam_role "$(cleanup_query aws iam list-roles --profile "$aws_profile" --query "Roles[?RoleName=='$phase_id-ec2-ecr-readonly'].RoleName" --output text)" \
       --arg instance_profile "$(cleanup_query aws iam list-instance-profiles --profile "$aws_profile" --query "InstanceProfiles[?InstanceProfileName=='$phase_id-ec2-ecr-readonly'].InstanceProfileName" --output text)" \
       '{regions:{primary:{instances:$primary_instances,volumes:$primary_volumes,vpcs:$primary_vpcs,peering_connections:$primary_peerings,key_pairs:$primary_keys},secondary:{instances:$secondary_instances,volumes:$secondary_volumes,vpcs:$secondary_vpcs,peering_connections:$secondary_peerings,key_pairs:$secondary_keys},tertiary:{instances:$tertiary_instances,volumes:$tertiary_volumes,vpcs:$tertiary_vpcs,peering_connections:$tertiary_peerings,key_pairs:$tertiary_keys}},ecr_repository:$ecr_repository,iam_role:$iam_role,instance_profile:$instance_profile}' >"$phase_root/cleanup-verification.json"
-    if [[ !( "$keep_failure" -eq 1 && "$phase_ok" -ne 1 ) ]] && ! jq -e '[..|strings|select(length>0 and .!="None")]|length==0' "$phase_root/cleanup-verification.json" >/dev/null; then status=1; fi
+    if ! jq -e '[..|strings|select(length>0 and .!="None")]|length==0' "$phase_root/cleanup-verification.json" >/dev/null; then status=1; fi
     [[ ! -s "$verification_errors" ]] || status=1
     if [[ "$status" -ne 0 ]]; then
       if [[ -f "$phase_root/manifest.json" ]]; then
@@ -349,9 +362,9 @@ run_phase() (
   if [[ "$plan_only" -eq 1 ]]; then jq -n --argjson node_count "$node_count" --arg status planned --arg artifact_root "$phase_root" '{node_count:$node_count,status:$status,artifact_root:$artifact_root}' >>"$phases_file"; phase_ok=1; return 0; fi
   if [[ "$auto_plan" -ne 1 ]]; then read -r -p "Type APPLY to create three-region phase n=$node_count: " answer; [[ "$answer" == APPLY ]] || bloc_die "operator declined apply"; fi
 
-  aws ec2 create-key-pair --profile "$aws_profile" --region "$primary_region" --key-name "$primary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$primary_key"; primary_key_created=1
-  aws ec2 create-key-pair --profile "$aws_profile" --region "$secondary_region" --key-name "$secondary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$secondary_key"; secondary_key_created=1
-  aws ec2 create-key-pair --profile "$aws_profile" --region "$tertiary_region" --key-name "$tertiary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$tertiary_key"; tertiary_key_created=1
+  aws ec2 create-key-pair --profile "$aws_profile" --region "$primary_region" --key-name "$primary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$primary_key"
+  aws ec2 create-key-pair --profile "$aws_profile" --region "$secondary_region" --key-name "$secondary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$secondary_key"
+  aws ec2 create-key-pair --profile "$aws_profile" --region "$tertiary_region" --key-name "$tertiary_key_name" --key-type rsa --key-format pem --query KeyMaterial --output text >"$tertiary_key"
   chmod 600 "$primary_key" "$secondary_key" "$tertiary_key"
   apply_attempted=1; (cd "$work" && AWS_PROFILE="$aws_profile" terraform apply -input=false -auto-approve campaign.tfplan && terraform output -json inventory >"$phase_root/inventory.json")
   inventory="$phase_root/inventory.json"

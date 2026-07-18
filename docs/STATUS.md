@@ -90,14 +90,11 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 1. Complete the module, ACS safety, Bash portability, chart, Terraform, and
    `linux/amd64` image gates for the three-region campaign, then commit and
    freeze the source SHA.
-2. Have a billing administrator confirm Free Tier plan/credit coverage and
-   acknowledge potentially billable inter-region transfer and T3 surplus
-   credits before any apply.
-3. Run the `n=4`, batches `8,128`, one-warmup/three-measurement probe and accept
+2. Run the `n=4`, batches `8,128`, one-warmup/three-measurement probe and accept
    it only with complete connectivity, finalized evidence, and empty teardown.
-4. Run the accepted `n=4` then `n=7` matrix, destroying and verifying `n=4`
+3. Run the accepted `n=4` then `n=7` matrix, destroying and verifying `n=4`
    before allocating `n=7`.
-5. Continue the mixed-root RBC, conflicting BBA AUX, delayed-message, and
+4. Continue the mixed-root RBC, conflicting BBA AUX, delayed-message, and
    secure-CRS/DKG work without describing latency evidence as Byzantine-safety
    or production-confidentiality evidence.
 
@@ -143,9 +140,9 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 - Builder API compatibility, SSV signing enforcement, and PBS-specific validation are intentionally out of scope for this milestone.
 - The selected three-region `n=7` placement needs 8 Standard On-Demand vCPUs
   in `us-east-1` and 4 in each EU region. The currently verified limits are
-  16/5/5 respectively, so no quota increase is required. Billing Free Tier
-  plan/credit state is still administrator-only, and inter-region transfer plus
-  T3 Unlimited surplus credits may be billable.
+  16/5/5 respectively, so no quota increase is required. Campaign authorization
+  accepts that inter-region transfer and T3 Unlimited surplus credits may be
+  billable; mandatory authenticated teardown is the operational constraint.
 
 ## Last Known Good State
 

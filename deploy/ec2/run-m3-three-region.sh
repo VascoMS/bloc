@@ -271,7 +271,7 @@ run_phase() (
       for attempt in 1 2 3; do
         present="$(aws ec2 describe-key-pairs --profile "$aws_profile" --region "$region" --filters "Name=key-name,Values=$key_name" --query 'length(KeyPairs)' --output text 2>>"$verification_errors")" || present="query-failed"
         [[ "$present" == 0 ]] && return 0
-        if [[ "$present" != query-failed ]] && aws ec2 delete-key-pair --profile "$aws_profile" --region "$region" --key-name "$key_name" >>"$verification_errors" 2>&1; then continue; fi
+        if [[ "$present" != query-failed ]] && aws ec2 delete-key-pair --profile "$aws_profile" --region "$region" --key-name "$key_name" >/dev/null 2>>"$verification_errors"; then continue; fi
         sleep 5
       done
       present="$(aws ec2 describe-key-pairs --profile "$aws_profile" --region "$region" --filters "Name=key-name,Values=$key_name" --query 'length(KeyPairs)' --output text 2>>"$verification_errors")" || return 1
@@ -286,6 +286,25 @@ run_phase() (
       value="$("$@" 2>>"$verification_errors")"; query_status=$?
       if [[ "$query_status" -ne 0 ]]; then printf 'cleanup query failed (%s): %s\n' "$query_status" "$*" >>"$verification_errors"; status=1; fi
       printf '%s' "$value"
+    }
+    exact_iam_name() {
+      local resource_type="$1" resource_name="$2" error_file="$phase_root/iam-$resource_type-check.err" query_status
+      : >"$error_file"
+      if [[ "$resource_type" == role ]]; then
+        aws iam get-role --profile "$aws_profile" --role-name "$resource_name" --output json >/dev/null 2>"$error_file"
+      else
+        aws iam get-instance-profile --profile "$aws_profile" --instance-profile-name "$resource_name" --output json >/dev/null 2>"$error_file"
+      fi
+      query_status=$?
+      if [[ "$query_status" -eq 0 ]]; then
+        printf '%s' "$resource_name"
+      elif grep -q 'NoSuchEntity' "$error_file"; then
+        :
+      else
+        cat "$error_file" >>"$verification_errors"
+        printf 'cleanup query failed (%s): exact IAM %s %s\n' "$query_status" "$resource_type" "$resource_name" >>"$verification_errors"
+      fi
+      rm -f "$error_file"
     }
     jq -n \
       --arg primary_instances "$(cleanup_query aws ec2 describe-instances --profile "$aws_profile" --region "$primary_region" --filters "Name=tag:Name,Values=$phase_id-*" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query 'Reservations[].Instances[].InstanceId' --output text)" \
@@ -304,8 +323,8 @@ run_phase() (
       --arg secondary_keys "$(cleanup_query aws ec2 describe-key-pairs --profile "$aws_profile" --region "$secondary_region" --filters "Name=key-name,Values=$phase_id-*" --query 'KeyPairs[].KeyName' --output text)" \
       --arg tertiary_keys "$(cleanup_query aws ec2 describe-key-pairs --profile "$aws_profile" --region "$tertiary_region" --filters "Name=key-name,Values=$phase_id-*" --query 'KeyPairs[].KeyName' --output text)" \
       --arg ecr_repository "$(cleanup_query aws ecr describe-repositories --profile "$aws_profile" --region "$primary_region" --query "repositories[?repositoryName=='bloc-node-$phase_id'].repositoryName" --output text)" \
-      --arg iam_role "$(cleanup_query aws iam list-roles --profile "$aws_profile" --query "Roles[?RoleName=='$phase_id-ec2-ecr-readonly'].RoleName" --output text)" \
-      --arg instance_profile "$(cleanup_query aws iam list-instance-profiles --profile "$aws_profile" --query "InstanceProfiles[?InstanceProfileName=='$phase_id-ec2-ecr-readonly'].InstanceProfileName" --output text)" \
+      --arg iam_role "$(exact_iam_name role "$phase_id-ec2-ecr-readonly")" \
+      --arg instance_profile "$(exact_iam_name instance-profile "$phase_id-ec2-ecr-readonly")" \
       '{regions:{primary:{instances:$primary_instances,volumes:$primary_volumes,vpcs:$primary_vpcs,peering_connections:$primary_peerings,key_pairs:$primary_keys},secondary:{instances:$secondary_instances,volumes:$secondary_volumes,vpcs:$secondary_vpcs,peering_connections:$secondary_peerings,key_pairs:$secondary_keys},tertiary:{instances:$tertiary_instances,volumes:$tertiary_volumes,vpcs:$tertiary_vpcs,peering_connections:$tertiary_peerings,key_pairs:$tertiary_keys}},ecr_repository:$ecr_repository,iam_role:$iam_role,instance_profile:$instance_profile}' >"$phase_root/cleanup-verification.json"
     if ! jq -e '[..|strings|select(length>0 and .!="None")]|length==0' "$phase_root/cleanup-verification.json" >/dev/null; then status=1; fi
     [[ ! -s "$verification_errors" ]] || status=1

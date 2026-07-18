@@ -52,6 +52,9 @@ func readConfig(path string) (ConfigFile, error) {
 		cfg.Slot = 1
 	}
 	normalizeConfig(&cfg)
+	if err := validateResourceLimits(cfg.Limits); err != nil {
+		return ConfigFile{}, err
+	}
 	return cfg, nil
 }
 
@@ -97,6 +100,35 @@ func decodeStrictJSON(data []byte, out any) error {
 			return fmt.Errorf("trailing JSON value")
 		}
 		return fmt.Errorf("trailing JSON data: %w", err)
+	}
+	return nil
+}
+
+// UnmarshalJSON distinguishes an omitted optional limit from an explicit zero,
+// which is invalid rather than a request for the default.
+func (limits *ResourceLimits) UnmarshalJSON(data []byte) error {
+	type wireLimits struct {
+		MaxProposalBytes              *int `json:"max_proposal_bytes"`
+		MaxEnvelopeBytes              *int `json:"max_envelope_bytes"`
+		MaxCombineAttemptsPerSubBatch *int `json:"max_combine_attempts_per_sub_batch"`
+	}
+	var wire wireLimits
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	if wire.MaxProposalBytes != nil {
+		limits.MaxProposalBytes = *wire.MaxProposalBytes
+		limits.explicitZeroProposal = *wire.MaxProposalBytes == 0
+	}
+	if wire.MaxEnvelopeBytes != nil {
+		limits.MaxEnvelopeBytes = *wire.MaxEnvelopeBytes
+		limits.explicitZeroEnvelope = *wire.MaxEnvelopeBytes == 0
+	}
+	if wire.MaxCombineAttemptsPerSubBatch != nil {
+		limits.MaxCombineAttemptsPerSubBatch = *wire.MaxCombineAttemptsPerSubBatch
+		limits.explicitZeroCombineAttempts = *wire.MaxCombineAttemptsPerSubBatch == 0
 	}
 	return nil
 }
@@ -164,9 +196,35 @@ func normalizeConfig(cfg *ConfigFile) {
 	if cfg.Network.Mode == "" {
 		cfg.Network.Mode = "libp2p"
 	}
+	defaults := defaultResourceLimits()
+	if cfg.Limits.MaxProposalBytes == 0 && !cfg.Limits.explicitZeroProposal {
+		cfg.Limits.MaxProposalBytes = defaults.MaxProposalBytes
+	}
+	if cfg.Limits.MaxEnvelopeBytes == 0 && !cfg.Limits.explicitZeroEnvelope {
+		cfg.Limits.MaxEnvelopeBytes = defaults.MaxEnvelopeBytes
+	}
+	if cfg.Limits.MaxCombineAttemptsPerSubBatch == 0 && !cfg.Limits.explicitZeroCombineAttempts {
+		cfg.Limits.MaxCombineAttemptsPerSubBatch = defaults.MaxCombineAttemptsPerSubBatch
+	}
 	for i := range cfg.Nodes {
 		normalizeNodeConfig(&cfg.Nodes[i])
 	}
+}
+
+func validateResourceLimits(limits ResourceLimits) error {
+	if limits.MaxProposalBytes <= 0 || limits.MaxProposalBytes > absoluteMaxProposalBytes {
+		return fmt.Errorf("limits.max_proposal_bytes must be in [1,%d]", absoluteMaxProposalBytes)
+	}
+	if limits.MaxEnvelopeBytes <= 0 || limits.MaxEnvelopeBytes > absoluteMaxEnvelopeBytes {
+		return fmt.Errorf("limits.max_envelope_bytes must be in [1,%d]", absoluteMaxEnvelopeBytes)
+	}
+	if limits.MaxEnvelopeBytes < limits.MaxProposalBytes+minimumEnvelopeHeadroomBytes {
+		return fmt.Errorf("limits.max_envelope_bytes must be at least max_proposal_bytes + %d", minimumEnvelopeHeadroomBytes)
+	}
+	if limits.MaxCombineAttemptsPerSubBatch < 1 || limits.MaxCombineAttemptsPerSubBatch > absoluteMaxCombineAttemptsPerSubBatch {
+		return fmt.Errorf("limits.max_combine_attempts_per_sub_batch must be in [1,%d]", absoluteMaxCombineAttemptsPerSubBatch)
+	}
+	return nil
 }
 
 func normalizeNodeConfig(node *NodeConfig) {

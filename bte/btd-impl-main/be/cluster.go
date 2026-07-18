@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	LibraryVersion = "bte-tx-v1"
-	defaultSuiteID = "BLS12-381-kilic"
-	aeadNonceSize  = 12
-	aeadTagSize    = 16
+	LibraryVersion                       = "bte-tx-v1"
+	defaultSuiteID                       = "BLS12-381-kilic"
+	aeadNonceSize                        = 12
+	aeadTagSize                          = 16
+	defaultMaxCombineAttemptsPerSubBatch = 256
 )
 
 type PublicParams struct {
@@ -107,6 +108,19 @@ type PlaintextResult struct {
 	RawTx            []byte
 	HashOK           bool
 	Err              error
+}
+
+// CombineOptions bounds invalid-share recovery work independently for every
+// planned sub-batch.
+type CombineOptions struct {
+	MaxAttemptsPerSubBatch  int
+	AttemptLimitsBySubBatch []int
+}
+
+// CombineStats reports cryptographic subset attempts by sub-batch, including
+// attempts made before a failed bounded combination.
+type CombineStats struct {
+	AttemptsBySubBatch []int
 }
 
 type ClusterBTE struct {
@@ -434,21 +448,44 @@ func (c *ClusterBTE) MakeShare(sk SecretShare, plan BatchPlan, subBatchID int) (
 }
 
 func (c *ClusterBTE) CombineShares(plan BatchPlan, shares []DecryptionShare) ([]PlaintextResult, error) {
+	results, _, err := c.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch})
+	return results, err
+}
+
+// CombineSharesBounded validates candidate ownership and tries deterministic
+// threshold subsets up to the supplied per-sub-batch limit.
+func (c *ClusterBTE) CombineSharesBounded(plan BatchPlan, shares []DecryptionShare, options CombineOptions) ([]PlaintextResult, CombineStats, error) {
+	stats := CombineStats{AttemptsBySubBatch: make([]int, len(plan.SubBatches))}
+	if options.MaxAttemptsPerSubBatch < 1 {
+		return nil, stats, fmt.Errorf("max attempts per sub-batch must be positive")
+	}
+	if options.AttemptLimitsBySubBatch != nil && len(options.AttemptLimitsBySubBatch) != len(plan.SubBatches) {
+		return nil, stats, fmt.Errorf("attempt limit count %d does not match %d sub-batches", len(options.AttemptLimitsBySubBatch), len(plan.SubBatches))
+	}
 	results := make([]PlaintextResult, c.planSize(plan))
 	bySubBatch := make(map[int][]*share.PubShare)
 	seenOperators := make(map[int]map[int]bool)
 	for _, d := range shares {
 		if d.BatchID != plan.BatchID {
-			return nil, fmt.Errorf("share batch id mismatch from operator %d", d.OperatorID)
+			return nil, stats, fmt.Errorf("share batch id mismatch from operator %d", d.OperatorID)
 		}
 		if d.SubBatchID < 0 || d.SubBatchID >= len(plan.SubBatches) {
-			return nil, fmt.Errorf("share sub-batch id out of range: %d", d.SubBatchID)
+			return nil, stats, fmt.Errorf("share sub-batch id out of range: %d", d.SubBatchID)
+		}
+		if d.OperatorID < 0 || d.OperatorID >= c.btd.N {
+			return nil, stats, fmt.Errorf("share operator id out of range: %d", d.OperatorID)
+		}
+		if d.Share == nil || d.Share.V == nil {
+			return nil, stats, fmt.Errorf("nil share from operator %d", d.OperatorID)
+		}
+		if int(d.Share.I) != d.OperatorID {
+			return nil, stats, fmt.Errorf("share index %d does not match operator %d", d.Share.I, d.OperatorID)
 		}
 		if seenOperators[d.SubBatchID] == nil {
 			seenOperators[d.SubBatchID] = make(map[int]bool)
 		}
 		if seenOperators[d.SubBatchID][d.OperatorID] {
-			return nil, fmt.Errorf("duplicate share from operator %d for sub-batch %d", d.OperatorID, d.SubBatchID)
+			return nil, stats, fmt.Errorf("duplicate share from operator %d for sub-batch %d", d.OperatorID, d.SubBatchID)
 		}
 		seenOperators[d.SubBatchID][d.OperatorID] = true
 		bySubBatch[d.SubBatchID] = append(bySubBatch[d.SubBatchID], d.Share)
@@ -456,24 +493,37 @@ func (c *ClusterBTE) CombineShares(plan BatchPlan, shares []DecryptionShare) ([]
 	for subBatchID, items := range plan.SubBatches {
 		subShares := bySubBatch[subBatchID]
 		if len(subShares) < c.btd.T {
-			return nil, fmt.Errorf("sub-batch %d has %d shares, need %d", subBatchID, len(subShares), c.btd.T)
+			return nil, stats, fmt.Errorf("sub-batch %d has %d shares, need %d", subBatchID, len(subShares), c.btd.T)
 		}
 		sort.Slice(subShares, func(i, j int) bool { return subShares[i].I < subShares[j].I })
-		subResults, err := c.combineSubBatch(items, subShares)
+		attemptLimit := options.MaxAttemptsPerSubBatch
+		if options.AttemptLimitsBySubBatch != nil {
+			attemptLimit = options.AttemptLimitsBySubBatch[subBatchID]
+		}
+		if attemptLimit < 1 {
+			return nil, stats, fmt.Errorf("sub-batch %d: combine attempt budget exhausted", subBatchID)
+		}
+		subResults, attempts, err := c.combineSubBatch(items, subShares, attemptLimit)
+		stats.AttemptsBySubBatch[subBatchID] = attempts
 		if err != nil {
-			return nil, fmt.Errorf("sub-batch %d: %w", subBatchID, err)
+			return nil, stats, fmt.Errorf("sub-batch %d: %w", subBatchID, err)
 		}
 		for _, result := range subResults {
 			results[result.OriginalPosition] = result
 		}
 	}
-	return results, nil
+	return results, stats, nil
 }
 
-func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare) ([]PlaintextResult, error) {
+func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare, maxAttempts int) ([]PlaintextResult, int, error) {
 	var firstErr error
 	var out []PlaintextResult
+	attempts := 0
 	forEachShareCombination(len(shares), c.btd.T, func(indices []int) bool {
+		if attempts >= maxAttempts {
+			return true
+		}
+		attempts++
 		candidateShares := make([]*share.PubShare, len(indices))
 		for i, idx := range indices {
 			candidateShares[i] = shares[idx]
@@ -498,12 +548,15 @@ func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare
 		return true
 	})
 	if out == nil {
-		if firstErr != nil {
-			return nil, firstErr
+		if attempts >= maxAttempts {
+			return nil, attempts, fmt.Errorf("combine attempt limit %d exhausted", maxAttempts)
 		}
-		return nil, fmt.Errorf("no valid threshold share subset")
+		if firstErr != nil {
+			return nil, attempts, firstErr
+		}
+		return nil, attempts, fmt.Errorf("no valid threshold share subset")
 	}
-	return out, nil
+	return out, attempts, nil
 }
 
 func plaintextResultsFromMessages(items []BatchItem, msgs []kyber.Point) []PlaintextResult {

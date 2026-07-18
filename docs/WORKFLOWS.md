@@ -53,6 +53,35 @@ Use them to catch regressions before deployment. `eval-local` and `eval-suite`
 also provide the clean local protocol baseline. The real distributed target for
 current thesis metrics is VM/EC2-per-sidecar evidence.
 
+### Resource-limit configuration
+
+Generated `bloc-cluster-v2` files explicitly include the shared `limits`
+object. Older v2 files omit it safely and receive these defaults:
+
+```json
+{
+  "limits": {
+    "max_proposal_bytes": 8388608,
+    "max_envelope_bytes": 16777216,
+    "max_combine_attempts_per_sub_batch": 256
+  }
+}
+```
+
+Every operator must use the same public file. Proposal bytes may be raised only
+to 32 MiB, envelopes only to 64 MiB, and envelopes must retain at least 64 KiB
+of headroom over proposals. Recovery attempts may be configured from 1 to 4096.
+Raise limits only for a recorded workload that cannot fit the defaults, then
+rerun the adversarial resource tests and local matrix. A cap rejection is a
+failed-closed protocol event, not permission to give individual operators
+different overrides.
+
+Both `gen-config` and `gen-ec2-config` accept
+`--max-proposal-bytes`, `--max-envelope-bytes`, and
+`--max-combine-attempts-per-sub-batch`. Prefer these flags over editing a
+generated artifact so invalid relationships and hard ceilings are rejected at
+generation time.
+
 ### Experiment and Result Naming
 
 Use one campaign ID for the complete logical run. The same ID must name the
@@ -148,14 +177,14 @@ go test ./be -run '^$' -bench '^BenchmarkHybridFullPath'
 ```
 
 For merge/plan attribution or optimization work, capture a baseline and an
-optimized phase with the same campaign id. The PowerShell runner fixes
+optimized phase with the same campaign id. The Bash runner fixes
 `GOMAXPROCS=1`, records ten one-second benchmark samples with allocations,
 profiles the 7-node batch-128 overlap modes, runs the 4/7-node evaluator
 matrix, and writes a comparison report without using AWS:
 
-```powershell
-.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase baseline -CampaignId <id>
-.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase optimized -CampaignId <id>
+```sh
+bash bloc-node/scripts/run-merge-plan-campaign.sh --phase baseline --campaign-id <id>
+bash bloc-node/scripts/run-merge-plan-campaign.sh --phase optimized --campaign-id <id>
 ```
 
 When interpreting M1 results, remember that the integrated BTE path already
@@ -237,14 +266,14 @@ go run ./cmd/bloc-node eval-remote \
   --git-commit <git-commit>
 ```
 
-For the immediate A1 pilot, use the Windows PowerShell runner from a shell with
-AWS CLI, Terraform, Docker Desktop, OpenSSH, and SCP available:
+For the immediate A1 pilot, use the Bash runner from macOS or Linux with AWS
+CLI, Terraform, Docker, OpenSSH, SCP, Python 3, and `jq` available:
 
-```powershell
-.\deploy\ec2\run-a1-pilot.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -ExperimentId bloc-ec2-a1-pilot-same-az-n4-step1
+```sh
+bash deploy/ec2/run-a1-pilot.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --experiment-id bloc-ec2-a1-pilot-same-az-n4-step1
 ```
 
 By default, the runner launches the `T0-same-az` 4-operator pilot with
@@ -257,32 +286,31 @@ deployment, and run `terraform destroy` immediately afterward.
 
 During runner or evaluator debugging, prefer one provisioned EC2 environment
 over repeated create/destroy loops. Launch the pilot with
-`-KeepResourcesOnFailure`; if a deploy or evaluator step fails after Terraform
+`--keep-resources-on-failure`; if a deploy or evaluator step fails after Terraform
 apply, the artifact directory keeps the inventory, generated configs, Terraform
 workdir, and ignored SSH key. Then patch code or scripts locally and rerun only
 the image/deploy/evaluator part:
 
-```powershell
-.\deploy\ec2\rerun-a1-pilot-existing.ps1 `
-  -ArtifactRoot .\results\ec2\<experiment-id> `
-  -AwsProfile bloc `
-  -BatchSizesCsv "128" `
-  -FirstSlot 1000
+```sh
+bash deploy/ec2/rerun-a1-pilot-existing.sh \
+  --artifact-root results/ec2/<experiment-id> \
+  --aws-profile bloc \
+  --batch-sizes 128 \
+  --first-slot 1000
 ```
 
 The recovery runner is unattended. It pulls the selected image on every
 operator, stops the full sidecar cluster before restarting any node, clones the
 existing generated configs with `FirstSlot` as the new initial slot, writes
-Linux-compatible UTF-8 JSON, performs bounded health/metrics checks, validates
+UTF-8 JSON without a BOM, performs bounded health/metrics checks, validates
 measured-run counts and consistency, and collects operator logs. Use
-`BatchSizesCsv` when invoking it through `powershell -File`; this avoids native
-PowerShell array coercion. Destroy the Terraform workdir once the kept-alive
+Use comma-separated `--batch-sizes` for one or more sizes. Destroy the Terraform workdir once the kept-alive
 environment has either produced a clean pilot or is no longer being actively
 debugged:
 
-```powershell
-terraform -chdir=.\results\ec2\<experiment-id>\generated\terraform-work destroy `
-  -var-file=.\results\ec2\<experiment-id>\generated\terraform-work\a1-pilot.tfvars `
+```sh
+terraform -chdir=results/ec2/<experiment-id>/generated/terraform-work destroy \
+  -var-file=results/ec2/<experiment-id>/generated/terraform-work/a1-pilot.tfvars \
   -auto-approve
 ```
 
@@ -293,32 +321,31 @@ traffic signal unless the security groups are intentionally changed.
 
 Before returning an ACS/BBA change to EC2, run the complete local safety gate:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  .\bloc-node\scripts\run-acs-safety-campaign.ps1
+```sh
+bash bloc-node/scripts/run-acs-safety-campaign.sh
 ```
 
 The runner is AWS-free and writes an ignored manifest, fixed-seed scheduler
 description, command logs, evaluator outputs, failed slot status, and
 `REPORT.md` under `results/local/acs-common-subset-safety/<campaign-id>/`. If a
 tooling or evaluator stage stops after an earlier stage passed, resume without
-repeating completed work by supplying the same `-CampaignId`, `-Resume`, and an
-explicit `-StartAt race|gate|matrix|identity`.
+repeating completed work by supplying the same `--campaign-id`, `--resume`, and
+an explicit `--start-at race|gate|matrix|identity`.
 
 For the first thesis-grade M3 same-AZ synthetic baseline, use the M3 wrapper.
 It runs the EC2 phase runner sequentially for 4, 7, and 10 operators, using
 batch sizes `8,32,128`, 5 warmups, and 30 measured repetitions:
 
-```powershell
-.\deploy\ec2\run-m3-same-az.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-m3-same-az.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --auto-approve-plan
 ```
 
 By default the wrapper pauses after each successful node-count phase so the
 phase summary can be inspected before launching the next, larger EC2 campaign.
-Use `-AutoApprovePhases` only when intentionally running the full 4/7/10 matrix
+Use `--auto-approve-phases` only when intentionally running the full 4/7/10 matrix
 without manual review between phases. It writes phase artifacts under
 `results/ec2/<campaign-id>/n<N>/`, merged campaign outputs under
 `results/ec2/<campaign-id>/`, and combined charts under
@@ -334,28 +361,27 @@ for context only; detailed overhead characterization remains M4.
 
 For focused Merge + Plan attribution on the optimized image, use:
 
-```powershell
-.\deploy\ec2\run-merge-plan-attribution.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-merge-plan-attribution.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --auto-approve-plan
 ```
 
-For unattended repeated collection, use the explicit CSV parameters rather
-than passing PowerShell arrays through `powershell -File`:
+For unattended repeated collection, use comma-separated matrix parameters:
 
-```powershell
-.\deploy\ec2\run-m3-cross-az.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -NodeCountsCsv "4,7" `
-  -BatchSizesCsv "8,32,128" `
-  -CampaignId "m3-cross-az-synthetic-<label>" `
-  -BaselineCampaignRoot ".\results\ec2\<baseline-campaign>" `
-  -Unattended
+```sh
+bash deploy/ec2/run-m3-cross-az.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --node-counts 4,7 \
+  --batch-sizes 8,32,128 \
+  --campaign-id "m3-cross-az-synthetic-<label>" \
+  --baseline-campaign-root "results/ec2/<baseline-campaign>" \
+  --unattended
 ```
 
-`-Unattended` removes both approval prompts but does not bypass Terraform's
+`--unattended` removes both approval prompts but does not bypass Terraform's
 resource allowlist, instance-count and batch-size bounds, phase acceptance, or
 cleanup checks. When `-BaselineCampaignRoot` is supplied, the completed campaign
 automatically writes `comparison/comparison.csv`, `comparison/REPORT.md`, and a
@@ -379,11 +405,11 @@ summary statistics.
 
 For the same-region cross-AZ synthetic comparison, use the cross-AZ wrapper:
 
-```powershell
-.\deploy\ec2\run-m3-cross-az.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-m3-cross-az.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --auto-approve-plan
 ```
 
 By default it runs only `n=4` and `n=7`, using the same batch sizes, warmups,
@@ -394,33 +420,73 @@ keeping private-IP BLOC traffic inside one VPC. Do not run a `t3.small` `n=10`
 EC2 phase unless the AWS account has enough vCPU quota for 10 operators plus
 the controller.
 
-For standalone two-region latency evidence, use the dedicated cross-region
-wrapper. It creates privately peered VPCs in `us-east-1` and `eu-west-1`, runs
-the controller in `us-east-1`, and places operators round-robin:
+For standalone three-region latency evidence, use the dedicated wrapper. It
+creates one VPC in `us-east-1`, `eu-west-1`, and `eu-central-1`, directly peers
+all three VPC pairs, runs the controller in `us-east-1`, and places operators
+by `node_id % 3`:
 
-```powershell
-.\deploy\ec2\run-m3-cross-region.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-m3-three-region.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --plan-only \
+  --unattended
+```
+
+After committing the validated source and receiving administrator confirmation
+of Free Tier plan/credit coverage, run the probe:
+
+```sh
+bash deploy/ec2/run-m3-three-region.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --node-counts 4 \
+  --batch-sizes 8,128 \
+  --warmups 1 \
+  --repetitions 3 \
+  --confirm-credit-coverage
+```
+
+If the probe and its teardown are accepted, run the full defaults with the same
+credit confirmation:
+
+```sh
+bash deploy/ec2/run-m3-three-region.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --confirm-credit-coverage
 ```
 
 The canonical matrix is `n=4/7`, batches `8/32/128`, five warmups, and thirty
-measurements on `t3.medium`, with a 60-second slot timeout. `-PlanOnly` checks
-both regional Terraform plans without creating resources. The runner records
-pairwise operator HTTP timing and CPU-credit snapshots, rejects any failed or
-inconsistent measured slot, and destroys each node-count phase before
-continuing. A real apply requires `servicequotas:GetServiceQuota` in both
-regions so the Standard On-Demand vCPU ceiling can be verified. Its four-stage
-report groups the unchanged raw timings into
-Proposal, ACS, Merge + Plan, and Decryption + Materialization. Older topology
-campaigns remain historical context because they used earlier commits.
+measurements on `t3.small`, with a 60-second slot timeout. Placement is `2/1/1`
+for `n=4` and `3/2/2` for `n=7`. `--plan-only` checks both node-count plans and
+the exact three-VPC/three-peering/six-peer-route allowlist without creating
+resources. Before a real apply, an administrator must verify Free Tier
+plan/credit coverage; then add `--confirm-credit-coverage`. The runner verifies
+8/4/4 vCPU headroom, records pre/post five-attempt pairwise health matrices,
+CPU/T3 credit metrics, resource samples, region/AZ attribution, and one image
+digest. It destroys and authenticates empty cleanup for each node-count phase
+before continuing. The report includes protocol p50/p95, four-stage, four
+region-pair classes, and critical-node-region attribution. Inter-region data
+transfer and T3 Unlimited surplus credits may be billable.
 
-Run `docker version --format '{{.Server.Version}}'` from the same PowerShell
-session before launching the pilot. If that command cannot talk to the Docker
-daemon, fix Docker Desktop access before creating AWS resources. A bash runner
-also exists at `deploy/ec2/run-a1-pilot.sh` for a future Linux/WSL controller,
-but the Windows runner is the current supported path for this workspace.
+Run `docker version --format '{{.Server.Version}}'` from the same terminal
+before launching the pilot. If it cannot talk to the Docker daemon, fix Docker
+access before creating AWS resources. All campaign runners support
+`--validate-only`, which performs argument/dependency validation without
+writing evidence or allocating cloud resources.
+
+Run the shared portability gate after changing any runner or artifact helper:
+
+```sh
+bash scripts/test-campaign-runners.sh
+```
+
+It checks Bash syntax, Python artifact fixtures, valid and invalid CLI paths,
+paths containing spaces, UTF-8-without-BOM output, every entrypoint's
+`--validate-only` path, and proves that validation does not invoke fake AWS,
+Terraform, Docker, SSH, or SCP lifecycle commands. The same command is expected
+to pass under the system macOS Bash 3.2 and Linux Bash 5.
 
 The ECR-backed runner path intentionally creates IAM roles and instance
 profiles named from the experiment id:

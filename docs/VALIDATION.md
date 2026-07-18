@@ -113,9 +113,8 @@ go run ./cmd/bloc-node eval-suite \
 After changes that affect ACS/BBA safety or liveness, run the local safety
 campaign before collecting distributed latency evidence:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  .\bloc-node\scripts\run-acs-safety-campaign.ps1
+```sh
+bash bloc-node/scripts/run-acs-safety-campaign.sh
 ```
 
 The campaign requires 1,000 fixed reordered RBC/BBA delivery schedules, Linux
@@ -137,6 +136,36 @@ go run ./cmd/bloc-node eval-suite \
   --repetitions 5 \
   --out-dir results/acs-liveness-stress
 ```
+
+### Resource-safety hardening gate
+
+Changes to proposal ingestion, transport envelopes, share admission, or BTE
+combination must pass both module suites and their Linux race variants:
+
+```sh
+cd bloc-node && go test ./... && go test -race ./...
+cd bte/btd-impl-main && go test ./... && go test -race ./...
+```
+
+Acceptance requires tests proving:
+
+- old v2 configs receive the 8 MiB/16 MiB/256 defaults and invalid overrides
+  fail at startup;
+- proposals and envelopes accept the exact limit and reject one byte over;
+- provider/direct proposals cannot exceed `BMax` or the encoded proposal cap;
+- authenticated operators cannot retain alternate batch identities, out-of-plan
+  sub-batches, or conflicting replacement points;
+- retention never exceeds `N*BMax` before planning or `N*alpha` afterward;
+- operator identity equals the Kyber public-share index at the node and BTE
+  boundaries;
+- subset enumeration is deterministic, reports attempts, and stops at its
+  cumulative per-sub-batch budget; and
+- the n10/t7 case with three invalid shares recovers in 165 attempts under the
+  default 256-attempt budget.
+
+Before EC2 evidence collection, also run the complete local ACS safety campaign
+because the hardened transport/share path is exercised by its persistent gate
+and matrix even though RBC/BBA logic is unchanged.
 
 ### M1 Timing Definitions
 
@@ -170,14 +199,14 @@ Older CSVs without the optional five columns remain chart-compatible.
 
 ### Merge/Plan Optimization Campaign
 
-Use the Windows-first local campaign when changing inclusion-list hashing,
+Use the cross-platform local campaign when changing inclusion-list hashing,
 deterministic merge, ciphertext decoding, or BTE batch planning. It captures
 ten-sample allocation benchmarks, CPU/memory profiles, and a 4/7-node local
 evaluator matrix without allocating cloud resources:
 
-```powershell
-.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase baseline -CampaignId <id>
-.\bloc-node\scripts\run-merge-plan-campaign.ps1 -Phase optimized -CampaignId <id>
+```sh
+bash bloc-node/scripts/run-merge-plan-campaign.sh --phase baseline --campaign-id <id>
+bash bloc-node/scripts/run-merge-plan-campaign.sh --phase optimized --campaign-id <id>
 ```
 
 Artifacts are ignored under `results/local/merge-plan-optimization/<id>/`.
@@ -192,17 +221,17 @@ has produced result artifacts worth reporting.
 
 Set up the chart module once:
 
-```powershell
+```sh
 cd latency-charts
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+. .venv/bin/activate
 python -m pip install -e ".[test]"
 ```
 
 Generate SVG and PNG figures in the repository chart directory:
 
-```powershell
-python -m bloc_latency_charts ..\bloc-node\results\m1-local\baseline-persistent
+```sh
+python -m bloc_latency_charts ../bloc-node/results/m1-local/baseline-persistent
 ```
 
 The command produces end-to-end p50/p95 scaling, mean sequential critical-path
@@ -263,6 +292,10 @@ of evaluator CSV fields. It must use Prometheus base units and bounded labels:
 | `bloc_slot_selected_gas{cluster_id,node_id}` | gauge | latest selected gas |
 | `bloc_protocol_messages_total{cluster_id,node_id,direction,kind}` | counter | protocol message count |
 | `bloc_protocol_message_bytes_total{cluster_id,node_id,direction,kind}` | counter | protocol message bytes |
+| `bloc_protocol_envelopes_rejected_total{cluster_id,node_id,direction,reason}` | counter | bounded envelope rejection reasons |
+| `bloc_decryption_shares_accepted_total{cluster_id,node_id}` | counter | unique shares admitted to candidate storage |
+| `bloc_decryption_shares_rejected_total{cluster_id,node_id,reason}` | counter | bounded share rejection reasons |
+| `bloc_decryption_share_subset_attempts_total{cluster_id,node_id}` | counter | cryptographic recovery attempts |
 | `bloc_http_requests_total{cluster_id,node_id,method,handler,code}` | counter | normalized HTTP requests |
 | `bloc_http_request_duration_seconds{cluster_id,node_id,method,handler,code}` | histogram | normalized HTTP latency |
 
@@ -302,9 +335,9 @@ go run ./cmd/bloc-node eval-remote \
 Optionally test chart compatibility from the distributed output if the charting
 schema changed. Do not treat Compose charts as thesis evidence:
 
-```powershell
+```sh
 cd latency-charts
-python -m bloc_latency_charts ..\bloc-node\results\distributed\compose-smoke
+python -m bloc_latency_charts ../bloc-node/results/distributed/compose-smoke
 ```
 
 ### Mock Placeholder Mempool Smoke
@@ -401,14 +434,13 @@ Acceptance criteria for a first VM-distributed smoke:
   node count, threshold, batch size, region/zone labels where applicable, and
   endpoint mode.
 
-For the A1 same-AZ pilot readiness campaign, run the Windows PowerShell EC2
-runner:
+For the A1 same-AZ pilot readiness campaign, run the Bash EC2 runner:
 
-```powershell
-.\deploy\ec2\run-a1-pilot.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -ExperimentId bloc-ec2-a1-pilot-same-az-n4-step1
+```sh
+bash deploy/ec2/run-a1-pilot.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --experiment-id bloc-ec2-a1-pilot-same-az-n4-step1
 ```
 
 The A1 pilot must:
@@ -425,8 +457,8 @@ The A1 pilot must:
   profile remain.
 
 When debugging the runner itself, it is acceptable to keep a failed environment
-alive with `-KeepResourcesOnFailure`, then use
-`deploy/ec2/rerun-a1-pilot-existing.ps1` to rebuild and redeploy only the
+alive with `--keep-resources-on-failure`, then use
+`deploy/ec2/rerun-a1-pilot-existing.sh` to rebuild and redeploy only the
 container image and rerun evaluator scenarios against the existing EC2
 instances. Use fresh slot ranges for every rerun and destroy the Terraform
 workdir as soon as the debugging window ends.
@@ -437,24 +469,24 @@ explicitly allowed in the pilot security groups.
 
 For the first thesis-grade M3 same-AZ synthetic campaign, run:
 
-```powershell
-.\deploy\ec2\run-m3-same-az.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-m3-same-az.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --auto-approve-plan
 ```
 
 The wrapper runs `n=4`, `n=7`, and `n=10` as separate EC2 phases with batch
 sizes `8`, `32`, and `128`, 5 warmups, and 30 measured repetitions per batch.
-It pauses between node counts unless `-AutoApprovePhases` is supplied.
+It pauses between node counts unless `--auto-approve-phases` is supplied.
 
 For the same-region cross-AZ synthetic comparison, run:
 
-```powershell
-.\deploy\ec2\run-m3-cross-az.ps1 `
-  -AdminCidrs "<your-ip>/32" `
-  -AwsProfile bloc `
-  -AutoApprovePlan
+```sh
+bash deploy/ec2/run-m3-cross-az.sh \
+  --admin-cidr "<your-ip>/32" \
+  --aws-profile bloc \
+  --auto-approve-plan
 ```
 
 The cross-AZ wrapper defaults to `n=4` and `n=7`, spreading generated public
@@ -478,29 +510,37 @@ Acceptance criteria:
   leftover EC2 instances, EBS volumes, VPC, ECR repository, temporary key pair,
   IAM role, or instance profile.
 
-### Cross-Region Latency Campaign
+### Three-Region Latency Campaign
 
-The initial cross-region campaign uses private VPC peering between `us-east-1`
-and `eu-west-1`, a `t3.medium` controller in the primary region, and
-round-robin `t3.medium` operators. Run a plan-only check first:
+The active cross-region campaign uses `t3.small` throughout, with one VPC in
+`us-east-1`, `eu-west-1`, and `eu-central-1`. All three VPC pairs are directly
+peered because VPC peering is non-transitive. The controller remains in the US;
+operators use `node_id % 3`, producing `2/1/1` for `n=4` and `3/2/2` for
+`n=7`. Run a plan-only check first:
 
-```powershell
-.\deploy\ec2\run-m3-cross-region.ps1 `
-  -AdminCidrs "127.0.0.1/32" `
-  -AwsProfile bloc `
-  -PlanOnly `
-  -Unattended
+```sh
+bash deploy/ec2/run-m3-three-region.sh \
+  --admin-cidr "127.0.0.1/32" \
+  --aws-profile bloc \
+  --plan-only \
+  --unattended
 ```
 
 Plan-only mode may record an unavailable quota check when the deploy identity
 lacks `servicequotas:GetServiceQuota`; it still validates the resource plans,
-but the runner refuses a real apply until quota is positively verified in both
-regions.
+but the runner refuses a real apply until quotas are positively verified in all
+three regions. The required `n=7` ceilings are 8 vCPUs in `us-east-1` and 4 in
+each EU region.
 
-Before the full matrix, run an `n=4`, batch-8 smoke with one warmup and three
-measurements. The accepted campaign uses `n=4,7`, batches `8,32,128`, five
+Before the full matrix, run an `n=4`, batches `8,128` probe with one warmup and
+three measurements. The accepted campaign uses `n=4,7`, batches `8,32,128`, five
 warmups, thirty measurements, and a 60-second timeout. Thirty samples support
 Type-7 p50/p95, not p99.
+
+Both real commands require a committed source tree and
+`--confirm-credit-coverage`. The confirmation is an operator attestation that
+an administrator checked the current plan/credit balance before allocation; it
+is not inferred from EC2's instance-type `FreeTierEligible` flag.
 
 The four-stage report must add to `total_slot_us` within 20 microseconds:
 
@@ -509,15 +549,22 @@ The four-stage report must add to `total_slot_us` within 20 microseconds:
 3. Merge + Plan: `merge_plan_us`.
 4. Decryption + Materialization: `threshold_wait_us + combine_us + materialization_us`.
 
-Acceptance also requires exact sample counts, all successful and consistent
-slots, requested selected-ciphertext counts, finalized node metrics, all
-Prometheus targets up, correct placement and instance types, one image digest,
-and empty cleanup checks in both regions. Operator secrets and temporary SSH
-keys are excluded from campaign artifacts.
+Acceptance also requires exactly 180 measured slots and 990 finalized node
+rows for the canonical matrix; all slots successful and consistent; requested
+selected-ciphertext counts; all Prometheus targets up before and after; every
+one of five health attempts for every ordered node pair successful before and
+after; correct region/AZ placement; one image digest; no restart/OOM evidence;
+and authenticated empty cleanup of instances, volumes, three VPCs, all three
+peering connections, ECR, regional keys, IAM role, and instance profile.
+Operator secrets and temporary SSH private keys are excluded from artifacts.
+Generate the report with `python -m bloc_latency_charts.three_region`; it emits
+protocol p50/p95, four-stage, pairwise-network, and critical-node-region
+summaries. Inter-region transfer and T3 Unlimited surplus credits are
+potentially billable even when an instance type is Free Tier eligible.
 
 ### EC2 Merge/Plan Attribution
 
-Run `deploy/ec2/run-merge-plan-attribution.ps1` only after the relevant
+Run `deploy/ec2/run-merge-plan-attribution.sh` only after the relevant
 protocol, chart, deployment, and canonical-document changes are committed. The
 runner deliberately blocks before AWS preflight when those sources are dirty.
 It requires at least 16 Standard On-Demand vCPUs, uses one image digest for all
@@ -556,6 +603,16 @@ go run bench/main.go
 
 ## What Existing Coverage Proves
 
+### Campaign runners
+
+Run `bash scripts/test-campaign-runners.sh` on macOS Bash 3.2 and Linux Bash 5.
+The gate covers syntax, structured-artifact unit/fixture tests, CLI exit-code
+behavior, paths containing spaces, UTF-8-without-BOM output, and all eight
+side-effect-free validation paths. Terraform formatting and validation for
+`deploy/ec2/terraform` and `deploy/ec2/terraform-three-region` remain separate
+required gates. A real EC2 pilot is intentionally not part of this migration's
+local acceptance and requires separate approval.
+
 ### bloc-node
 
 - deterministic inclusion-list merge behavior,
@@ -563,6 +620,8 @@ go run bench/main.go
 - wire/protobuf round-trips,
 - deterministic signed Ethereum transaction generation for the evaluator,
 - wrong-batch share filtering before threshold combination.
+- bounded proposal/envelope handling, authenticated per-operator share
+  retention/pruning, and bounded-label rejection metrics.
 
 ### BTE
 
@@ -574,6 +633,7 @@ go run bench/main.go
 - deterministic `BatchPlan` behavior, including collision-free fallback for interleaved repeated indices,
 - BEAT-MEV-style `2*sqrt(B)` sub-batching is the default cluster planning mode,
 - threshold enforcement and duplicate-share handling,
+- operator/share-index enforcement and deterministic capped subset recovery,
 - full-path benchmark coverage for several batch sizes.
 
 ### hbbft

@@ -137,7 +137,7 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: RBC output alone never selects common-subset membership. ACS waits for all BBA results and every true result's RBC payload, and returns exactly the true proposers. BBA counts only AUX messages carrying values already admitted to `binValues` and re-evaluates pending AUX messages when a new value is admitted.
 - Rationale: RBC proves proposal availability and consistency, while BBA decides inclusion. Mixing those responsibilities weakens common-subset agreement under reordered asynchronous delivery.
 - Consequences: Safety is tested over 1,000 fixed delivery schedules plus a 100-slot batch-128 gate and a complete n4/n7 matrix. Any future liveness repair must preserve these completion and validity rules; the all-RBC shortcut cannot return as a workaround.
-- Related files: `sbc/hbbft/acs.go`, `sbc/hbbft/bba.go`, `bloc-node/scripts/run-acs-safety-campaign.ps1`, `docs/VALIDATION.md`
+- Related files: `sbc/hbbft/acs.go`, `sbc/hbbft/bba.go`, `bloc-node/scripts/run-acs-safety-campaign.sh`, `docs/VALIDATION.md`
 
 ## 0012. Bind post-ACS BTE decoding to slot context and repair collision planning
 
@@ -192,3 +192,85 @@ Use this file for major architecture, protocol, and workflow decisions.
   `bte/btd-impl-main/be/btd.go`, `bloc-node/internal/app/config.go`,
   `bloc-node/internal/app/transport_libp2p.go`, `deploy/docker-compose/`,
   `deploy/ec2/`
+
+## 0015. Bound protocol ingress, share retention, and recovery work
+
+- Date: 2026-07-17
+- Status: Accepted
+- Context: Authenticated libp2p streams were read without an application byte
+  limit, share state admitted every new batch/sub-batch tuple, and invalid-share
+  recovery could enumerate threshold subsets without a protocol work budget.
+- Options considered: fixed process constants; operator-local CLI overrides;
+  shared cluster limits with compatible defaults; remove invalid-share fallback;
+  or enumerate every configured-member subset.
+- Decision: Keep `bloc-cluster-v2` and add optional shared resource limits with
+  defaults of 8 MiB per encoded proposal, 16 MiB per envelope, and 256
+  cumulative subset attempts per sub-batch. Enforce limits inbound and outbound.
+  Retain one batch identity and one candidate per authenticated
+  operator/sub-batch, validate the public-share index, and contract retention
+  from `N*BMax` before planning to `N*alpha` afterward. Keep deterministic
+  recovery but fail closed when its budget is exhausted.
+- Rationale: Shared limits make every operator apply the same auditable policy,
+  preserve current n4/n7/n10 experiments, and convert peer-controlled memory
+  and cryptographic work into finite bounds without requiring public share
+  proofs in this milestone.
+- Consequences: Old v2 configs receive defaults and generated configs emit them
+  explicitly. Oversized proposals/envelopes and conflicting or out-of-scope
+  shares are rejected with bounded-label metrics. A low recovery cap can reject
+  a batch for which a later valid subset exists. Terminal failure publication,
+  public share verification, and mempool timeouts remain separate work.
+- Related files: `bloc-node/internal/app/config.go`,
+  `bloc-node/internal/app/transport_libp2p.go`, `bloc-node/internal/app/node.go`,
+  `bte/btd-impl-main/be/cluster.go`
+
+## 0016. Use Bash as the single campaign-runner interface
+
+- Date: 2026-07-17
+- Status: Accepted
+- Context: Local and EC2 campaign automation had accumulated eight Windows
+  PowerShell entrypoints. The macOS/Linux development host could not execute
+  the canonical safety gate, and an older Bash pilot had drifted behind the
+  supported PowerShell implementation.
+- Options considered: keep both implementations supported; retain deprecated
+  PowerShell copies; or replace them with one Bash 3.2-compatible interface
+  backed by shared shell and Python-standard-library artifact helpers.
+- Decision: Bash is the only maintained campaign interface. Runners use
+  kebab-case flags, preserve evidence schemas and cleanup rules, expose a
+  side-effect-free `--validate-only` mode, and build EC2 images explicitly for
+  `linux/amd64`. Structured JSON and CSV transformations live in the shared
+  Python helper rather than ad hoc shell parsing.
+- Rationale: One portable implementation removes cross-platform blocking and
+  dual-runner drift while keeping lifecycle safety and evidence compatibility
+  testable on both the system macOS Bash and Linux.
+- Consequences: Native PowerShell support is retired. Windows users must use
+  WSL or another Bash environment. Historical references remain unchanged,
+  while active documentation and validation commands use Bash.
+- Related files: `scripts/lib/`, `scripts/test-campaign-runners.sh`,
+  `bloc-node/scripts/`, `deploy/ec2/`
+
+## 0017. Use three directly peered regions for the cross-region campaign
+
+- Date: 2026-07-18
+- Status: Accepted
+- Context: The two-region `t3.medium` layout required 6 EU vCPUs for `n=7`,
+  above the verified `eu-west-1` limit of 5. It also measured only one
+  transatlantic path and could not distinguish EU–EU latency.
+- Options considered: request an EU quota increase; reduce the operator count;
+  keep two regions with uneven manual placement; or use `t3.small` across one
+  US and two EU regions with deterministic modulo-three placement.
+- Decision: Use `us-east-1`, `eu-west-1`, and `eu-central-1`, with the controller
+  in the US and operators assigned by `node_id % 3`. Create one VPC per region
+  and direct peerings for US–Ireland, US–Frankfurt, and Ireland–Frankfurt, with
+  both directional routes for every pair. Use `t3.small` throughout.
+- Rationale: `n=7` requires 8/4/4 vCPUs, which fits the verified 16/5/5 limits,
+  and the full mesh exposes intra-region, both transatlantic, and EU–EU paths.
+  A direct mesh is mandatory because VPC peering is non-transitive.
+- Consequences: A quota increase is not currently required, but Free Tier
+  plan/credit eligibility remains an administrator check and inter-region
+  transfer or T3 Unlimited surplus credits may be billed. Campaign evidence
+  must retain one image digest, placement/AZ attribution, complete five-attempt
+  pairwise health matrices, and authenticated empty three-region teardown.
+  Historical two-region artifacts remain readable but are not the active
+  evidence target.
+- Related files: `deploy/ec2/terraform-three-region/`,
+  `deploy/ec2/run-m3-three-region.sh`, `latency-charts/`, `docs/VALIDATION.md`

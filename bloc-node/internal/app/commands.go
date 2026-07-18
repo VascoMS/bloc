@@ -27,6 +27,9 @@ func genConfig(args []string) error {
 	maxDecryptedGas := fs.Uint64("max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	maxDecryptedTxs := fs.Int("max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
 	defaultTxGas := fs.Uint64("default-tx-gas", 21000, "default gas assigned to raw/synthetic submissions")
+	maxProposalBytes := fs.Int("max-proposal-bytes", defaultMaxProposalBytes, "maximum encoded inclusion-list proposal bytes")
+	maxEnvelopeBytes := fs.Int("max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
+	maxCombineAttempts := fs.Int("max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
 	mempoolURL := fs.String("mempool-url", "", "mempool-il base URL for provider=mempool-http")
 	baseP2P := fs.Int("base-p2p-port", 10000, "first libp2p listen port")
@@ -53,6 +56,14 @@ func genConfig(args []string) error {
 	}
 	if *threshold < 1 || *threshold > *nodes {
 		return fmt.Errorf("threshold must be in [1,%d]", *nodes)
+	}
+	limits := ResourceLimits{
+		MaxProposalBytes:              *maxProposalBytes,
+		MaxEnvelopeBytes:              *maxEnvelopeBytes,
+		MaxCombineAttemptsPerSubBatch: *maxCombineAttempts,
+	}
+	if err := validateResourceLimits(limits); err != nil {
+		return err
 	}
 	if *crsOut == "" {
 		*crsOut = filepath.Join(filepath.Dir(*out), "cluster.crs")
@@ -98,6 +109,7 @@ func genConfig(args []string) error {
 		},
 		Provider: ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL},
 		Network:  NetworkConfig{Mode: "libp2p"},
+		Limits:   limits,
 	}
 	secrets := make([]NodeSecretConfig, 0, *nodes)
 	templates, err := resolveAddressTemplates(*addressMode, *httpListenTemplate, *httpAdvertiseTemplate, *p2pListenTemplate, *p2pAdvertiseTemplate)

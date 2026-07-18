@@ -240,6 +240,10 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-008 — Share admission is not membership-bound or publicly verifiable
 
 - Severity/category: **P1 — security/resource exhaustion**
+- Remediation status (2026-07-17): **resource-exhaustion portion remediated for
+  active prototype workflows**. Authenticated membership/index checks,
+  per-operator candidate bounds, post-plan pruning, and cumulative subset
+  attempt budgets are enforced. Public share correctness proofs remain open.
 - Stage: share ingress and combine
 - Evidence: `addWireShare` trusts claimed `OperatorID`, creates the Kyber share
   index from it, and `addShare` admits any new claimed identity. Threshold
@@ -255,6 +259,9 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-009 — Inbound libp2p envelope size is unbounded
 
 - Severity/category: **P1 — availability/resource exhaustion**
+- Remediation status (2026-07-17): **remediated**. Shared v2 configuration
+  bounds encoded proposals and inbound/outbound envelopes; oversized inbound
+  streams are reset before protobuf decoding and emit bounded-label metrics.
 - Stage: operator transport ingress
 - Evidence: the stream handler calls `io.ReadAll(s)` without a protocol maximum
   or `LimitReader`.

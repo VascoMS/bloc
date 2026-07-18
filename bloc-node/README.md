@@ -71,6 +71,8 @@ All correct operators should report the same `batch_id`, merged-set hash, select
   trusted-dealer BTE share and libp2p private key,
 - blockspace caps and defaults,
 - provider mode.
+- shared resource limits for encoded proposals, libp2p envelopes, and
+  per-sub-batch recovery attempts.
 
 The clean v2 config boundary rejects legacy files that combine the CRS seed,
 all BTE shares, and all libp2p private keys. The public CRS does not contain the
@@ -81,6 +83,12 @@ ACS and BTE share messages use protobuf envelopes over authenticated,
 multiplexed libp2p streams. The generated bindings live in
 `proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
 local multiaddresses use TCP underneath; libp2p is not gRPC.
+
+The v2 defaults are 8 MiB per encoded proposal, 16 MiB per inbound/outbound
+envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
+are restricted to authenticated configured operators, one batch identity, and
+one point per sub-batch; planning prunes the pre-plan `N*BMax` bound to
+`N*alpha`. Old v2 files without `limits` receive the defaults.
 
 For deployment configs, use `--address-mode container`. The old `http_addr`
 and `p2p_addr` fields remain backward-compatible defaults for local configs,
@@ -201,3 +209,15 @@ run `eval-remote --tx-source mock-placeholder --mempool-url <mempool-il>`. In
 that mode the evaluator does not submit `/tx` payloads; sidecars fetch encrypted
 placeholder candidates from `mempool-il` and materialize the original target
 transactions after threshold decryption.
+
+## Local Campaign Runners
+
+Protocol campaigns use the portable Bash entrypoints:
+
+```sh
+bash scripts/run-acs-safety-campaign.sh
+bash scripts/run-merge-plan-campaign.sh --phase baseline --campaign-id <id>
+```
+
+Both support `--validate-only`; generated evidence remains under ignored
+`results/` directories.

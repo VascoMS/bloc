@@ -14,6 +14,14 @@ import (
 const (
 	clusterConfigVersion = "bloc-cluster-v2"
 	nodeSecretVersion    = "bloc-node-secret-v1"
+
+	defaultMaxProposalBytes               = 8 << 20
+	defaultMaxEnvelopeBytes               = 16 << 20
+	defaultMaxCombineAttemptsPerSubBatch  = 256
+	absoluteMaxProposalBytes              = 32 << 20
+	absoluteMaxEnvelopeBytes              = 64 << 20
+	absoluteMaxCombineAttemptsPerSubBatch = 4096
+	minimumEnvelopeHeadroomBytes          = 64 << 10
 )
 
 // ConfigFile is the public JSON configuration shared by all BLOC nodes in a
@@ -33,7 +41,27 @@ type ConfigFile struct {
 	Blockspace   BlockspaceConfig `json:"blockspace,omitempty"`
 	Provider     ProviderConfig   `json:"provider,omitempty"`
 	Network      NetworkConfig    `json:"network,omitempty"`
+	Limits       ResourceLimits   `json:"limits,omitempty"`
 	CRSBytes     []byte           `json:"-"`
+}
+
+// ResourceLimits bounds attacker-influenced protocol memory and cryptographic
+// work. Zero values are filled with the stable v2 defaults.
+type ResourceLimits struct {
+	MaxProposalBytes              int `json:"max_proposal_bytes,omitempty"`
+	MaxEnvelopeBytes              int `json:"max_envelope_bytes,omitempty"`
+	MaxCombineAttemptsPerSubBatch int `json:"max_combine_attempts_per_sub_batch,omitempty"`
+	explicitZeroProposal          bool
+	explicitZeroEnvelope          bool
+	explicitZeroCombineAttempts   bool
+}
+
+func defaultResourceLimits() ResourceLimits {
+	return ResourceLimits{
+		MaxProposalBytes:              defaultMaxProposalBytes,
+		MaxEnvelopeBytes:              defaultMaxEnvelopeBytes,
+		MaxCombineAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch,
+	}
 }
 
 // NodeConfig describes one operator process. HTTPAddr exposes the local control
@@ -154,11 +182,22 @@ type slotState struct {
 	shareGenerationDone bool
 	combineInFlight     bool
 	shareVersion        uint64
-	shares              []be.DecryptionShare
-	seenShares          map[string]bool
+	shareCandidates     map[int]*operatorShareCandidates
+	combineAttemptsLeft []int
 	result              *Result
 	metrics             Metrics
 	metricTimes         metricTimes
+}
+
+type operatorShareCandidates struct {
+	batchID  [32]byte
+	batchSet bool
+	shares   map[int]retainedShare
+}
+
+type retainedShare struct {
+	value   be.DecryptionShare
+	encoded []byte
 }
 
 // Node owns the per-process BLOC state for one operator.
@@ -243,6 +282,8 @@ type Metrics struct {
 	SubBatches                   int              `json:"sub_batches"`
 	SharesGenerated              int              `json:"shares_generated"`
 	SharesAccepted               int              `json:"shares_accepted"`
+	SharesRejected               int              `json:"shares_rejected"`
+	ShareSubsetAttempts          int              `json:"share_subset_attempts"`
 	CombineAttempts              int              `json:"combine_attempts"`
 	SharesNeededPerSub           int              `json:"shares_needed_per_sub_batch"`
 	OutboundMessages             map[string]int   `json:"outbound_messages"`

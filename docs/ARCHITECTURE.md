@@ -67,8 +67,9 @@ flowchart LR
     bte["bte/btd-impl-main\nencrypt, plan, share, combine"]
     result["Materialized slot result"]
 
-    source -->|"raw signed target txs"| mempool
-    source -->|"direct test submissions"| nodes
+    source -->|"encrypted placeholder txs (intended)"| mempool
+    source -.->|"raw corpus (replay adapter only)"| mempool
+    source -.->|"raw direct submissions (test only)"| nodes
     mempool -->|"encrypted placeholder candidates"| nodes
     nodes -->|"proposal bytes and ACS messages"| acs
     nodes -->|"ciphertexts and decryption shares"| bte
@@ -91,16 +92,20 @@ sequenceDiagram
     participant M as mempool-il
     participant N as bloc-node operator
     participant A as SlotACS
-    participant B as ClusterBTE
+    participant B as Operator-local ClusterBTE library
     participant P as Peer operators
 
-    alt replay-placeholder source
-        S->>M: signed target transaction corpus
-        M->>B: EncryptTx(raw, index, cluster, slot)
+    alt intended confidentiality boundary
+        S->>S: EncryptTx using public cluster material
+        S->>M: encrypted placeholder transaction
         M-->>N: encrypted placeholder candidates
-    else direct evaluator source
-        S->>N: raw signed transaction and metadata
-        N->>B: EncryptTx(raw, index, cluster, slot)
+    else prototype replay-placeholder adapter
+        S->>M: signed target transaction corpus
+        M->>M: act as mock submitter and call EncryptTx
+        M-->>N: encrypted placeholder candidates
+    else prototype direct evaluator adapter
+        S->>N: raw transaction bytes and metadata
+        N->>N: call EncryptTx for synthetic testing
     end
     N->>A: protobuf inclusion-list proposal
     A->>P: slot-scoped RBC and BBA messages
@@ -116,12 +121,23 @@ sequenceDiagram
     N->>N: parse Ethereum transactions and publish result
 ```
 
+`ClusterBTE` is an in-process Go library object, not a remote cluster service.
+The first branch is the intended confidentiality boundary: a submitter can
+encrypt with public cluster material before any mempool service or operator sees
+the target plaintext. The other two branches are prototype scaffolding.
+`mempool-il` encrypts only in `replay-placeholder` mode, where it deliberately
+acts as a mock external submitter, and `bloc-node` encrypts only for the direct
+evaluator `/tx` path. Those adapters support repeatable experiments; they are
+not the intended production transaction-submission flow, because their host
+process sees the target plaintext before ACS agreement and threshold
+decryption.
+
 ### Stage Handoffs
 
 | Stage | Owner | Input | Output and identity | Network activity | Failure behavior |
 | --- | --- | --- | --- | --- | --- |
 | Source ingestion | `mempool-il` or `bloc-node` | RPC candidates, corpus entries, or direct raw bytes | Normalized candidate metadata | RPC/HTTP outside consensus | Source errors prevent proposal construction or polling refresh |
-| Hybrid encryption | BTE | Raw bytes, index, cluster ID, slot | Canonical `Ciphertext`; AEAD and proof context bind cluster, slot, and index | None inside BTE | Encryption or serialization error rejects the item/request |
+| Hybrid encryption | Submitter-side BTE or a prototype adapter | Raw bytes, index, cluster ID, slot | Canonical `Ciphertext`; AEAD and proof context bind cluster, slot, and index | None inside BTE | Encryption or serialization error rejects the item/request |
 | Proposal construction | `bloc-node` | Local encrypted candidates | Protobuf `InclusionList(slot, operator, items)`; local canonical JSON hash is diagnostic before ACS | Proposal becomes RBC input | Provider/encoding failure marks the active slot failed |
 | Reliable broadcast | `hbbft` RBC | One opaque proposal per proposer | Available proposal bytes associated with proposer ID | PROOF, ECHO, and READY messages | Invalid/duplicate messages are rejected; no timeout exists in the asynchronous core |
 | Binary agreement and ACS | `hbbft` BBA/ACS | RBC completion signals and BBA messages | Common subset of proposer IDs and proposal bytes | BVAL and AUX messages | ACS waits for all BBA decisions and every truthy RBC result |
@@ -171,7 +187,13 @@ only input order used to compute `BatchID` and original positions.
   twice. `alpha` is at least `ceil(2*sqrt(B))` and at least the maximum index
   frequency; the deterministic fallback repairs round-robin collisions.
 - **Share scope:** only shares matching the local `BatchID` and a valid
-  sub-batch count toward threshold reconstruction.
+  sub-batch count toward threshold reconstruction. The authenticated operator
+  must match the public-share index, and only one candidate per
+  operator/sub-batch is retained.
+- **Bounded resources:** shared cluster limits cap encoded proposals and every
+  inbound/outbound libp2p envelope. Pre-plan share state is bounded by
+  `N*BMax`, post-plan state by `N*alpha`, and invalid-share recovery has a
+  cumulative per-sub-batch attempt budget.
 - **Ownership:** successful decoding fixes `BatchID` from accepted wire bytes;
   later caller mutation cannot change decoded ciphertexts or planning identity.
 - **Fail-closed selected data:** malformed accepted lists or selected BTE

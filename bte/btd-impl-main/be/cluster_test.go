@@ -230,6 +230,81 @@ func TestCombineSharesSkipsInvalidExtraShareSubset(t *testing.T) {
 	require.Equal(t, rawTx, results[0].RawTx)
 }
 
+func TestCombineSharesBoundedStopsAtDeterministicAttemptLimit(t *testing.T) {
+	cluster := newTestCluster(t, 16, 4, 3)
+	rawTx := []byte("bounded recovery")
+	ct, err := cluster.EncryptTx(rawTx, 0, "cluster-a", 123)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+
+	shares := make([]DecryptionShare, 0, 4)
+	for operatorID := 0; operatorID < 4; operatorID++ {
+		candidate, err := cluster.MakeShare(cluster.Shares[operatorID], plan, 0)
+		require.NoError(t, err)
+		shares = append(shares, candidate)
+	}
+	shares[0].Share.V = cluster.btd.suite.G1().Point().Add(shares[0].Share.V, cluster.btd.suite.G1().Point().Base())
+
+	_, stats, err := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 3})
+	require.ErrorContains(t, err, "attempt limit 3 exhausted")
+	require.Equal(t, []int{3}, stats.AttemptsBySubBatch)
+
+	results, stats, err := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 4})
+	require.NoError(t, err)
+	require.Equal(t, []int{4}, stats.AttemptsBySubBatch)
+	require.Equal(t, rawTx, results[0].RawTx)
+}
+
+func TestCombineSharesBoundedRejectsOperatorIndexMismatch(t *testing.T) {
+	cluster := newTestCluster(t, 8, 4, 3)
+	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+	candidate, err := cluster.MakeShare(cluster.Shares[0], plan, 0)
+	require.NoError(t, err)
+	candidate.Share.I = 1
+	_, _, err = cluster.CombineSharesBounded(plan, []DecryptionShare{candidate}, CombineOptions{MaxAttemptsPerSubBatch: 1})
+	require.ErrorContains(t, err, "does not match operator")
+}
+
+func TestCombineSharesBoundedN10ByzantineRecoveryFitsDefaultBudget(t *testing.T) {
+	cluster := newTestCluster(t, 16, 10, 7)
+	rawTx := []byte("n10 bounded recovery")
+	ct, err := cluster.EncryptTx(rawTx, 0, "cluster-a", 123)
+	require.NoError(t, err)
+	plan, err := cluster.PlanBatch([]Ciphertext{ct})
+	require.NoError(t, err)
+
+	shares := make([]DecryptionShare, 0, 10)
+	for operatorID := 0; operatorID < 10; operatorID++ {
+		candidate, err := cluster.MakeShare(cluster.Shares[operatorID], plan, 0)
+		require.NoError(t, err)
+		if operatorID < 3 {
+			candidate.Share.V = cluster.btd.suite.G1().Point().Add(candidate.Share.V, cluster.btd.suite.G1().Point().Base())
+		}
+		shares = append(shares, candidate)
+	}
+
+	remaining := defaultMaxCombineAttemptsPerSubBatch
+	total := 0
+	for count := 7; count <= 10; count++ {
+		results, stats, combineErr := cluster.CombineSharesBounded(plan, shares[:count], CombineOptions{MaxAttemptsPerSubBatch: remaining})
+		require.Len(t, stats.AttemptsBySubBatch, 1)
+		remaining -= stats.AttemptsBySubBatch[0]
+		total += stats.AttemptsBySubBatch[0]
+		if count < 10 {
+			require.Error(t, combineErr)
+			continue
+		}
+		require.NoError(t, combineErr)
+		require.Equal(t, rawTx, results[0].RawTx)
+	}
+	require.Equal(t, 165, total)
+	require.Equal(t, defaultMaxCombineAttemptsPerSubBatch-165, remaining)
+}
+
 func TestCiphertextSerializationRoundTrip(t *testing.T) {
 	cluster := newTestCluster(t, 8, 10, 5)
 	ct, err := cluster.EncryptTx([]byte("serialized tx"), 0, "cluster-a", 123)

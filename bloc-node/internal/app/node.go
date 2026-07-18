@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,9 @@ import (
 // operator's private BTE share and libp2p identity.
 func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultConfig) (*Node, error) {
 	normalizeConfig(&cfg)
+	if err := validateResourceLimits(cfg.Limits); err != nil {
+		return nil, err
+	}
 	if secrets.ClusterID != cfg.ClusterID {
 		return nil, fmt.Errorf("node secrets cluster %q does not match config cluster %q", secrets.ClusterID, cfg.ClusterID)
 	}
@@ -99,10 +103,10 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 
 func (n *Node) newSlotState(slotID uint64) *slotState {
 	state := &slotState{
-		id:          slotID,
-		phase:       slotPrepared,
-		seenPending: make(map[string]bool),
-		seenShares:  make(map[string]bool),
+		id:              slotID,
+		phase:           slotPrepared,
+		seenPending:     make(map[string]bool),
+		shareCandidates: make(map[int]*operatorShareCandidates),
 		metrics: Metrics{
 			SharesNeededPerSub: n.cfg.Threshold,
 			MaxDecryptedGas:    n.cfg.Blockspace.MaxDecryptedGas,
@@ -258,7 +262,7 @@ func (n *Node) handleSlotStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]any{
 		"slot": n.id, "phase": n.phase, "node_id": n.self.ID,
 		"pending": len(n.pending), "planned": n.planned,
-		"shares": len(n.shares), "combine_in_flight": n.combineInFlight,
+		"shares": n.retainedShareCountLocked(), "combine_in_flight": n.combineInFlight,
 		"complete": n.result != nil,
 	}
 	n.mu.Unlock()
@@ -356,17 +360,36 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := hashHex(encoded)
+	item := EncryptedPlaceholder{
+		Hash:                  hash,
+		Ciphertext:            encoded,
+		Gas:                   req.Gas,
+		EffectiveFeePerGasWei: req.EffectiveFeePerGasWei,
+		From:                  strings.ToLower(req.From),
+		Nonce:                 req.Nonce,
+		Kind:                  req.Kind,
+	}
 	n.mu.Lock()
 	if !n.seenPending[hash] {
-		n.pending = append(n.pending, EncryptedPlaceholder{
-			Hash:                  hash,
-			Ciphertext:            encoded,
-			Gas:                   req.Gas,
-			EffectiveFeePerGasWei: req.EffectiveFeePerGasWei,
-			From:                  strings.ToLower(req.From),
-			Nonce:                 req.Nonce,
-			Kind:                  req.Kind,
-		})
+		if len(n.pending) >= n.cfg.BMax {
+			n.mu.Unlock()
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("proposal item count exceeds BMax %d", n.cfg.BMax)})
+			return
+		}
+		candidateItems := append(append([]EncryptedPlaceholder(nil), n.pending...), item)
+		candidateList := InclusionList{Slot: n.id, OperatorID: n.self.ID, Items: candidateItems}
+		candidateEncoded, encodeErr := inclusion.EncodeList(candidateList)
+		if encodeErr != nil {
+			n.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": encodeErr.Error()})
+			return
+		}
+		if len(candidateEncoded) > n.cfg.Limits.MaxProposalBytes {
+			n.mu.Unlock()
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("encoded proposal has %d bytes, maximum %d", len(candidateEncoded), n.cfg.Limits.MaxProposalBytes)})
+			return
+		}
+		n.pending = candidateItems
 		n.seenPending[hash] = true
 		n.metrics.SubmittedTxs++
 		n.metrics.SubmittedBytes += len(raw)
@@ -407,6 +430,11 @@ func (n *Node) startConsensus() error {
 			n.markSlotFailed("proposal")
 			return
 		}
+		if boundsErr := validateProposalBounds(len(list.Items), len(encodedList), n.cfg); boundsErr != nil {
+			err = boundsErr
+			n.markSlotFailed("proposal")
+			return
+		}
 		proposalReady := time.Now()
 		n.mu.Lock()
 		n.metricTimes.slotStart = start
@@ -429,6 +457,16 @@ func (n *Node) startConsensus() error {
 		n.handleACSOutput(output)
 	})
 	return err
+}
+
+func validateProposalBounds(itemCount, encodedBytes int, cfg ConfigFile) error {
+	if itemCount > cfg.BMax {
+		return fmt.Errorf("proposal item count %d exceeds BMax %d", itemCount, cfg.BMax)
+	}
+	if encodedBytes > cfg.Limits.MaxProposalBytes {
+		return fmt.Errorf("encoded proposal has %d bytes, maximum %d", encodedBytes, cfg.Limits.MaxProposalBytes)
+	}
+	return nil
 }
 
 // handleEnvelope is the common inbound message path for every transport.
@@ -578,6 +616,11 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		return
 	}
 	n.plan = plan
+	n.pruneShareCandidatesLocked(plan)
+	n.combineAttemptsLeft = make([]int, len(plan.SubBatches))
+	for i := range n.combineAttemptsLeft {
+		n.combineAttemptsLeft[i] = n.cfg.Limits.MaxCombineAttemptsPerSubBatch
+	}
 	n.metricTimes.acsDecision = decisionAt
 	n.metricTimes.acsOutputDecoded = decodedAt
 	n.metricTimes.agreedSetDone = agreedAt
@@ -737,13 +780,14 @@ func (n *Node) tryCombine() {
 	if !ok {
 		return
 	}
-	shares, rejected := matchingSharesForPlan(attempt.shares, attempt.plan)
-	if rejected > 0 {
-		log.Printf("ignored %d shares for other batches or sub-batches while waiting for batch %s", rejected, hex.EncodeToString(attempt.plan.BatchID[:]))
-	}
+	shares := attempt.shares
 	thresholdAt := time.Now()
 	log.Printf("event=threshold_reached node_id=%d slot=%d batch_id=%s shares=%d", n.self.ID, n.id, hex.EncodeToString(attempt.plan.BatchID[:]), len(shares))
-	results, err := n.cluster.CombineShares(attempt.plan, shares)
+	results, stats, err := n.cluster.CombineSharesBounded(attempt.plan, shares, be.CombineOptions{
+		MaxAttemptsPerSubBatch:  n.cfg.Limits.MaxCombineAttemptsPerSubBatch,
+		AttemptLimitsBySubBatch: append([]int(nil), attempt.attemptLimits...),
+	})
+	n.recordCombineStats(stats)
 	if err != nil {
 		log.Printf("combine shares: %v", err)
 		if n.finishFailedCombine(attempt.shareVersion) {
@@ -809,10 +853,11 @@ func (n *Node) tryCombine() {
 }
 
 type combineAttempt struct {
-	plan         be.BatchPlan
-	material     MaterializedTransactionSet
-	shares       []be.DecryptionShare
-	shareVersion uint64
+	plan          be.BatchPlan
+	material      MaterializedTransactionSet
+	shares        []be.DecryptionShare
+	shareVersion  uint64
+	attemptLimits []int
 }
 
 // claimCombine admits at most one expensive reconstruction per node. Share
@@ -824,19 +869,46 @@ func (n *Node) claimCombine() (combineAttempt, bool) {
 	if n.result != nil || !n.planned || !n.shareGenerationDone || n.combineInFlight {
 		return combineAttempt{}, false
 	}
-	shares := append([]be.DecryptionShare(nil), n.shares...)
-	matching, _ := matchingSharesForPlan(shares, n.plan)
-	if !hasThresholdPerSubBatch(matching, n.plan, n.cfg.Threshold) {
+	shares := n.retainedSharesLocked()
+	if !hasThresholdPerSubBatch(shares, n.plan, n.cfg.Threshold) {
+		return combineAttempt{}, false
+	}
+	for i := range n.plan.SubBatches {
+		if i >= len(n.combineAttemptsLeft) || n.combineAttemptsLeft[i] <= 0 {
+			return combineAttempt{}, false
+		}
+	}
+	if len(shares) == 0 {
 		return combineAttempt{}, false
 	}
 	n.combineInFlight = true
 	n.metrics.CombineAttempts++
 	return combineAttempt{
-		plan:         n.plan,
-		material:     n.material,
-		shares:       shares,
-		shareVersion: n.shareVersion,
+		plan:          n.plan,
+		material:      n.material,
+		shares:        shares,
+		shareVersion:  n.shareVersion,
+		attemptLimits: append([]int(nil), n.combineAttemptsLeft...),
 	}, true
+}
+
+func (n *Node) recordCombineStats(stats be.CombineStats) {
+	n.mu.Lock()
+	total := 0
+	for subBatchID, attempts := range stats.AttemptsBySubBatch {
+		if subBatchID < len(n.combineAttemptsLeft) {
+			n.combineAttemptsLeft[subBatchID] -= attempts
+			if n.combineAttemptsLeft[subBatchID] < 0 {
+				n.combineAttemptsLeft[subBatchID] = 0
+			}
+		}
+		n.metrics.ShareSubsetAttempts += attempts
+		total += attempts
+	}
+	n.mu.Unlock()
+	if n.observability != nil {
+		n.observability.recordShareSubsetAttempts(total)
+	}
 }
 
 // finishFailedCombine releases the single-flight claim and reports whether a
@@ -851,16 +923,28 @@ func (n *Node) finishFailedCombine(attemptVersion uint64) bool {
 // addWireShare validates and converts a transport share into the BTE library
 // type before deduplication.
 func (n *Node) addWireShare(w WireShare) error {
-	batchID, err := hex.DecodeString(w.BatchIDHex)
-	if err != nil {
-		return err
+	if _, ok := n.peers[uint64(w.OperatorID)]; !ok || w.OperatorID < 0 {
+		return n.rejectShare("membership", "share operator %d is not configured", w.OperatorID)
 	}
-	if len(batchID) != 32 {
-		return fmt.Errorf("batch id has %d bytes", len(batchID))
+	batchHex := w.BatchIDHex
+	if len(batchHex) != 64 {
+		return n.rejectShare("encoding", "batch id has %d hex characters, expected 64", len(batchHex))
 	}
-	point, err := unmarshalPointHex(n.suite, w.PointHex)
+	batchID, err := hex.DecodeString(batchHex)
 	if err != nil {
-		return err
+		return n.rejectShare("encoding", "decode batch id: %v", err)
+	}
+	if w.SubBatchID < 0 || w.SubBatchID >= n.cfg.BMax {
+		return n.rejectShare("sub_batch", "share sub-batch id out of range: %d", w.SubBatchID)
+	}
+	pointHex := w.PointHex
+	expectedPointHexLen := n.suite.G1().Point().MarshalSize() * 2
+	if len(pointHex) != expectedPointHexLen {
+		return n.rejectShare("encoding", "share point has %d hex characters, expected %d", len(pointHex), expectedPointHexLen)
+	}
+	point, err := unmarshalPointHex(n.suite, pointHex)
+	if err != nil {
+		return n.rejectShare("encoding", "decode share point: %v", err)
 	}
 	var id [32]byte
 	copy(id[:], batchID)
@@ -874,16 +958,64 @@ func (n *Node) addWireShare(w WireShare) error {
 
 // addShare deduplicates a BTE share and updates share-related metrics.
 func (n *Node) addShare(d be.DecryptionShare) error {
-	key := fmt.Sprintf("%x/%d/%d", d.BatchID, d.SubBatchID, d.OperatorID)
+	if _, ok := n.peers[uint64(d.OperatorID)]; !ok || d.OperatorID < 0 {
+		return n.rejectShare("membership", "share operator %d is not configured", d.OperatorID)
+	}
+	if d.Share == nil || d.Share.V == nil {
+		return n.rejectShare("encoding", "nil share from operator %d", d.OperatorID)
+	}
+	if int(d.Share.I) != d.OperatorID {
+		return n.rejectShare("membership", "share index %d does not match operator %d", d.Share.I, d.OperatorID)
+	}
+	if d.SubBatchID < 0 || d.SubBatchID >= n.cfg.BMax {
+		return n.rejectShare("sub_batch", "share sub-batch id out of range: %d", d.SubBatchID)
+	}
+	encoded, err := d.Share.V.MarshalBinary()
+	if err != nil {
+		return n.rejectShare("encoding", "marshal share from operator %d: %v", d.OperatorID, err)
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.seenShares[key] {
-		return nil
+	if n.shareCandidates == nil {
+		n.shareCandidates = make(map[int]*operatorShareCandidates)
 	}
-	n.seenShares[key] = true
-	n.shares = append(n.shares, d)
+	if n.planned && d.BatchID != n.plan.BatchID {
+		n.recordShareRejectedLocked("batch")
+		return fmt.Errorf("share batch id mismatch from operator %d", d.OperatorID)
+	}
+	if n.planned && d.SubBatchID >= len(n.plan.SubBatches) {
+		n.recordShareRejectedLocked("sub_batch")
+		return fmt.Errorf("share sub-batch id out of range: %d", d.SubBatchID)
+	}
+	candidates := n.shareCandidates[d.OperatorID]
+	if candidates == nil {
+		candidates = &operatorShareCandidates{shares: make(map[int]retainedShare)}
+		n.shareCandidates[d.OperatorID] = candidates
+	}
+	if candidates.batchSet && candidates.batchID != d.BatchID {
+		n.recordShareRejectedLocked("batch")
+		return fmt.Errorf("operator %d already supplied a different batch identity", d.OperatorID)
+	}
+	if existing, ok := candidates.shares[d.SubBatchID]; ok {
+		if bytes.Equal(existing.encoded, encoded) {
+			return nil
+		}
+		n.recordShareRejectedLocked("conflict")
+		return fmt.Errorf("conflicting share from operator %d for sub-batch %d", d.OperatorID, d.SubBatchID)
+	}
+	candidates.batchID = d.BatchID
+	candidates.batchSet = true
+	candidates.shares[d.SubBatchID] = retainedShare{value: d, encoded: append([]byte(nil), encoded...)}
+	if n.retainedShareCountLocked() > n.cfg.N*n.cfg.BMax {
+		delete(candidates.shares, d.SubBatchID)
+		n.recordShareRejectedLocked("capacity")
+		return fmt.Errorf("share retention capacity exceeded")
+	}
 	n.shareVersion++
 	n.metrics.SharesAccepted++
+	if n.observability != nil {
+		n.observability.recordShareAccepted()
+	}
 	if d.OperatorID == int(n.self.ID) {
 		n.metrics.SharesGenerated++
 	}
@@ -891,6 +1023,61 @@ func (n *Node) addShare(d be.DecryptionShare) error {
 		n.metrics.FirstShareUnixNano = time.Now().UnixNano()
 	}
 	return nil
+}
+
+func (n *Node) rejectShare(reason, format string, args ...any) error {
+	n.mu.Lock()
+	n.recordShareRejectedLocked(reason)
+	n.mu.Unlock()
+	return fmt.Errorf(format, args...)
+}
+
+func (n *Node) recordShareRejectedLocked(reason string) {
+	n.metrics.SharesRejected++
+	if n.observability != nil {
+		n.observability.recordShareRejected(reason)
+	}
+}
+
+func (n *Node) retainedShareCountLocked() int {
+	total := 0
+	for _, candidates := range n.shareCandidates {
+		total += len(candidates.shares)
+	}
+	return total
+}
+
+func (n *Node) retainedSharesLocked() []be.DecryptionShare {
+	out := make([]be.DecryptionShare, 0, n.retainedShareCountLocked())
+	for _, operatorID := range n.nodeIDs {
+		candidates := n.shareCandidates[int(operatorID)]
+		if candidates == nil {
+			continue
+		}
+		subBatchIDs := make([]int, 0, len(candidates.shares))
+		for subBatchID := range candidates.shares {
+			subBatchIDs = append(subBatchIDs, subBatchID)
+		}
+		sort.Ints(subBatchIDs)
+		for _, subBatchID := range subBatchIDs {
+			out = append(out, candidates.shares[subBatchID].value)
+		}
+	}
+	return out
+}
+
+func (n *Node) pruneShareCandidatesLocked(plan be.BatchPlan) {
+	for operatorID, candidates := range n.shareCandidates {
+		if !candidates.batchSet || candidates.batchID != plan.BatchID {
+			delete(n.shareCandidates, operatorID)
+			continue
+		}
+		for subBatchID := range candidates.shares {
+			if subBatchID < 0 || subBatchID >= len(plan.SubBatches) {
+				delete(candidates.shares, subBatchID)
+			}
+		}
+	}
 }
 
 // marshalShare converts a BTE decryption share into transport-safe hex fields.
@@ -938,6 +1125,12 @@ func (n *Node) recordInbound(kind string, size int) {
 	n.metrics.InboundBytes[kind] += int64(size)
 	if n.observability != nil {
 		n.observability.recordProtocol("inbound", kind, size)
+	}
+}
+
+func (n *Node) recordProtocolRejected(direction, reason string) {
+	if n.observability != nil {
+		n.observability.recordProtocolRejected(direction, reason)
 	}
 }
 

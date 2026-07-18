@@ -49,6 +49,28 @@ func TestMempoolProviderRejectsMalformedEncryptedPayloadHex(t *testing.T) {
 	}
 }
 
+func TestMempoolProviderRejectsProposalBeyondBMax(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"kind":"placeholder","encrypted_payload_hex":"01"},{"kind":"placeholder","encrypted_payload_hex":"02"}]}`))
+	}))
+	defer server.Close()
+
+	node := &Node{
+		cfg: ConfigFile{
+			BMax:     1,
+			Provider: ProviderConfig{Mode: "mempool-http", MempoolURL: server.URL},
+			Limits:   defaultResourceLimits(),
+		},
+		self:      NodeConfig{ID: 2},
+		slotState: &slotState{id: 9},
+	}
+	_, err := node.buildInclusionList()
+	if err == nil || !strings.Contains(err.Error(), "BMax") {
+		t.Fatalf("error = %v, want provider BMax rejection", err)
+	}
+}
+
 func TestValidateTxSource(t *testing.T) {
 	if err := validateTxSource("synthetic", ""); err != nil {
 		t.Fatalf("synthetic rejected: %v", err)

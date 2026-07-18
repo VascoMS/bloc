@@ -370,6 +370,8 @@ Implementation-specific adaptations and deviations are:
 - deterministic planning, repeated-index separation, collision fallback,
   preserved golden memberships, and varied frequency properties;
 - threshold and metadata enforcement; and
+- operator/share-index binding, deterministic bounded subset recovery, cap
+  exhaustion, and the n10/t7 three-invalid-share 165-attempt path; and
 - canonical/malformed decoder fuzz seeds.
 
 `elgamal/elgamal_test.go` covers threshold ElGamal. The inherited root benchmark
@@ -386,8 +388,9 @@ in [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md).
 - Setup and threshold shares still come from one trusted generator rather than
   an auditable MPC ceremony and DKG.
 - Decryption shares have no public correctness proof or attribution mechanism.
-- Combination may enumerate a large number of threshold subsets when invalid
-  extras are admitted.
+- Combination uses a deterministic per-sub-batch attempt cap. This bounds work
+  but can fail closed before finding a later valid subset when configured below
+  the required combination count.
 - Public mutable plans and shares receive only partial defensive validation;
   generic callers must respect constructor invariants.
 - There is no DKG, proactive resharing, committee rotation, secure deletion,

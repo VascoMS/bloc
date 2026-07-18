@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,8 @@ import (
 )
 
 const blocEnvelopeProtocol = protocol.ID("/bloc/envelope/1.0.0")
+
+var errEnvelopeTooLarge = errors.New("protocol envelope exceeds configured maximum")
 
 // LibP2PTransport carries addressed ACS and share messages over authenticated,
 // multiplexed libp2p streams.
@@ -59,19 +62,33 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 		operatorID, known := t.peerOperators[remotePeer]
 		if !known {
 			log.Printf("reject libp2p stream from unconfigured peer_id=%s", remotePeer)
+			t.node.recordProtocolRejected("inbound", "authentication")
 			return
 		}
-		data, err := io.ReadAll(s)
+		data, err := readBoundedEnvelope(s, t.node.cfg.Limits.MaxEnvelopeBytes)
 		if err != nil {
+			if errors.Is(err, errEnvelopeTooLarge) {
+				t.node.recordProtocolRejected("inbound", "oversize")
+				_ = s.Reset()
+				return
+			}
+			t.node.recordProtocolRejected("inbound", "decode")
 			log.Printf("read libp2p stream: %v", err)
 			return
 		}
 		env, err := t.codec.Decode(data)
 		if err != nil {
+			t.node.recordProtocolRejected("inbound", "decode")
 			log.Printf("decode libp2p stream envelope: %v", err)
 			return
 		}
+		if err := validateEnvelopePayload(env); err != nil {
+			t.node.recordProtocolRejected("inbound", "payload")
+			log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
+			return
+		}
 		if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, env); err != nil {
+			t.node.recordProtocolRejected("inbound", "authentication")
 			log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
 			return
 		}
@@ -79,6 +96,36 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 	})
 	log.Printf("event=libp2p_listen node_id=%d peer_id=%s listen_addrs=%v advertise_addr=%s", t.node.self.ID, h.ID(), h.Addrs(), t.node.self.p2pAdvertiseAddr())
 	t.connectStaticPeers(ctx)
+	return nil
+}
+
+func readBoundedEnvelope(reader io.Reader, maxBytes int) ([]byte, error) {
+	if maxBytes < 1 {
+		return nil, fmt.Errorf("invalid maximum envelope size %d", maxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, int64(maxBytes)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBytes {
+		return nil, fmt.Errorf("%w: got more than %d bytes", errEnvelopeTooLarge, maxBytes)
+	}
+	return data, nil
+}
+
+func validateEnvelopePayload(env WireEnvelope) error {
+	switch env.Kind {
+	case "acs":
+		if env.ACS == nil || env.Share != nil {
+			return fmt.Errorf("acs envelope has invalid payload")
+		}
+	case "share":
+		if env.Share == nil || env.ACS != nil {
+			return fmt.Errorf("share envelope has invalid payload")
+		}
+	default:
+		return fmt.Errorf("unsupported envelope kind %q", env.Kind)
+	}
 	return nil
 }
 
@@ -104,7 +151,12 @@ func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope)
 	env = authenticatedOutboundEnvelope(t.node.self.ID, to, env)
 	data, err := t.codec.Encode(env)
 	if err != nil {
+		t.node.recordProtocolRejected("outbound", "payload")
 		return 0, err
+	}
+	if len(data) > t.node.cfg.Limits.MaxEnvelopeBytes {
+		t.node.recordProtocolRejected("outbound", "oversize")
+		return 0, fmt.Errorf("%w: encoded %d bytes, maximum %d", errEnvelopeTooLarge, len(data), t.node.cfg.Limits.MaxEnvelopeBytes)
 	}
 	if err := t.sendStream(ctx, to, data); err != nil {
 		return 0, err

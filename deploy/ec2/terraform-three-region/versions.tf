@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
@@ -16,4 +16,9 @@ provider "aws" {
 provider "aws" {
   alias  = "secondary"
   region = var.secondary_region
+}
+
+provider "aws" {
+  alias  = "tertiary"
+  region = var.tertiary_region
 }

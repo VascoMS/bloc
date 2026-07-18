@@ -89,6 +89,12 @@ func TestPrometheusMetricsUseBoundedSchemaAndBaseUnits(t *testing.T) {
 	node.observability.slotStarted()
 	node.observability.recordProtocol("outbound", "acs", 128)
 	node.observability.recordProtocol("inbound", "share", 64)
+	node.observability.recordProtocolRejected("inbound", "attacker-controlled")
+	node.observability.recordProtocolRejected("outbound", "oversize")
+	node.observability.recordShareAccepted()
+	node.observability.recordShareRejected("attacker-controlled")
+	node.observability.recordShareRejected("conflict")
+	node.observability.recordShareSubsetAttempts(7)
 	node.observability.slotFailed("arbitrary dynamic error")
 	node.observability.slotCompleted(Metrics{TotalSlotUS: 2000, ACSUS: 1000, SelectedCiphertexts: 8, SelectedGas: 168000})
 	body := scrapeNodeMetrics(t, node)
@@ -99,6 +105,10 @@ func TestPrometheusMetricsUseBoundedSchemaAndBaseUnits(t *testing.T) {
 		`reason="unknown"`,
 		`kind="acs"`,
 		`kind="share"`,
+		`bloc_protocol_envelopes_rejected_total{cluster_id="cluster",direction="outbound",node_id="1",reason="oversize"} 1`,
+		`bloc_decryption_shares_accepted_total{cluster_id="cluster",node_id="1"} 1`,
+		`bloc_decryption_shares_rejected_total{cluster_id="cluster",node_id="1",reason="conflict"} 1`,
+		`bloc_decryption_share_subset_attempts_total{cluster_id="cluster",node_id="1"} 7`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q:\n%s", want, body)
@@ -112,6 +122,7 @@ func TestPrometheusMetricsUseBoundedSchemaAndBaseUnits(t *testing.T) {
 		"peer_id",
 		"http_advertise_url",
 		"arbitrary dynamic error",
+		"attacker-controlled",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("metrics body contains forbidden token %q:\n%s", forbidden, body)
@@ -245,6 +256,9 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	}
 	if cluster.N != 4 || cluster.Threshold != 3 || cluster.Slot != 7 {
 		t.Fatalf("unexpected cluster metadata: %+v", cluster)
+	}
+	if cluster.Limits != defaultResourceLimits() {
+		t.Fatalf("generated resource limits = %+v, want %+v", cluster.Limits, defaultResourceLimits())
 	}
 	if len(cluster.Nodes) != 4 || len(secrets) != 4 || len(crs) == 0 {
 		t.Fatalf("unexpected generated material: nodes=%d secrets=%d crs_bytes=%d", len(cluster.Nodes), len(secrets), len(crs))

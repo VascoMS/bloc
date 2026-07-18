@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,31 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	}
 	if len(cfg.CRSBytes) == 0 || cfg.CRSFile != "cluster.crs" {
 		t.Fatalf("public CRS was not loaded: file=%q bytes=%d", cfg.CRSFile, len(cfg.CRSBytes))
+	}
+	if cfg.Limits != defaultResourceLimits() {
+		t.Fatalf("generated resource limits = %+v, want %+v", cfg.Limits, defaultResourceLimits())
+	}
+	var legacyV2 map[string]any
+	if err := json.Unmarshal(publicJSON, &legacyV2); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := legacyV2["limits"]; !ok {
+		t.Fatal("generated public config omitted explicit resource limits")
+	}
+	delete(legacyV2, "limits")
+	legacyJSON, err := json.Marshal(legacyV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clusterPath, legacyJSON, 0644); err != nil {
+		t.Fatal(err)
+	}
+	legacyCfg, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatalf("read v2 config without limits: %v", err)
+	}
+	if legacyCfg.Limits != defaultResourceLimits() {
+		t.Fatalf("legacy v2 defaults = %+v, want %+v", legacyCfg.Limits, defaultResourceLimits())
 	}
 
 	secretPath := filepath.Join(dir, "secrets", "operator-2.json")

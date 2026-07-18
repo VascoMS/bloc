@@ -14,6 +14,8 @@ var (
 	phaseMetricLabelNames    = []string{"cluster_id", "node_id", "phase"}
 	stageMetricLabelNames    = []string{"cluster_id", "node_id", "stage"}
 	protocolMetricLabelNames = []string{"cluster_id", "node_id", "direction", "kind"}
+	protocolRejectLabelNames = []string{"cluster_id", "node_id", "direction", "reason"}
+	shareRejectLabelNames    = []string{"cluster_id", "node_id", "reason"}
 	failureMetricLabelNames  = []string{"cluster_id", "node_id", "reason"}
 	httpMetricLabelNames     = []string{"cluster_id", "node_id", "method", "handler", "code"}
 	slotStageNames           = []string{"total", "proposal_preparation", "acs", "merge_plan", "acs_output_decode", "agreed_set", "merge", "ciphertext_decode", "batch_plan", "share_generation", "threshold_wait", "combine", "materialization", "commit_to_plaintext"}
@@ -38,6 +40,10 @@ type nodeMetrics struct {
 	slotSelectedGas     *prometheus.GaugeVec
 	protocolMessages    *prometheus.CounterVec
 	protocolBytes       *prometheus.CounterVec
+	protocolRejected    *prometheus.CounterVec
+	sharesAccepted      *prometheus.CounterVec
+	sharesRejected      *prometheus.CounterVec
+	shareSubsetAttempts *prometheus.CounterVec
 	httpRequests        *prometheus.CounterVec
 	httpDuration        *prometheus.HistogramVec
 }
@@ -96,6 +102,22 @@ func newNodeMetrics(clusterID string, nodeID uint64) *nodeMetrics {
 			Name: "bloc_protocol_message_bytes_total",
 			Help: "Protocol message bytes counted by direction and kind.",
 		}, protocolMetricLabelNames),
+		protocolRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bloc_protocol_envelopes_rejected_total",
+			Help: "Rejected protocol envelopes counted by direction and bounded reason.",
+		}, protocolRejectLabelNames),
+		sharesAccepted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bloc_decryption_shares_accepted_total",
+			Help: "Unique decryption shares admitted to bounded candidate storage.",
+		}, nodeMetricLabelNames),
+		sharesRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bloc_decryption_shares_rejected_total",
+			Help: "Rejected decryption shares counted by bounded reason.",
+		}, shareRejectLabelNames),
+		shareSubsetAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bloc_decryption_share_subset_attempts_total",
+			Help: "Cryptographic threshold-share subset attempts.",
+		}, nodeMetricLabelNames),
 		httpRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "bloc_http_requests_total",
 			Help: "HTTP requests counted by method, normalized handler, and status code.",
@@ -119,6 +141,10 @@ func newNodeMetrics(clusterID string, nodeID uint64) *nodeMetrics {
 		m.slotSelectedGas,
 		m.protocolMessages,
 		m.protocolBytes,
+		m.protocolRejected,
+		m.sharesAccepted,
+		m.sharesRejected,
+		m.shareSubsetAttempts,
 		m.httpRequests,
 		m.httpDuration,
 	)
@@ -130,6 +156,15 @@ func newNodeMetrics(clusterID string, nodeID uint64) *nodeMetrics {
 	for _, reason := range []string{"proposal", "acs", "decode", "planning", "share", "combine", "unknown"} {
 		m.slotFailedTotal.WithLabelValues(m.clusterID, m.nodeID, reason)
 	}
+	for _, reason := range []string{"oversize", "decode", "authentication", "payload", "unknown"} {
+		m.protocolRejected.WithLabelValues(m.clusterID, m.nodeID, "inbound", reason)
+		m.protocolRejected.WithLabelValues(m.clusterID, m.nodeID, "outbound", reason)
+	}
+	for _, reason := range []string{"membership", "batch", "sub_batch", "encoding", "conflict", "capacity", "unknown"} {
+		m.sharesRejected.WithLabelValues(m.clusterID, m.nodeID, reason)
+	}
+	m.sharesAccepted.WithLabelValues(m.labels()...)
+	m.shareSubsetAttempts.WithLabelValues(m.labels()...)
 	return m
 }
 
@@ -214,6 +249,24 @@ func (m *nodeMetrics) recordProtocol(direction, kind string, size int) {
 	}
 }
 
+func (m *nodeMetrics) recordProtocolRejected(direction, reason string) {
+	m.protocolRejected.WithLabelValues(m.clusterID, m.nodeID, normalizeDirection(direction), normalizeProtocolRejection(reason)).Inc()
+}
+
+func (m *nodeMetrics) recordShareRejected(reason string) {
+	m.sharesRejected.WithLabelValues(m.clusterID, m.nodeID, normalizeShareRejection(reason)).Inc()
+}
+
+func (m *nodeMetrics) recordShareAccepted() {
+	m.sharesAccepted.WithLabelValues(m.labels()...).Inc()
+}
+
+func (m *nodeMetrics) recordShareSubsetAttempts(attempts int) {
+	if attempts > 0 {
+		m.shareSubsetAttempts.WithLabelValues(m.labels()...).Add(float64(attempts))
+	}
+}
+
 func (m *nodeMetrics) recordHTTP(method, handler string, code int, duration time.Duration) {
 	labels := []string{m.clusterID, m.nodeID, normalizeHTTPMethod(method), normalizeHTTPHandler(handler), strconv.Itoa(code)}
 	m.httpRequests.WithLabelValues(labels...).Inc()
@@ -224,6 +277,24 @@ func normalizeMessageKind(kind string) string {
 	switch kind {
 	case "acs", "share":
 		return kind
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeProtocolRejection(reason string) string {
+	switch reason {
+	case "oversize", "decode", "authentication", "payload":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeShareRejection(reason string) string {
+	switch reason {
+	case "membership", "batch", "sub_batch", "encoding", "conflict", "capacity":
+		return reason
 	default:
 		return "unknown"
 	}

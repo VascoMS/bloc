@@ -30,7 +30,7 @@ dives under `docs/modules/` and the reviewed findings in
 correctness and security gaps below the previously exercised test surface,
 including mixed-root RBC reconstruction, the deterministic BBA placeholder
 coin, BBA equivocation/future-message handling, insecure diagonal CRS elements,
-and unbounded/unverified share admission. Existing local campaign results remain
+and the then-unbounded/unverified share admission path. Existing local campaign results remain
 useful honest-path prototype measurements, but they are not evidence against
 these adversarial findings.
 
@@ -42,6 +42,23 @@ must match the authenticated configured libp2p peer. PIR-002 and PIR-004 are
 remediated for the active prototype workflows. PIR-001 is only partially
 remediated because the inherited diagonal CRS elements remain intentionally in
 scope; no secure-CRS claim is made.
+
+The BLOC-owned resource-admission boundary is also bounded. Shared v2 cluster
+configuration caps encoded proposals, inbound/outbound libp2p envelopes, and
+per-sub-batch recovery attempts. Share admission is membership/index checked,
+retains at most one batch identity and one candidate per operator/sub-batch,
+and contracts from an `N*BMax` pre-plan bound to `N*alpha` after planning.
+These controls remediate the active prototype resource-exhaustion portions of
+PIR-008 and PIR-009; public share verifiability remains deferred.
+
+Campaign tooling is now maintained as one Bash 3.2-compatible interface for
+macOS and Linux. All eight active local/EC2 runners support side-effect-free
+`--validate-only`, EC2 image paths enforce `linux/amd64`, and structured
+artifact work is shared through a Python-standard-library helper. The complete
+ACS safety campaign and one current-code Merge/Plan baseline phase have passed
+through the Bash runners on macOS; EC2 runners
+have only static, fixture, Terraform, and cleanup-simulation validation in this
+change, and no AWS resources were created.
 
 The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred until after distributed sidecar deployment evidence exists.
 
@@ -64,23 +81,25 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - EC2 inventory can be converted into sidecar cluster config and remote-evaluator config for one-sidecar-per-EC2 deployments,
   - a first 4-operator EC2 smoke can be launched, observed through Prometheus, driven by `eval-remote`, and destroyed after artifact collection,
   - VM/EC2-per-sidecar deployment can run repeated distributed metric-gathering campaigns.
-  - a dedicated two-region path can plan and collect standalone `t3.medium`
-    evidence across privately peered `us-east-1`/`eu-west-1` VPCs.
+  - a dedicated three-region path can plan and collect standalone `t3.small`
+    evidence across fully meshed, privately peered `us-east-1`, `eu-west-1`,
+    and `eu-central-1` VPCs.
 
 ## Immediate Next Actions
 
-1. Plan and implement correctness patches for mixed-root RBC reconstruction,
-   conflicting BBA AUX messages, and multi-epoch delayed-message retention,
-   with adversarial delivery schedules.
-2. Cap inbound envelopes and bound retained share candidates; authenticated
-   sender/operator binding is complete.
-3. Run the resulting HBBFT, BTE, and `bloc-node` race suites on Linux.
-4. Implement and locally validate bounded parallel ciphertext decoding only
-   after the corrected consensus/transport baseline is green.
-5. Rebuild one image, run a clean EC2 `n=4`, batch-128 recovery probe, and only
-   then consider a new optimized cross-AZ `n=4/n=7` campaign.
-6. Design removal of inherited diagonal CRS elements and an auditable setup/DKG
-   ceremony before any production-confidentiality claim.
+1. Complete the module, ACS safety, Bash portability, chart, Terraform, and
+   `linux/amd64` image gates for the three-region campaign, then commit and
+   freeze the source SHA.
+2. Have a billing administrator confirm Free Tier plan/credit coverage and
+   acknowledge potentially billable inter-region transfer and T3 surplus
+   credits before any apply.
+3. Run the `n=4`, batches `8,128`, one-warmup/three-measurement probe and accept
+   it only with complete connectivity, finalized evidence, and empty teardown.
+4. Run the accepted `n=4` then `n=7` matrix, destroying and verifying `n=4`
+   before allocating `n=7`.
+5. Continue the mixed-root RBC, conflicting BBA AUX, delayed-message, and
+   secure-CRS/DKG work without describing latency evidence as Byzantine-safety
+   or production-confidentiality evidence.
 
 ## Current Blockers / Risks
 
@@ -96,11 +115,11 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   secure BTE setup/DKG design. Kubernetes manifests are intentionally deferred
   and incompatible with the clean v2 config boundary until separately migrated.
 
-- The Merge + Plan correctness patch passes both Go suites, bounded outer and
-  capsule decoder fuzzing, and local n4 BMax-128 batches 8/32/128. Its Linux
-  race gate is still pending because this Windows host has no gcc toolchain,
-  WSL distribution, or locally cached Go Docker image. Do not begin EC2
-  evidence collection from this patch until that race gate passes.
+- The Merge + Plan and resource-safety patches pass both Go suites, bounded
+  decoder tests, local n4 BMax-128 batches 8/32/128, and the complete Bash ACS
+  campaign on macOS. The campaign tooling also passes its portability suite on
+  macOS Bash 3.2 and Linux Bash 5.2. A separately approved real EC2 pilot is
+  still required before the migrated cloud runners produce new evidence.
 
 - The optimized 2026-07-14 cross-AZ campaign remains invalid historical evidence: after 7 clean
   batch-128 measurements, three `n=4` operators decided 3 inclusion lists/96
@@ -116,19 +135,25 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 - Local-host scheduling noise means Compose timing output is diagnostic only. Distributed thesis metrics should come from the VM/EC2-per-sidecar deployment, where each operator has an independent machine and network identity.
 - Prometheus `/metrics` now uses native collectors and histogram-safe PromQL is required for Grafana p50/p95 panels; evaluator CSV/JSON remains the offline chart artifact format.
 - Realistic transaction-source evidence now requires the mock-placeholder path: public mempool transactions are target payloads, not native BLOC placeholders, so they must be encrypted once by a mock external submitter before sidecars include them.
+- Resource limits default to 8 MiB proposals, 16 MiB envelopes, and 256
+  cumulative recovery attempts per sub-batch. Oversized inputs and conflicting
+  or out-of-scope shares fail closed and emit bounded-label rejection metrics.
+  Terminal failed-slot publication and mempool HTTP timeouts remain separate
+  operational follow-ups.
 - Builder API compatibility, SSV signing enforcement, and PBS-specific validation are intentionally out of scope for this milestone.
-- The cross-region `n=4/n=7` Terraform plans pass their exact resource/type
-  allowlists and both regional quotas are readable. The current quotas are 16
-  Standard On-Demand vCPUs in `us-east-1` and 5 in `eu-west-1`: `n=4` fits,
-  while the round-robin `n=7` phase needs 6 EU vCPUs and remains quota-blocked.
+- The selected three-region `n=7` placement needs 8 Standard On-Demand vCPUs
+  in `us-east-1` and 4 in each EU region. The currently verified limits are
+  16/5/5 respectively, so no quota increase is required. Billing Free Tier
+  plan/credit state is still administrator-only, and inter-region transfer plus
+  T3 Unlimited surplus credits may be billable.
 
 ## Last Known Good State
 
-- Date: `2026-07-15`
-- Meaning: the corrected ACS/BBA path passed 1,000 fixed reordered-delivery schedules across 20 repeated module runs, Linux race validation, a persistent n4/batch-128 gate with 100/100 successful consistent measurements, and an n4/n7 batch `8/32/128` matrix with 180/180 successful consistent measurements. The optimized same-AZ Compute Flex `n=4/n=7` attribution evidence from 2026-07-14 remains the latest accepted cloud performance baseline, but the corrected implementation still requires a clean EC2 recovery probe before new cross-AZ latency samples are accepted.
+- Date: `2026-07-18`
+- Meaning: the corrected ACS/BBA and resource-bounded path passed the Bash safety campaign on macOS Bash 3.2: 1,000 fixed reordered-delivery schedules, race validation, a persistent n4/batch-128 gate with 100/100 successful consistent measurements, and an n4/n7 batch `8/32/128` matrix with 180/180 successful consistent measurements. The optimized same-AZ Compute Flex `n=4/n=7` attribution evidence from 2026-07-14 remains the latest accepted cloud performance baseline; migrated EC2 runners require a separately approved pilot before producing new cloud evidence.
 - Data-realism addendum: `mempool-il` now has a corpus-backed `replay-placeholder` mode that validates real signed Ethereum target transactions, encrypts them once using BLOC public cluster material, and exposes mock placeholder candidates through the existing inclusion-list API. `bloc-node` can consume these encrypted payloads via the mempool provider without changing synthetic evaluator defaults.
 - Baseline commands:
-  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bloc-node\scripts\run-acs-safety-campaign.ps1`
+  - `bash bloc-node/scripts/run-acs-safety-campaign.sh`
   - `cd bloc-node && go test ./...`
   - `cd sbc/hbbft && go test ./...`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 3 --out-dir results/acs-bba-self-vote-matrix`
@@ -150,10 +175,12 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 ## Current M3 Target
 
 - Run repeated remote-evaluator campaigns against VM/EC2-per-sidecar deployments, using Compose only as a local deployment rehearsal, then produce thesis-ready distributed latency/performance artifacts.
-- Current target campaign: plan-check and smoke the two-region deployment, then
-  collect the standalone `n=4/n=7`, batch `8/32/128`, 30-sample cross-region
-  latency matrix. Older same-AZ/cross-AZ data is historical context because it
-  predates the current evidence candidate.
+- Current target campaign: plan-check and probe the full-mesh three-region
+  deployment, then collect the standalone `n=4/n=7`, batch `8/32/128`,
+  30-sample latency matrix on `t3.small`. Placement is `node_id % 3` across
+  US/Ireland/Frankfurt, with the controller in the US. Older same-AZ/cross-AZ
+  and two-region data is historical context because it predates this evidence
+  candidate.
 
 ## Deferred Later Milestones
 

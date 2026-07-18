@@ -19,12 +19,27 @@ func (n *Node) buildInclusionList() (InclusionList, error) {
 		n.mu.Unlock()
 		list := InclusionList{Slot: n.id, OperatorID: n.self.ID, Items: items}
 		list.Hash = inclusion.HashInclusionList(list)
-		return list, nil
+		return n.validateProviderProposal(list)
 	case "mempool-http":
-		return n.fetchMempoolInclusionList()
+		list, err := n.fetchMempoolInclusionList()
+		if err != nil {
+			return InclusionList{}, err
+		}
+		return n.validateProviderProposal(list)
 	default:
 		return InclusionList{}, fmt.Errorf("unknown inclusion-list provider %q", n.cfg.Provider.Mode)
 	}
+}
+
+func (n *Node) validateProviderProposal(list InclusionList) (InclusionList, error) {
+	encoded, err := inclusion.EncodeList(list)
+	if err != nil {
+		return InclusionList{}, err
+	}
+	if err := validateProposalBounds(len(list.Items), len(encoded), n.cfg); err != nil {
+		return InclusionList{}, err
+	}
+	return list, nil
 }
 
 // fetchMempoolInclusionList adapts the standalone mempool-il HTTP response into

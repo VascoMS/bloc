@@ -33,6 +33,7 @@ type ec2ConfigOptions struct {
 	MaxDecryptedGas uint64
 	MaxDecryptedTxs int
 	DefaultTxGas    uint64
+	Limits          ResourceLimits
 	PrometheusURL   string
 	GrafanaURL      string
 	ControllerURL   string
@@ -111,6 +112,9 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.Uint64Var(&options.MaxDecryptedGas, "max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	fs.IntVar(&options.MaxDecryptedTxs, "max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
 	fs.Uint64Var(&options.DefaultTxGas, "default-tx-gas", 21000, "default gas assigned to raw/synthetic submissions")
+	fs.IntVar(&options.Limits.MaxProposalBytes, "max-proposal-bytes", defaultMaxProposalBytes, "maximum encoded inclusion-list proposal bytes")
+	fs.IntVar(&options.Limits.MaxEnvelopeBytes, "max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
+	fs.IntVar(&options.Limits.MaxCombineAttemptsPerSubBatch, "max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
 	fs.StringVar(&options.PrometheusURL, "prometheus-url", "http://127.0.0.1:9090", "Prometheus URL to record in remote evaluator metadata")
 	fs.StringVar(&options.GrafanaURL, "grafana-url", "http://127.0.0.1:3000", "Grafana URL to record in remote evaluator metadata")
 	fs.StringVar(&options.ControllerURL, "controller-url", "", "optional controller URL or host label to record in metadata")
@@ -125,6 +129,9 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	}
 	if options.BMax < 1 || options.HTTPPort < 1 || options.P2PPort < 1 {
 		return ec2ConfigOptions{}, fmt.Errorf("bmax, http-port, and p2p-port must be positive")
+	}
+	if err := validateResourceLimits(options.Limits); err != nil {
+		return ec2ConfigOptions{}, err
 	}
 	if _, err := validateEC2HostMode(options.HTTPHostMode); err != nil {
 		return ec2ConfigOptions{}, fmt.Errorf("http-host-mode: %w", err)
@@ -149,6 +156,12 @@ func readEC2Inventory(path string) (ec2Inventory, error) {
 }
 
 func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFile, []byte, []NodeSecretConfig, remoteEvalConfig, error) {
+	if options.Limits == (ResourceLimits{}) {
+		options.Limits = defaultResourceLimits()
+	}
+	if err := validateResourceLimits(options.Limits); err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
+	}
 	nodes := len(inventory.Nodes)
 	if options.Nodes != 0 && options.Nodes != nodes {
 		return ConfigFile{}, nil, nil, remoteEvalConfig{}, fmt.Errorf("nodes=%d does not match %d inventory nodes", options.Nodes, nodes)
@@ -211,6 +224,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		},
 		Provider: ProviderConfig{Mode: options.ProviderMode, MempoolURL: options.MempoolURL},
 		Network:  NetworkConfig{Mode: "libp2p"},
+		Limits:   options.Limits,
 	}
 	secrets := make([]NodeSecretConfig, 0, nodes)
 	remote := remoteEvalConfig{

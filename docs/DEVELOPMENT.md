@@ -19,6 +19,10 @@
 - Use standard Go formatting and short lowercase package names.
 - Prefer explicit protocol names such as `InclusionList`, `WireShare`, and `MaterializedTransactionSet`.
 - Add doc comments for exported identifiers and protocol-critical internals when the code is not self-evident.
+- Keep campaign entrypoints compatible with macOS Bash 3.2 and Linux Bash.
+  Use `scripts/lib/campaign-common.sh` for lifecycle primitives and the shared
+  Python helper for JSON/CSV processing. Every runner must keep
+  `--validate-only` side-effect free.
 
 ## Artifact Policy
 

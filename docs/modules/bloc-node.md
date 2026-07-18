@@ -170,9 +170,8 @@ Boolean value. Share payloads carry application operator ID, hex `BatchID`,
 sub-batch ID, and a serialized `G1` point.
 
 `ProtoEnvelopeCodec` rejects unsupported versions and unknown concrete payload
-types. The string `kind` and protobuf oneof are not cross-validated as one
-independent invariant; a mismatch generally decodes to a nil field and is
-ignored by the node handler.
+types. The transport separately requires the string `kind` and protobuf oneof
+to identify the same non-nil ACS or share payload before routing.
 
 ### libp2p transport
 
@@ -188,8 +187,15 @@ map and rejects unknown peers. After decoding, it requires `Envelope.From` to
 match that authenticated operator, requires a direct envelope addressed to the
 local operator, and requires a share's operator ID to match the same identity.
 Outbound routing overwrites `From`, `To`, and `Direct` from local transport
-state rather than trusting caller-populated fields. Inbound stream bytes remain
-uncapped and are tracked as a separate resource-hardening issue.
+state rather than trusting caller-populated fields. Both directions enforce the
+shared `limits.max_envelope_bytes`; inbound reads stop at one byte beyond the
+limit and reset oversized streams before protobuf decoding. Rejections use the
+bounded reasons `oversize`, `decode`, `authentication`, and `payload`.
+
+Encoded inclusion-list proposals are independently bounded by
+`limits.max_proposal_bytes` and `BMax`. The defaults are 8 MiB and 128 items;
+the envelope default is 16 MiB. The separate proposal bound prevents a local
+operator from creating RBC messages that configured peers cannot accept.
 
 ### Node-level routing and serialization
 
@@ -281,16 +287,19 @@ proof verification/share generation.
 
 ### Inbound shares
 
-`addWireShare` requires a 32-byte hex batch ID and a decodable `G1` point, then
-constructs a Kyber `PubShare` whose interpolation index is the claimed
-application operator ID. `addShare` deduplicates by
-`BatchID/subBatchID/operatorID`, increments a monotonically increasing share
-version, and retains candidates even if planning has not completed.
+Before decoding a curve point, `addWireShare` requires a configured operator,
+canonical 32-byte batch-ID hex, the exact encoded `G1` length, and a sub-batch
+ID in `[0,BMax)`. Authenticated envelope validation independently binds the
+share operator to `Envelope.From` and the configured libp2p peer. `addShare`
+then requires the Kyber public-share index to equal that operator ID.
 
-The current boundary does not require the claimed operator to be configured,
-bind it to `Envelope.From`, or check that it corresponds to the authenticated
-remote peer. Wrong-batch/out-of-range candidates are filtered before combine;
-unknown claimed identities for the right batch are not.
+Before planning, each configured operator may retain one batch identity and
+one immutable candidate per sub-batch, bounding storage by `N*BMax`. After the
+local plan exists, other batch identities and sub-batches outside the exact
+plan range are pruned, reducing the bound to `N*alpha`. Byte-identical repeats
+are idempotent; conflicting replacements are rejected and the first candidate
+is retained. Accepted and fixed-category rejected counters never include
+attacker-controlled metric labels.
 
 ### Combine single-flight
 
@@ -299,17 +308,17 @@ unknown claimed identities for the right batch are not.
 - a plan exists;
 - local share generation is finished;
 - no result or combine attempt exists; and
-- distinct claimed operator IDs reach threshold in every sub-batch.
+- distinct configured operator IDs reach threshold in every sub-batch; and
+- every sub-batch still has recovery-attempt budget.
 
-It snapshots the plan, materialization prefix, shares, and share version.
-`matchingSharesForPlan` removes wrong-batch and invalid-sub-batch candidates.
-The BTE library then searches for a valid threshold subset. If combine fails,
-the claim is released and an immediate retry occurs only if new shares arrived
-during the attempt.
-
-Because candidates are neither membership-bound nor publicly verifiable, a
-malicious peer can force premature attempts and enlarge the subset search. This
-is tracked as a resource-exhaustion/security finding.
+It snapshots the plan, materialization prefix, canonical candidate set, share
+version, and remaining per-sub-batch budgets. The BTE library sorts by operator
+ID and searches deterministic threshold subsets. Attempt statistics are
+charged back to slot state, so a new share can trigger one retry but cannot
+reset work already consumed. A sub-batch that exhausts its configured budget
+permanently fails closed for that slot. Candidates are still not publicly
+verifiable; the bounded search is the prototype fallback rather than proof of
+production-grade share validity.
 
 ## Materialization And Results
 
@@ -358,6 +367,14 @@ arrays and an empty `BatchID`, marks metrics finalized, and transitions to
 - `BatchID`, sub-batch memberships, and original positions must match at every
   correct operator.
 - Only matching-batch, in-range sub-batch shares reach BTE combine.
+- Share candidates are keyed by authenticated operator. Before planning, each
+  operator may establish one batch identity and one candidate for each of at
+  most `BMax` sub-batches; after planning, mismatched candidates are pruned and
+  the bound becomes one candidate per operator for each of `alpha` sub-batches.
+- Identical share retransmissions are idempotent. A conflicting second point
+  for the same operator/sub-batch is rejected without replacing the first.
+- Subset recovery is deterministic and consumes a cumulative configured budget
+  per sub-batch across retries; exhaustion prevents further combine work.
 - Results preserve selected order even though cryptography executes by
   sub-batch.
 - Old-slot envelopes are discarded before metrics and state mutation.
@@ -418,16 +435,17 @@ Current `bloc-node` tests cover:
   in-flight-send drain, and serialized ACS stepping;
 - slot-status ACS diagnostics;
 - share filtering, combine threshold admission, single-flight, retry on new
-  shares, and successful-result finality;
+  shares, per-operator retention bounds, conflicting-duplicate rejection,
+  cumulative subset-attempt budgets, and successful-result finality;
 - deterministic signed Ethereum test transactions;
 - authenticated envelope/share sender validation, complete transport writes,
   and HTTP connection reuse; and
 - evaluator scheduling, consistency, metrics boundaries, and artifact policy.
 
-The suite tests the sender-binding validation boundary directly but does not yet
-exercise a malicious remote stream end-to-end. It also does not cover inbound
-stream size limits, terminal failure results, or a deterministic
-invalid-Ethereum fallback.
+The suite tests sender binding, exact/oversized envelope reads, outbound size
+rejection, proposal bounds, share retention/pruning, and bounded n=10 recovery.
+It does not yet exercise an oversized malicious remote stream end-to-end or
+cover terminal failure results and a deterministic invalid-Ethereum fallback.
 
 Run `go test ./...` from `bloc-node`.
 
@@ -436,8 +454,9 @@ Run `go test ./...` from `bloc-node`.
 - Setup and operator secrets still originate at one trusted generator; this is
   isolation for the prototype deployment, not DKG or hardened key custody.
 - The public CRS still includes inherited insecure diagonal elements.
-- Inbound streams are unbounded and share admission can grow memory and combine
-  work.
+- Envelope/proposal bytes, retained share candidates, and recovery attempts are
+  bounded by shared v2 configuration. Public share correctness proofs are still
+  unavailable, so bounded subset recovery remains a prototype fallback.
 - `mempool-http` proposal fetch has no explicit timeout.
 - Failure is fail-closed but not represented as a terminal slot/result state.
 - Ethereum validation is syntactic only and invalid raw bytes still produce a

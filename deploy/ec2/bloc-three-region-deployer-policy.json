@@ -143,12 +143,6 @@
       "Effect": "Allow",
       "Action": "servicequotas:GetServiceQuota",
       "Resource": "arn:aws:servicequotas:*:632783683536:ec2/L-1216C47A"
-    },
-    {
-      "Sid": "ReadCampaignEC2Metrics",
-      "Effect": "Allow",
-      "Action": "cloudwatch:GetMetricStatistics",
-      "Resource": "*"
     }
   ]
 }

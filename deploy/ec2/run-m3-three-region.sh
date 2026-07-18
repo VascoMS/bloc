@@ -149,26 +149,6 @@ collect_pairwise_network() {
   done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
 }
 
-collect_cpu_credits() {
-  local inventory="$1" phase="$2" output="$3" times start end host node_id metric value
-  times="$(python3 - <<'PY'
-from datetime import datetime, timedelta, timezone
-end = datetime.now(timezone.utc)
-print((end - timedelta(minutes=15)).isoformat().replace('+00:00', 'Z'))
-print(end.isoformat().replace('+00:00', 'Z'))
-PY
-)"
-  start="$(printf '%s\n' "$times"|sed -n '1p')"; end="$(printf '%s\n' "$times"|sed -n '2p')"
-  printf 'timestamp,phase,instance_id,node_id,region,metric,average\n' >"$output"
-  while IFS= read -r host; do
-    node_id="$(jq -r 'if has("id") then .id else "controller" end' <<<"$host")"
-    for metric in CPUUtilization CPUCreditBalance CPUCreditUsage CPUSurplusCreditBalance CPUSurplusCreditsCharged; do
-      value="$(aws cloudwatch get-metric-statistics --profile "$aws_profile" --region "$(jq -r .region <<<"$host")" --namespace AWS/EC2 --metric-name "$metric" --dimensions "Name=InstanceId,Value=$(jq -r .instance_id <<<"$host")" --start-time "$start" --end-time "$end" --period 60 --statistics Average --query 'Datapoints | sort_by(@,&Timestamp)[-1].Average' --output text)"
-      printf '%s,%s,%s,%s,%s,%s,%s\n' "$end" "$phase" "$(jq -r .instance_id <<<"$host")" "$node_id" "$(jq -r .region <<<"$host")" "$metric" "$value" >>"$output"
-    done
-  done < <(jq -c '[.controller]+.nodes|.[]' "$inventory")
-}
-
 collect_resource_sample() {
   local inventory="$1" phase="$2" batch="$3" output="$4" timestamp node key public inspect stats
   timestamp="$(bloc_utc_iso)"
@@ -423,7 +403,6 @@ run_phase() (
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets-before.json"
   assert_prometheus_targets "$phase_root/prometheus-targets-before.json" "$node_count"
   collect_pairwise_network "$inventory" pre "$phase_root/network-pre.csv"; assert_network_matrix "$phase_root/network-pre.csv" $((node_count * node_count))
-  collect_cpu_credits "$inventory" pre "$phase_root/cpu-credits-pre.csv"
   collect_resource_sample "$inventory" pre-campaign "" "$phase_root/resource-samples.csv"
   next_slot=1; specs=()
   for batch in "${batches[@]}"; do
@@ -438,7 +417,6 @@ run_phase() (
   bloc_python "$repo_root" merge-scenarios --root "$phase_root" "${specs[@]}"
   bloc_python "$repo_root" annotate-placement --phase-root "$phase_root" --inventory "$inventory"
   collect_pairwise_network "$inventory" post "$phase_root/network-post.csv"; assert_network_matrix "$phase_root/network-post.csv" $((node_count * node_count))
-  collect_cpu_credits "$inventory" post "$phase_root/cpu-credits-post.csv"
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets.json"
   assert_prometheus_targets "$phase_root/prometheus-targets.json" "$node_count"
   while IFS= read -r node; do ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$node")" 'docker logs --timestamps ec2-bloc-node-1 2>&1' >"$phase_root/logs/operator-$(jq -r .id <<<"$node").log"; done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
@@ -456,7 +434,7 @@ for node in "${nodes[@]}"; do
 done
 jq -s . "$phases_file" >"$campaign_root/phases.json"
 if [[ "$plan_only" -ne 1 ]]; then
-  for name in run_measurements.csv node_measurements.csv scenario_summary.csv network-pre.csv network-post.csv cpu-credits-pre.csv cpu-credits-post.csv resource-samples.csv; do inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/$name"); done; bloc_python "$repo_root" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
+  for name in run_measurements.csv node_measurements.csv scenario_summary.csv network-pre.csv network-post.csv resource-samples.csv; do inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/$name"); done; bloc_python "$repo_root" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
   inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/scenario_summary.json"); done; bloc_python "$repo_root" merge-json --output "$campaign_root/scenario_summary.json" "${inputs[@]}"
 fi
 write_campaign_manifest "$( [[ "$plan_only" -eq 1 ]] && echo planned || echo complete)" ""

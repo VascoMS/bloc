@@ -425,6 +425,11 @@ creates one VPC in `us-east-1`, `eu-west-1`, and `eu-central-1`, directly peers
 all three VPC pairs, runs the controller in `us-east-1`, and places operators
 by `node_id % 3`:
 
+The deploy identity policy used by this workflow is maintained at
+`deploy/ec2/bloc-three-region-deployer-policy.json`. It includes direct VPC
+peering, detailed-monitoring, regional teardown, and inline ECR-pull policy
+lifecycle permissions for roles named `bloc-ec2-3r-*`.
+
 ```sh
 bash deploy/ec2/run-m3-three-region.sh \
   --admin-cidr "<your-ip>/32" \

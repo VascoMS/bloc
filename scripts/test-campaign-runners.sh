@@ -21,6 +21,9 @@ bash deploy/ec2/run-a1-pilot.sh --admin-cidr 127.0.0.1/32 --validate-only
 bash deploy/ec2/run-m3-same-az.sh --admin-cidr 127.0.0.1/32 --validate-only
 bash deploy/ec2/run-m3-cross-az.sh --admin-cidr 127.0.0.1/32 --validate-only
 bash deploy/ec2/run-m3-three-region.sh --admin-cidr 127.0.0.1/32 --validate-only
+! grep -Eq '\bssh -i\b' deploy/ec2/run-m3-three-region.sh || { echo "three-region runner SSH can consume loop input" >&2; exit 1; }
+grep -Fq 'sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json' deploy/ec2/run-m3-three-region.sh || { echo "three-region runner does not secure the operator secret for the container UID" >&2; exit 1; }
+grep -Fq 'cleanup exit $cleanup_status' deploy/ec2/run-m3-three-region.sh || { echo "three-region runner does not report cleanup status separately" >&2; exit 1; }
 bash deploy/ec2/run-merge-plan-attribution.sh --admin-cidr 127.0.0.1/32 --validate-only
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/bloc runner fixture.XXXXXX")"

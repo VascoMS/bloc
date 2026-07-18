@@ -142,7 +142,7 @@ collect_pairwise_network() {
   while IFS= read -r source; do
     source_key="$(key_for "$source")"
     while IFS= read -r target; do
-      samples="$(ssh -i "$source_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$source")" "for i in 1 2 3 4 5; do curl --max-time 5 -sS -o /dev/null -w '%{http_code},%{time_connect},%{time_total}\\n' http://$(jq -r .private_ip <<<"$target"):8000/healthz || echo '000,0,0'; done")"
+      samples="$(ssh -n -i "$source_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$source")" "for i in 1 2 3 4 5; do curl --max-time 5 -sS -o /dev/null -w '%{http_code},%{time_connect},%{time_total}\\n' http://$(jq -r .private_ip <<<"$target"):8000/healthz || echo '000,0,0'; done")"
       summary="$(awk -F, '{a++; if ($1==200) {s++; c+=$2; t+=$3}} END {if(s) printf "%d,%d,%.3f,%.3f",a,s,1000*c/s,1000*t/s; else printf "%d,0,,",a}' <<<"$samples")"
       printf '%s,%s,%s,%s,%s,%s,%s\n' "$phase" "$(jq -r .id <<<"$source")" "$(jq -r .region <<<"$source")" "$(jq -r .id <<<"$target")" "$(jq -r .region <<<"$target")" "$(jq -r .private_ip <<<"$target")" "$summary" >>"$output"
     done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
@@ -175,8 +175,8 @@ collect_resource_sample() {
   [[ -f "$output" ]] || printf 'timestamp,phase,batch_size,node_id,region,container_status,restart_count,oom_killed,cpu_percent,mem_usage,mem_percent,net_io,block_io,pids\n' >"$output"
   while IFS= read -r node; do
     key="$(key_for "$node")"; public="$(jq -r .public_ip <<<"$node")"
-    inspect="$(ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "docker inspect --format '{{.State.Status}},{{.RestartCount}},{{.State.OOMKilled}}' ec2-bloc-node-1" 2>/dev/null || true)"
-    stats="$(ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "docker stats --no-stream --format '{{.CPUPerc}},{{.MemUsage}},{{.MemPerc}},{{.NetIO}},{{.BlockIO}},{{.PIDs}}' ec2-bloc-node-1" 2>/dev/null || true)"
+    inspect="$(ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "docker inspect --format '{{.State.Status}},{{.RestartCount}},{{.State.OOMKilled}}' ec2-bloc-node-1" 2>/dev/null || true)"
+    stats="$(ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "docker stats --no-stream --format '{{.CPUPerc}},{{.MemUsage}},{{.MemPerc}},{{.NetIO}},{{.BlockIO}},{{.PIDs}}' ec2-bloc-node-1" 2>/dev/null || true)"
     [[ -n "$inspect" ]] || inspect='error,error,error'; [[ -n "$stats" ]] || stats='error,error,error,error,error,error'
     printf '%s,%s,%s,%s,%s,%s,%s\n' "$timestamp" "$phase" "$batch" "$(jq -r .id <<<"$node")" "$(jq -r .region <<<"$node")" "$inspect" "$stats" >>"$output"
   done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
@@ -240,12 +240,12 @@ run_phase() (
   collect_failure_logs() {
     [[ -f "$phase_root/inventory.json" ]] || return 0
     while IFS= read -r node; do
-      ssh -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$node")" 'docker logs --timestamps ec2-bloc-node-1 2>&1; sudo tail -n 200 /var/log/cloud-init-output.log' >"$phase_root/logs/operator-$(jq -r .id <<<"$node")-failure.log" 2>&1 || true
+      ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$node")" 'docker logs --timestamps ec2-bloc-node-1 2>&1; sudo tail -n 200 /var/log/cloud-init-output.log' >"$phase_root/logs/operator-$(jq -r .id <<<"$node")-failure.log" 2>&1 || true
     done < <(jq -c '.nodes[]' "$phase_root/inventory.json")
   }
 
   cleanup_phase() {
-    original_status=$?; status=$original_status; destroy_status=0; verification_errors="$phase_root/cleanup-verification-errors.log"; : >"$verification_errors"; set +e
+    original_status=$?; final_status=$original_status; cleanup_status=0; destroy_status=0; verification_errors="$phase_root/cleanup-verification-errors.log"; : >"$verification_errors"; set +e
     trap - EXIT
     [[ "$phase_ok" -eq 1 ]] || collect_failure_logs
     if [[ -d "$phase_root/generated/secrets.ec2" ]]; then rm -rf "$phase_root/generated/secrets.ec2"; fi
@@ -259,12 +259,12 @@ run_phase() (
         [[ "$destroy_status" -ne 0 ]] || break
         sleep 15
       done
-      [[ "$destroy_status" -eq 0 ]] || status=1
+      if [[ "$destroy_status" -ne 0 ]]; then cleanup_status=1; final_status=1; fi
     fi
     if [[ "$plan_only" -eq 1 ]]; then
       rm -f "$primary_key" "$secondary_key" "$tertiary_key"; rmdir "$key_dir" 2>/dev/null || true
       jq -n '{status:"not-applied",resources:[]}' >"$phase_root/cleanup-verification.json"
-      exit "$status"
+      exit "$final_status"
     fi
     delete_campaign_key() {
       local region="$1" key_name="$2" present="" attempt
@@ -277,14 +277,14 @@ run_phase() (
       present="$(aws ec2 describe-key-pairs --profile "$aws_profile" --region "$region" --filters "Name=key-name,Values=$key_name" --query 'length(KeyPairs)' --output text 2>>"$verification_errors")" || return 1
       [[ "$present" == 0 ]]
     }
-    delete_campaign_key "$primary_region" "$primary_key_name" || status=1
-    delete_campaign_key "$secondary_region" "$secondary_key_name" || status=1
-    delete_campaign_key "$tertiary_region" "$tertiary_key_name" || status=1
+    delete_campaign_key "$primary_region" "$primary_key_name" || { cleanup_status=1; final_status=1; }
+    delete_campaign_key "$secondary_region" "$secondary_key_name" || { cleanup_status=1; final_status=1; }
+    delete_campaign_key "$tertiary_region" "$tertiary_key_name" || { cleanup_status=1; final_status=1; }
     rm -f "$primary_key" "$secondary_key" "$tertiary_key"; rmdir "$key_dir" 2>/dev/null || true
     cleanup_query() {
       local value query_status
       value="$("$@" 2>>"$verification_errors")"; query_status=$?
-      if [[ "$query_status" -ne 0 ]]; then printf 'cleanup query failed (%s): %s\n' "$query_status" "$*" >>"$verification_errors"; status=1; fi
+      if [[ "$query_status" -ne 0 ]]; then printf 'cleanup query failed (%s): %s\n' "$query_status" "$*" >>"$verification_errors"; fi
       printf '%s' "$value"
     }
     exact_iam_name() {
@@ -326,20 +326,20 @@ run_phase() (
       --arg iam_role "$(exact_iam_name role "$phase_id-ec2-ecr-readonly")" \
       --arg instance_profile "$(exact_iam_name instance-profile "$phase_id-ec2-ecr-readonly")" \
       '{regions:{primary:{instances:$primary_instances,volumes:$primary_volumes,vpcs:$primary_vpcs,peering_connections:$primary_peerings,key_pairs:$primary_keys},secondary:{instances:$secondary_instances,volumes:$secondary_volumes,vpcs:$secondary_vpcs,peering_connections:$secondary_peerings,key_pairs:$secondary_keys},tertiary:{instances:$tertiary_instances,volumes:$tertiary_volumes,vpcs:$tertiary_vpcs,peering_connections:$tertiary_peerings,key_pairs:$tertiary_keys}},ecr_repository:$ecr_repository,iam_role:$iam_role,instance_profile:$instance_profile}' >"$phase_root/cleanup-verification.json"
-    if ! jq -e '[..|strings|select(length>0 and .!="None")]|length==0' "$phase_root/cleanup-verification.json" >/dev/null; then status=1; fi
-    [[ ! -s "$verification_errors" ]] || status=1
-    if [[ "$status" -ne 0 ]]; then
+    if ! jq -e '[..|strings|select(length>0 and .!="None")]|length==0' "$phase_root/cleanup-verification.json" >/dev/null; then cleanup_status=1; final_status=1; fi
+    if [[ -s "$verification_errors" ]]; then cleanup_status=1; final_status=1; fi
+    if [[ "$final_status" -ne 0 ]]; then
       if [[ -f "$phase_root/manifest.json" ]]; then
-        jq --arg reason "phase exit $original_status; cleanup exit $status" '.status="invalid" | .invalid_reason=$reason' "$phase_root/manifest.json" >"$phase_root/manifest.json.tmp" && mv "$phase_root/manifest.json.tmp" "$phase_root/manifest.json"
+        jq --arg reason "phase exit $original_status; cleanup exit $cleanup_status" '.status="invalid" | .invalid_reason=$reason' "$phase_root/manifest.json" >"$phase_root/manifest.json.tmp" && mv "$phase_root/manifest.json.tmp" "$phase_root/manifest.json"
       else
         placement='[]'; [[ ! -f "$phase_root/inventory.json" ]] || placement="$(jq '.nodes|sort_by(.id)|map({id,region,zone,instance_type})' "$phase_root/inventory.json")"
-        jq -n --arg schema_version bloc-ec2-three-region-phase/v1 --arg experiment_id "$phase_id" --arg status invalid --arg invalid_reason "phase exit $original_status; cleanup exit $status" --arg source_sha "$source_sha" --arg topology T2-three-region --argjson node_count "$node_count" --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" --arg cpu_credits "$cpu_credits" --arg docker_image_digest "${phase_digest:-}" --argjson placement "$placement" '{schema_version:$schema_version,experiment_id:$experiment_id,status:$status,invalid_reason:$invalid_reason,source_sha:$source_sha,topology:$topology,node_count:$node_count,placement:$placement,primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image_digest:$docker_image_digest}' >"$phase_root/manifest.json"
+        jq -n --arg schema_version bloc-ec2-three-region-phase/v1 --arg experiment_id "$phase_id" --arg status invalid --arg invalid_reason "phase exit $original_status; cleanup exit $cleanup_status" --arg source_sha "$source_sha" --arg topology T2-three-region --argjson node_count "$node_count" --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" --arg cpu_credits "$cpu_credits" --arg docker_image_digest "${phase_digest:-}" --argjson placement "$placement" '{schema_version:$schema_version,experiment_id:$experiment_id,status:$status,invalid_reason:$invalid_reason,source_sha:$source_sha,topology:$topology,node_count:$node_count,placement:$placement,primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image_digest:$docker_image_digest}' >"$phase_root/manifest.json"
       fi
       jq -n --argjson node_count "$node_count" --arg status invalid --arg artifact_root "$phase_root" '{node_count:$node_count,status:$status,artifact_root:$artifact_root}' >>"$phases_file"
     elif [[ "$phase_record_ready" -eq 1 ]]; then
       jq -n --argjson node_count "$node_count" --arg status complete --arg artifact_root "$phase_root" --arg image_digest "$phase_digest" '{node_count:$node_count,status:$status,artifact_root:$artifact_root,image_digest:$image_digest}' >>"$phases_file"
     fi
-    exit "$status"
+    exit "$final_status"
   }
   trap cleanup_phase EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
@@ -400,26 +400,27 @@ run_phase() (
   write_prometheus_config "$inventory" "$prometheus"
   while IFS= read -r host; do
     public="$(jq -r .public_ip <<<"$host")"; key="$(key_for "$host")"; ready=0
-    for attempt in $(seq 1 60); do if ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "ubuntu@$public" 'cloud-init status --wait >/dev/null && docker version >/dev/null && docker compose version >/dev/null'; then ready=1; break; fi; sleep 10; done
+    for attempt in $(seq 1 60); do if ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "ubuntu@$public" 'cloud-init status --wait >/dev/null && docker version >/dev/null && docker compose version >/dev/null'; then ready=1; break; fi; sleep 10; done
     [[ "$ready" -eq 1 ]] || bloc_die "host $public did not become ready"
   done < <(jq -c '[.controller]+.nodes|.[]' "$inventory")
   while IFS= read -r node; do
     id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; key="$(key_for "$node")"
-    ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" 'sudo mkdir -p /etc/bloc /opt/bloc/ec2 && sudo chown -R ubuntu:ubuntu /opt/bloc /etc/bloc'
+    ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" 'sudo mkdir -p /etc/bloc /opt/bloc/ec2 && sudo chown -R ubuntu:ubuntu /opt/bloc /etc/bloc'
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$cluster" "ubuntu@$public:/etc/bloc/cluster.json"
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$phase_root/generated/cluster.ec2.crs" "ubuntu@$public:/etc/bloc/cluster.crs"
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$phase_root/generated/secrets.ec2/operator-$id.json" "ubuntu@$public:/etc/bloc/operator.json"
+    ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" 'sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json'
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$script_dir/operator-compose.yaml" "ubuntu@$public:/opt/bloc/ec2/operator-compose.yaml"
-    ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "aws ecr get-login-password --region '$primary_region'|docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$id' BLOC_IMAGE='$runtime_image' docker compose -f operator-compose.yaml up -d"
+    ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "aws ecr get-login-password --region '$primary_region'|docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$id' BLOC_IMAGE='$runtime_image' docker compose -f operator-compose.yaml up -d"
   done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
   rm -rf "$phase_root/generated/secrets.ec2"
   controller="$(jq -c .controller "$inventory")"; controller_public="$(jq -r .public_ip <<<"$controller")"; controller_key="$(key_for "$controller")"
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'sudo mkdir -p /opt/bloc/ec2 /opt/bloc/docker-compose/grafana && sudo chown -R ubuntu:ubuntu /opt/bloc'
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'sudo mkdir -p /opt/bloc/ec2 /opt/bloc/docker-compose/grafana && sudo chown -R ubuntu:ubuntu /opt/bloc'
   scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$remote" "$prometheus" "$script_dir/controller-compose.yaml" "ubuntu@$controller_public:/opt/bloc/ec2/"
   scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "$repo_root/deploy/docker-compose/grafana/." "ubuntu@$controller_public:/opt/bloc/docker-compose/grafana/"
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "aws ecr get-login-password --region '$primary_region'|docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; docker compose -f controller-compose.yaml up -d"
-  while IFS= read -r private; do ready=0; for attempt in $(seq 1 30); do if ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "curl --max-time 5 -fsS http://$private:8000/healthz"; then ready=1; break; fi; sleep 5; done; [[ "$ready" -eq 1 ]] || bloc_die "operator $private did not become healthy"; done < <(jq -r '.nodes|sort_by(.id)[]|.private_ip' "$inventory")
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets-before.json"
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "aws ecr get-login-password --region '$primary_region'|docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; docker compose -f controller-compose.yaml up -d"
+  while IFS= read -r private; do ready=0; for attempt in $(seq 1 30); do if ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "curl --max-time 5 -fsS http://$private:8000/healthz"; then ready=1; break; fi; sleep 5; done; [[ "$ready" -eq 1 ]] || bloc_die "operator $private did not become healthy"; done < <(jq -r '.nodes|sort_by(.id)[]|.private_ip' "$inventory")
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets-before.json"
   assert_prometheus_targets "$phase_root/prometheus-targets-before.json" "$node_count"
   collect_pairwise_network "$inventory" pre "$phase_root/network-pre.csv"; assert_network_matrix "$phase_root/network-pre.csv" $((node_count * node_count))
   collect_cpu_credits "$inventory" pre "$phase_root/cpu-credits-pre.csv"
@@ -428,7 +429,7 @@ run_phase() (
   for batch in "${batches[@]}"; do
     collect_resource_sample "$inventory" before-batch "$batch" "$phase_root/resource-samples.csv"
     remote_dir="/opt/bloc/ec2/results/$phase_id/batch-$batch"
-    ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions' --out-dir 'results/$phase_id/batch-$batch' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
+    ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions' --out-dir 'results/$phase_id/batch-$batch' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
     mkdir -p "$phase_root/scenarios/batch-$batch"; scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "ubuntu@$controller_public:$remote_dir" "$phase_root/scenarios/batch-$batch/results"
     bloc_python "$repo_root" assert-evaluator --csv "$phase_root/scenarios/batch-$batch/results/run_measurements.csv" --expected "$node_count/$batch=$repetitions"
     specs+=("1:$phase_root/scenarios/batch-$batch/results"); collect_resource_sample "$inventory" during-batch "$batch" "$phase_root/resource-samples.csv"; collect_resource_sample "$inventory" after-batch "$batch" "$phase_root/resource-samples.csv"
@@ -438,11 +439,11 @@ run_phase() (
   bloc_python "$repo_root" annotate-placement --phase-root "$phase_root" --inventory "$inventory"
   collect_pairwise_network "$inventory" post "$phase_root/network-post.csv"; assert_network_matrix "$phase_root/network-post.csv" $((node_count * node_count))
   collect_cpu_credits "$inventory" post "$phase_root/cpu-credits-post.csv"
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets.json"
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets.json"
   assert_prometheus_targets "$phase_root/prometheus-targets.json" "$node_count"
-  while IFS= read -r node; do ssh -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$node")" 'docker logs --timestamps ec2-bloc-node-1 2>&1' >"$phase_root/logs/operator-$(jq -r .id <<<"$node").log"; done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-prometheus-1 2>&1' >"$phase_root/logs/prometheus.log" || true
-  ssh -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-grafana-1 2>&1' >"$phase_root/logs/grafana.log" || true
+  while IFS= read -r node; do ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$(jq -r .public_ip <<<"$node")" 'docker logs --timestamps ec2-bloc-node-1 2>&1' >"$phase_root/logs/operator-$(jq -r .id <<<"$node").log"; done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-prometheus-1 2>&1' >"$phase_root/logs/prometheus.log" || true
+  ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-grafana-1 2>&1' >"$phase_root/logs/grafana.log" || true
   peerings="$(cd "$work" && terraform output -json peering_connection_ids)"
   jq -n --arg schema_version bloc-ec2-three-region-phase/v1 --arg experiment_id "$phase_id" --arg status complete --arg source_sha "$source_sha" --arg topology T2-three-region --argjson node_count "$node_count" --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" --arg cpu_credits "$cpu_credits" --arg docker_image "$runtime_image" --arg docker_image_digest "$phase_digest" --arg git_commit "$git_commit" --arg batch_sizes "$batch_sizes_csv" --argjson warmups "$warmups" --argjson repetitions "$repetitions" --arg eval_timeout "$eval_timeout" --argjson placement "$(jq '.nodes|sort_by(.id)|map({id,region,zone,instance_type})' "$inventory")" --argjson peering_connection_ids "$peerings" '{schema_version:$schema_version,experiment_id:$experiment_id,status:$status,source_sha:$source_sha,topology:$topology,node_count:$node_count,placement:$placement,primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,peering_connection_ids:$peering_connection_ids,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image:$docker_image,docker_image_digest:$docker_image_digest,git_commit:$git_commit,batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,eval_timeout:$eval_timeout}' >"$phase_root/manifest.json"
   bloc_python "$repo_root" assert-three-region-phase --phase-root "$phase_root"

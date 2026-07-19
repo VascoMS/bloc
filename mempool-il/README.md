@@ -2,11 +2,11 @@
 
 Standalone Go service that ingests pending Ethereum transactions, builds a deterministic mempool snapshot, and produces a deterministic bounded inclusion list.
 
-For the cross-module architecture, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+For the cross-module architecture, read [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 For source normalization, replay-placeholder construction, list identity, and
 HTTP-boundary details, read
-[docs/modules/mempool-il.md](/bloc/docs/modules/mempool-il.md). For validation
-expectations, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+[docs/modules/mempool-il.md](../docs/modules/mempool-il.md). For validation
+expectations, read [docs/VALIDATION.md](../docs/VALIDATION.md).
 
 ## What It Does
 

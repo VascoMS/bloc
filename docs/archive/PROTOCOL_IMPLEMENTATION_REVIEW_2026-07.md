@@ -4,8 +4,8 @@
 
 This historical record captures the source-led review used to rewrite the BLOC
 architecture documentation. Canonical current behavior belongs in
-[ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md) and
-[`docs/modules/`](/bloc/docs/modules/); this file retains review coverage,
+[ARCHITECTURE.md](../../docs/ARCHITECTURE.md) and
+[`docs/modules/`](../../docs/modules/); this file retains review coverage,
 confirmed findings, paper deviations, and follow-up questions.
 
 - Review date: 2026-07-15
@@ -39,10 +39,10 @@ network handoff, and validating tests. Existing documentation and the following
 papers were treated as claims to compare with code rather than implementation
 truth:
 
-- [BLOC Final](/bloc/papers/BLOC_Final.pdf)
-- [BEAT-MEV](/bloc/papers/BEAT-MEV.pdf)
-- [The Honey Badger of BFT Protocols](/bloc/papers/honeybadger.pdf)
-- [ACS Improvement](/bloc/papers/ACS_Improvement.pdf)
+- [BLOC Final](../../papers/BLOC_Final.pdf)
+- [BEAT-MEV](../../papers/BEAT-MEV.pdf)
+- [The Honey Badger of BFT Protocols](../../papers/honeybadger.pdf)
+- [ACS Improvement](../../papers/ACS_Improvement.pdf)
 
 The terms `implemented`, `adapted`, `deferred`, and `contradicted` below mean:
 

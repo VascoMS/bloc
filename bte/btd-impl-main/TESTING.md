@@ -1,9 +1,9 @@
 # Testing Coverage
 
 Supplemental module note. The cross-repo validation matrix now lives in
-[docs/VALIDATION.md](/bloc/docs/VALIDATION.md), and the canonical construction,
+[docs/VALIDATION.md](../../docs/VALIDATION.md), and the canonical construction,
 wire-format, planning, and security discussion lives in
-[docs/modules/bte.md](/bloc/docs/modules/bte.md).
+[docs/modules/bte.md](../../docs/modules/bte.md).
 
 This document explains what the current test and benchmark suite checks after the cluster-facing BTE integration.
 

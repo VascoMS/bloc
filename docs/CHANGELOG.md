@@ -1,5 +1,20 @@
 # Changelog
 
+Use this file for implementation-level changes that do not need a full decision
+record. Entries are historical records: their follow-up field describes the next
+action at the time of the entry and is not a source of current project state.
+Use [STATUS.md](STATUS.md) for current blockers, evidence, and next actions.
+
+## Entry Format
+
+```md
+- YYYY-MM-DD | milestone | area/module | change made | reason | files touched | validation performed | follow-up work at the time
+```
+
+## Entries
+
+- 2026-07-19 | `not selected` | documentation and agent workflow | made `AGENTS.md` the sole mandatory agent entry point, rebuilt `STATUS.md` as concise live state, moved environment-specific commands into deployment runbooks, consolidated evaluation/demo/archive material into canonical owners, normalized repository-relative links, and removed superseded standalone documents | keep milestone, blocker, evidence, baseline, and next-action state coherent while reducing duplicated and stale agent context without adding documentation-checking code | `AGENTS.md`, root/module READMEs, `docs/`, `deploy/*/README.md`, removed `bloc-node` supplements and `depr/` archive | 162 local Markdown links resolved; stale-reference scans passed; all eight campaign/deployment entry points returned `--help` consistent with active examples; `git diff --check` passed; only documentation and the obsolete archive placeholder changed | keep `STATUS.md` current in every task covered by its maintenance contract; select the next active milestone only in a separately authorized planning task |
+
 - 2026-07-19 | `M0` | repository Git ownership | made branch/status/divergence checks, focused commits, validation-before-integration, fast-forward preference, and safe pruning of fully merged task branches part of the agent operating contract; prohibited force-pushing and deletion of unmerged work | prevent long-lived task branches from accumulating unrelated milestones and make repository maintenance part of completing each task | `AGENTS.md`, `docs/DEVELOPMENT.md` | audited all local/remote refs and worktrees after a pruned fetch; proved the active 22-commit history directly descends from `main`, two task refs are already ancestors, and the remaining BTE attribution ref has five unique PowerShell-era commits that must be preserved for an explicit Bash port/review | validate the consolidated candidate, fast-forward and publish `main`, then prune only the fully merged task refs |
 
 - 2026-07-19 | `M3` | accepted three-region latency evidence | recorded the completed `n=4/n=7`, batch `8/32/128` three-region campaign as the final M3 honest-path experimental baseline | replace the pre-deployment status with the evidence actually collected before moving to later thesis work | `docs/STATUS.md`, `docs/WORKFLOWS.md`, ignored accepted campaign artifacts | 180/180 measured slots and 990/990 finalized node rows passed; one image digest, placement, stage additivity, Prometheus, pairwise health, resource stability, and authenticated teardown gates passed; Terraform destroyed 40 then 43 resources | archive the evidence with checksums and decide whether to add a confirmation run or matched same-region control |
@@ -37,16 +52,6 @@
 - 2026-07-14 | `M3` | exact-image campaign resume | allow the Merge/Plan campaign to reuse a prebuilt local image and require its local image ID to match the resumed phase digest before allocating the next phase | preserve one-image attribution after runner-only commits and avoid spending Free-plan credits on an invalid comparison | `deploy/ec2/run-merge-plan-attribution.ps1` | PowerShell parser check and local Docker image inspection | resume n7 phases from the accepted `sha256:118f...` image |
 
 - 2026-07-14 | `M3` | blocked measurement identity and campaign resume | namespace merged evaluator run IDs by measurement block, exclude warmups from EC2 acceptance and analysis, and allow already-completed/cleaned phases to be validated and resumed without provisioning them again | preserve all 30 measurements per batch while avoiding repeated AWS allocation after an artifact-only validation failure | `deploy/ec2/run-a1-pilot.ps1`, `deploy/ec2/run-merge-plan-attribution.ps1`, `latency-charts/*` | PowerShell parser checks and latency-chart tests | resume the completed Compute Flex n=4 evidence, then run Compute Flex n=7 and T3 n=7 |
-
-Use this file for implementation-level changes that do not need a full decision record.
-
-## Entry Format
-
-```md
-- YYYY-MM-DD | milestone | area/module | change made | reason | files touched | validation performed | follow-up work
-```
-
-## Entries
 
 - 2026-07-14 | `M3` | EC2 campaign automation, evaluator CSV, latency analysis | added a same-AZ Merge + Plan attribution campaign over Free-plan-eligible Compute Flex n=4/n=7 and T3 burstable n=7 operators, balanced three-block measurement ordering and drift summaries, one-image digest enforcement, EC2 host metadata, selected-ciphertext CSV evidence, strict campaign validation, comparison tables, Markdown reporting, and PNG/SVG charts | determine how much EC2 Merge + Plan latency is ciphertext decoding and separate node-count effects from instance-class and local-host effects without claiming fixed CPU performance or p99 | `deploy/ec2/*`, `bloc-node/internal/app/eval_suite.go`, `latency-charts/*`, canonical docs | PowerShell parser checks passed; source guard blocked relevant uncommitted work before AWS access; bloc-node and BTE Go suites passed; 13 latency-chart tests passed including synthetic three-phase analysis; Terraform initialized and validated | run the three EC2 phases sequentially and present the generated report |
 

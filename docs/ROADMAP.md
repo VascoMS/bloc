@@ -2,6 +2,9 @@
 
 This roadmap is now ordered around the thesis path from local protocol baseline evidence to VM/EC2-per-sidecar distributed evidence, then to later Builder API and DVT integration work.
 
+Milestone state is maintained in [`STATUS.md`](STATUS.md). M3 is the latest
+completed milestone, and no next active milestone has been selected.
+
 Builder API compatibility, production mev-boost behavior, real proposer signing, and PBS prefix enforcement are explicitly deferred until the sidecar can first be deployed, observed, and evaluated across independently hosted operator machines.
 
 ## M0. Current Prototype Baseline
@@ -46,6 +49,7 @@ Builder API compatibility, production mev-boost behavior, real proposer signing,
 
 ## M3. Distributed Sidecar Metrics Collection
 
+- Status: complete for the accepted honest-path three-region latency campaign.
 - RQs advanced: `RQ1`, `RQ2`, `RQ4`
 - Objective: collect repeated distributed latency/performance evidence from the deployment-ready sidecar using one VM/EC2 instance per operator, with both synthetic transaction submissions and mock-placeholder mempool inputs where useful.
 - Deliverables:

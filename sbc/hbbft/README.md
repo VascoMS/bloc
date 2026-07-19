@@ -4,10 +4,10 @@ Practical implementation of the Honey Badger Byzantine Fault Tolerance consensus
 
 In this repository, the ACS core is also used by the BLOC prototype through a
 separate slot-scoped adapter. For the cross-module BLOC boundary, read
-[docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md). For the RBC/BBA/ACS state
+[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For the RBC/BBA/ACS state
 machines, slot adapter, paper deviations, and known limitations, read
-[docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md). For validation
-expectations, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+[docs/modules/hbbft.md](../../docs/modules/hbbft.md). For validation
+expectations, read [docs/VALIDATION.md](../../docs/VALIDATION.md).
 
 ## Summary
 
@@ -43,5 +43,5 @@ go run bench/main.go
 
 ## References
 
-- [simulation/README.md](/bloc/sbc/hbbft/simulation/README.md)
-- [bench/README.md](/bloc/sbc/hbbft/bench/README.md)
+- [simulation/README.md](../../sbc/hbbft/simulation/README.md)
+- [bench/README.md](../../sbc/hbbft/bench/README.md)

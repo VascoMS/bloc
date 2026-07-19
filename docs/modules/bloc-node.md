@@ -17,17 +17,17 @@ prototype control and evidence surface.
 
 | Area | Principal source and symbols |
 | --- | --- |
-| CLI and trusted setup | [`internal/app/app.go`](/bloc/bloc-node/internal/app/app.go), [`commands.go`](/bloc/bloc-node/internal/app/commands.go): `genConfig`, `runNode` |
-| Configuration | [`internal/app/config.go`](/bloc/bloc-node/internal/app/config.go), [`types.go`](/bloc/bloc-node/internal/app/types.go): `ConfigFile`, `Node`, `slotState` |
-| Node state machine | [`internal/app/node.go`](/bloc/bloc-node/internal/app/node.go): slot lifecycle, ACS, share, combine, result paths |
-| Proposal providers | [`internal/app/provider.go`](/bloc/bloc-node/internal/app/provider.go): direct and `mempool-http` proposals |
-| Inclusion-list schema | [`internal/app/inclusion/types.go`](/bloc/bloc-node/internal/app/inclusion/types.go), [`proto.go`](/bloc/bloc-node/internal/app/inclusion/proto.go) |
-| Canonical merge | [`internal/app/inclusion/merge.go`](/bloc/bloc-node/internal/app/inclusion/merge.go): list/agreed/merged hashes and bounds |
-| Network schema | [`proto/bloc/v1/messages.proto`](/bloc/bloc-node/proto/bloc/v1/messages.proto), [`internal/app/codec.go`](/bloc/bloc-node/internal/app/codec.go) |
-| Operator transport | [`internal/app/transport.go`](/bloc/bloc-node/internal/app/transport.go), [`transport_libp2p.go`](/bloc/bloc-node/internal/app/transport_libp2p.go) |
-| BTE encoding helpers | [`internal/app/crypto.go`](/bloc/bloc-node/internal/app/crypto.go) |
-| Ethereum parsing | [`internal/app/ethdemo/tx.go`](/bloc/bloc-node/internal/app/ethdemo/tx.go): deterministic test generation and signed-byte parsing |
-| HTTP/metrics | [`internal/app/node.go`](/bloc/bloc-node/internal/app/node.go), [`metrics.go`](/bloc/bloc-node/internal/app/metrics.go) |
+| CLI and trusted setup | [`internal/app/app.go`](../../bloc-node/internal/app/app.go), [`commands.go`](../../bloc-node/internal/app/commands.go): `genConfig`, `runNode` |
+| Configuration | [`internal/app/config.go`](../../bloc-node/internal/app/config.go), [`types.go`](../../bloc-node/internal/app/types.go): `ConfigFile`, `Node`, `slotState` |
+| Node state machine | [`internal/app/node.go`](../../bloc-node/internal/app/node.go): slot lifecycle, ACS, share, combine, result paths |
+| Proposal providers | [`internal/app/provider.go`](../../bloc-node/internal/app/provider.go): direct and `mempool-http` proposals |
+| Inclusion-list schema | [`internal/app/inclusion/types.go`](../../bloc-node/internal/app/inclusion/types.go), [`proto.go`](../../bloc-node/internal/app/inclusion/proto.go) |
+| Canonical merge | [`internal/app/inclusion/merge.go`](../../bloc-node/internal/app/inclusion/merge.go): list/agreed/merged hashes and bounds |
+| Network schema | [`proto/bloc/v1/messages.proto`](../../bloc-node/proto/bloc/v1/messages.proto), [`internal/app/codec.go`](../../bloc-node/internal/app/codec.go) |
+| Operator transport | [`internal/app/transport.go`](../../bloc-node/internal/app/transport.go), [`transport_libp2p.go`](../../bloc-node/internal/app/transport_libp2p.go) |
+| BTE encoding helpers | [`internal/app/crypto.go`](../../bloc-node/internal/app/crypto.go) |
+| Ethereum parsing | [`internal/app/ethdemo/tx.go`](../../bloc-node/internal/app/ethdemo/tx.go): deterministic test generation and signed-byte parsing |
+| HTTP/metrics | [`internal/app/node.go`](../../bloc-node/internal/app/node.go), [`metrics.go`](../../bloc-node/internal/app/metrics.go) |
 | Evaluation support | `eval*.go`, `report.go`, and `tx_source.go`; operational rather than protocol-defining |
 
 ## Configuration, State, And Trust Material
@@ -403,19 +403,20 @@ commit-to-plaintext, and total slot.
 Share generation and threshold wait can overlap, so all stage values are event
 intervals rather than a universally additive decomposition. Exact measurement
 and experiment acceptance semantics are in
-[VALIDATION.md](/bloc/docs/VALIDATION.md). Evaluator/deployment procedures are
-in [WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
+[VALIDATION.md](../../docs/VALIDATION.md). Generic evaluator workflow is in
+[WORKFLOWS.md](../../docs/WORKFLOWS.md); environment-specific deployment is in
+the matching `deploy/*/README.md`.
 
 ## Paper Correspondence And Deviations
 
-The repository's [BLOC paper](/bloc/papers/BLOC_Final.pdf) supplies the
+The repository's [BLOC paper](../../papers/BLOC_Final.pdf) supplies the
 top-level encrypted-proposal/agreement/decryption concept. The node implements
 that concept as an external sidecar and local materialization surface rather
 than integrating with a beacon/execution client or DVT signing protocol.
 
 Consensus details and deviations from HoneyBadger are in
-[hbbft.md](/bloc/docs/modules/hbbft.md). BEAT-MEV mapping, setup shortcuts, and
-cryptographic limitations are in [bte.md](/bloc/docs/modules/bte.md). The
+[hbbft.md](../../docs/modules/hbbft.md). BEAT-MEV mapping, setup shortcuts, and
+cryptographic limitations are in [bte.md](../../docs/modules/bte.md). The
 sidecar-specific additions are the slot lifecycle, application wire envelopes,
 canonical merge identities, scoped BTE boundary, share gossip, and evaluator
 metrics.
@@ -466,4 +467,4 @@ Run `go test ./...` from `bloc-node`.
 - The `omit-proposal` fault proposes a valid empty list; it does not simulate a
   network-silent proposer.
 - Confirmed review findings and priorities are in
-  [PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+  [PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md](../../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).

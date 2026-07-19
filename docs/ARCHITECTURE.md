@@ -12,14 +12,15 @@ This document owns the system-level view: module boundaries, end-to-end
 handoffs, trust assumptions, protocol identities, and cross-module invariants.
 Implementation details live in the module deep dives:
 
-- [`mempool-il`](/bloc/docs/modules/mempool-il.md)
-- [`hbbft` and the BLOC slot adapter](/bloc/docs/modules/hbbft.md)
-- [Batched threshold encryption](/bloc/docs/modules/bte.md)
-- [`bloc-node` integration](/bloc/docs/modules/bloc-node.md)
+- [`mempool-il`](../docs/modules/mempool-il.md)
+- [`hbbft` and the BLOC slot adapter](../docs/modules/hbbft.md)
+- [Batched threshold encryption](../docs/modules/bte.md)
+- [`bloc-node` integration](../docs/modules/bloc-node.md)
 
-Operational commands, evaluator behavior, deployment, and measurement
-definitions remain in [WORKFLOWS.md](/bloc/docs/WORKFLOWS.md) and
-[VALIDATION.md](/bloc/docs/VALIDATION.md).
+Generic process and experiment naming live in
+[WORKFLOWS.md](../docs/WORKFLOWS.md), evidence definitions remain in
+[VALIDATION.md](../docs/VALIDATION.md), and environment-specific commands live
+in the matching `deploy/*/README.md`.
 
 ## Implemented Boundary
 
@@ -37,7 +38,7 @@ does not implement DKG, isolated production key custody, a cryptographic common
 coin, public decryption-share verification, execution-client validation,
 Builder API compatibility, proposer signing, slashing, or PBS enforcement.
 The current security and protocol-completeness gaps are recorded in the
-[implementation review](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+[implementation review](../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
 ## Trust And Fault Model
 
@@ -209,13 +210,13 @@ The HTTP control API, persistent evaluator, remote evaluator, Prometheus
 collectors, Docker/VM deployment files, and latency charts measure or operate
 the protocol but do not define its identities or decisions. Metric intervals
 and experiment acceptance rules are specified in
-[VALIDATION.md](/bloc/docs/VALIDATION.md). Local, container, and VM execution
-procedures are specified in [WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
+[VALIDATION.md](../docs/VALIDATION.md). Local module commands remain in module
+READMEs; container and VM procedures live under `deploy/*/README.md`.
 
 ## Canonical References
 
-- Module implementation details: [`docs/modules/`](/bloc/docs/modules/)
-- Current milestone and evidence posture: [STATUS.md](/bloc/docs/STATUS.md)
-- Major design rationale: [DECISIONS.md](/bloc/docs/DECISIONS.md)
-- Shared terminology: [GLOSSARY.md](/bloc/docs/GLOSSARY.md)
-- Source research: [`papers/`](/bloc/papers/)
+- Module implementation details: [`docs/modules/`](../docs/modules/)
+- Current milestone and evidence posture: [STATUS.md](../docs/STATUS.md)
+- Major design rationale: [DECISIONS.md](../docs/DECISIONS.md)
+- Shared terminology: [GLOSSARY.md](../docs/GLOSSARY.md)
+- Source research: [`papers/`](../papers/)

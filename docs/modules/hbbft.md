@@ -16,14 +16,14 @@ or materialize a block. Those operations belong to `bloc-node` after ACS.
 
 | Layer | Principal source and symbols |
 | --- | --- |
-| Reliable broadcast | [`rbc.go`](/bloc/sbc/hbbft/rbc.go): `RBC`, `ProofRequest`, `EchoRequest`, `ReadyRequest`, `tryDecodeValue` |
-| Binary agreement | [`bba.go`](/bloc/sbc/hbbft/bba.go): `BBA`, `BvalRequest`, `AuxRequest`, `tryOutputAgreement` |
-| Common subset | [`acs.go`](/bloc/sbc/hbbft/acs.go): `ACS`, `processBroadcast`, `processAgreement`, `tryCompleteAgreement` |
-| BLOC slot adapter | [`bloc_slot.go`](/bloc/sbc/hbbft/bloc_slot.go): `SlotACS`, `SlotMessage`, `SlotOutput`, `AcceptedBatch` |
-| Outbound queue | [`message_que.go`](/bloc/sbc/hbbft/message_que.go): atomic queue drain used by ACS |
-| Generic transport types | [`transport.go`](/bloc/sbc/hbbft/transport.go): `Transport`, `RPC`, `MessageTuple` |
-| Inherited top-level driver | [`honey_badger.go`](/bloc/sbc/hbbft/honey_badger.go): inactive BLOC path |
-| Local harness transport | [`local_transport.go`](/bloc/sbc/hbbft/local_transport.go): tests, simulation, and benchmark only |
+| Reliable broadcast | [`rbc.go`](../../sbc/hbbft/rbc.go): `RBC`, `ProofRequest`, `EchoRequest`, `ReadyRequest`, `tryDecodeValue` |
+| Binary agreement | [`bba.go`](../../sbc/hbbft/bba.go): `BBA`, `BvalRequest`, `AuxRequest`, `tryOutputAgreement` |
+| Common subset | [`acs.go`](../../sbc/hbbft/acs.go): `ACS`, `processBroadcast`, `processAgreement`, `tryCompleteAgreement` |
+| BLOC slot adapter | [`bloc_slot.go`](../../sbc/hbbft/bloc_slot.go): `SlotACS`, `SlotMessage`, `SlotOutput`, `AcceptedBatch` |
+| Outbound queue | [`message_que.go`](../../sbc/hbbft/message_que.go): atomic queue drain used by ACS |
+| Generic transport types | [`transport.go`](../../sbc/hbbft/transport.go): `Transport`, `RPC`, `MessageTuple` |
+| Inherited top-level driver | [`honey_badger.go`](../../sbc/hbbft/honey_badger.go): inactive BLOC path |
+| Local harness transport | [`local_transport.go`](../../sbc/hbbft/local_transport.go): tests, simulation, and benchmark only |
 
 ## Inputs, Outputs, State, And Message Identities
 
@@ -243,13 +243,13 @@ not part of this active path.
 ## Paper Correspondence And Deviations
 
 The design follows the high-level construction in
-[The Honey Badger of BFT Protocols](/bloc/papers/honeybadger.pdf): `N` parallel
+[The Honey Badger of BFT Protocols](../../papers/honeybadger.pdf): `N` parallel
 RBC instances disseminate proposals, `N` binary agreements decide inclusion,
 and ACS outputs at least `N-F` proposals under the stated assumptions. The RBC
 uses Reed-Solomon shards and Merkle proofs with the paper's ECHO/READY threshold
 shape.
 
-The repository's [ACS improvement reference](/bloc/papers/ACS_Improvement.pdf)
+The repository's [ACS improvement reference](../../papers/ACS_Improvement.pdf)
 and BLOC work motivate the slot-specific integration and diagnostics. The
 project adaptation is the `SlotACS` boundary, not a new ACS selection rule.
 
@@ -280,7 +280,7 @@ Existing tests cover:
 The current tests do not cover mixed-root RBC reconstruction, authenticated
 peer-to-sender binding, conflicting AUX messages from one Byzantine sender, or
 future messages more than one epoch ahead. These gaps are recorded in the
-[implementation review](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+[implementation review](../../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
 Run `go test ./...` from `sbc/hbbft`.
 

@@ -2,158 +2,126 @@
 
 ## Purpose
 
-This is the primary entry point for Codex and other LLM agents working in the BLOC thesis prototype. Start here, then read only the smallest set of canonical docs needed for the task.
+This is the sole mandatory entry point for Codex and other coding agents working
+in the BLOC thesis prototype. Read this file first, then load only the smallest
+task-specific context needed to act safely.
 
-## Read Order
+## Required Read Order
 
-1. This file
-2. [docs/STATUS.md](/bloc/docs/STATUS.md)
-3. [docs/CODEX_GUIDE.md](/bloc/docs/CODEX_GUIDE.md)
-4. The task-specific canonical docs listed below
+1. This file.
+2. [docs/STATUS.md](docs/STATUS.md) for current state, blockers, evidence, and
+   immediate actions.
+3. The README for the affected module.
+4. Only the canonical document and source files required by the task.
+
+Do not load every canonical document for a narrow change. Source code and tests
+are authoritative for implemented behavior; when they conflict with canonical
+documentation, correct the documentation in the same task.
 
 ## Repository Map
 
-- `bloc-node/`: integrated prototype node, local evaluator, transport layers, and reports
+- `bloc-node/`: integrated node, evaluators, transport, metrics, and reports
 - `mempool-il/`: deterministic mempool inclusion-list service
-- `bte/btd-impl-main/`: BEAT-MEV batched threshold encryption library and benchmarks
-- `sbc/hbbft/`: HoneyBadger ACS implementation plus the BLOC slot adapter
-- `latency-charts/`: Python chart generation for `eval-suite` latency outputs
+- `bte/btd-impl-main/`: BEAT-MEV-derived BTE library and benchmarks
+- `sbc/hbbft/`: HoneyBadger ACS implementation and BLOC slot adapter
+- `latency-charts/`: chart generation and campaign analysis
+- `deploy/`: local Compose and VM/EC2 deployment runbooks and artifacts
 - `papers/`: research PDFs and reference material
 
-Most source code lives under `cmd/` and `internal/` inside each module. Tests are colocated as `*_test.go`.
-
-## Canonical Docs
-
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [docs/DEVELOPMENT.md](/bloc/docs/DEVELOPMENT.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-- [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
-- [docs/CHANGELOG.md](/bloc/docs/CHANGELOG.md)
-- [docs/ROADMAP.md](/bloc/docs/ROADMAP.md)
-- [docs/GLOSSARY.md](/bloc/docs/GLOSSARY.md)
-- [docs/CODEX_GUIDE.md](/bloc/docs/CODEX_GUIDE.md)
-- [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md)
-- [docs/modules/mempool-il.md](/bloc/docs/modules/mempool-il.md)
-- [docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md)
-- [docs/modules/bte.md](/bloc/docs/modules/bte.md)
+Most Go source lives under module-local `cmd/` and `internal/` directories.
+Tests are colocated as `*_test.go`.
 
 ## Task Routing
 
-### Architecture or protocol changes
+| Task | Minimum context after `STATUS.md` |
+|---|---|
+| Architecture or cross-module protocol change | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), affected [module deep dive](docs/modules/), relevant decisions, then validation |
+| `bloc-node` change | [bloc-node/README.md](bloc-node/README.md), [node deep dive](docs/modules/bloc-node.md), then validation sections matching the behavior |
+| `mempool-il` change | [mempool-il/README.md](mempool-il/README.md), [mempool deep dive](docs/modules/mempool-il.md), then matching validation |
+| BTE change | [BTE README](bte/btd-impl-main/README.md), [BTE deep dive](docs/modules/bte.md), and [TESTING.md](bte/btd-impl-main/TESTING.md) when test or benchmark behavior matters |
+| ACS or `hbbft` change | [hbbft README](sbc/hbbft/README.md), [hbbft deep dive](docs/modules/hbbft.md), and the ACS safety validation section |
+| Deployment or campaign operation | The relevant README under `deploy/`, plus acceptance criteria in [docs/VALIDATION.md](docs/VALIDATION.md) |
+| Documentation-only change | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), the owning canonical document, and link/ownership validation |
+| Debugging | Matching workflow/validation section and a historical note only when it documents the same failure mode |
 
-Read:
+## Context-Minimization Rules
 
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- the affected canonical document under [docs/modules/](/bloc/docs/modules/)
-- [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+- Build a small task packet containing the objective, affected module, likely
+  files, invariants, and required validation.
+- Do not paste long benchmark output or historical debugging narratives when a
+  durable conclusion already exists in canonical documentation.
+- Read archived material only for the exact subsystem or failure being studied.
+- Keep stable context in canonical docs and temporary context in task-scoped
+  scratchpads or ignored result artifacts.
 
-### `bloc-node` changes
+## Documentation Ownership
 
-Read:
+- `README.md`: repository entry point
+- `AGENTS.md`: agent operating contract and task router
+- `docs/STATUS.md`: live milestone, blocker, evidence, and next-action state
+- `docs/ARCHITECTURE.md`: system boundaries and cross-module invariants
+- `docs/modules/*.md`: module algorithms, state, identities, and limitations
+- `docs/DEVELOPMENT.md`: repository and documentation conventions
+- `docs/WORKFLOWS.md`: generic development, documentation, and artifact workflows
+- `docs/VALIDATION.md`: evidence semantics, commands, and acceptance criteria
+- `deploy/*/README.md`: environment-specific operational runbooks
+- `docs/DECISIONS.md`: major design and workflow decisions
+- `docs/CHANGELOG.md`: implementation-level history
+- `docs/ROADMAP.md`: milestone objectives and done criteria
+- `docs/archive/`: intentional historical evidence records that remain useful
 
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [bloc-node/README.md](/bloc/bloc-node/README.md)
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+Do not create a parallel explanation when one of these owners already exists.
+Module READMEs should stay focused on usage, commands, and entry points.
 
-### `mempool-il` changes
+## `STATUS.md` Maintenance Contract
 
-Read:
+Review `docs/STATUS.md` whenever work changes any of the following:
 
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [mempool-il/README.md](/bloc/mempool-il/README.md)
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- [docs/modules/mempool-il.md](/bloc/docs/modules/mempool-il.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
+- milestone selection, start, completion, or blockage;
+- an open blocker or risk;
+- accepted or rejected evidence;
+- the last known good baseline; or
+- immediate next actions.
 
-### BTE changes
+When one of those facts changes, update `STATUS.md` in the same task. Remove or
+rewrite resolved blockers instead of preserving them as current risks. Do not
+select a new active milestone unless the user or task explicitly authorizes that
+decision. Historical detail belongs in evidence reports or the changelog, not in
+the live status surface.
 
-Read:
+Every handoff must state whether `STATUS.md` was reviewed and whether it required
+an update.
 
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [bte/btd-impl-main/README.md](/bloc/bte/btd-impl-main/README.md)
-- [bte/btd-impl-main/TESTING.md](/bloc/bte/btd-impl-main/TESTING.md)
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- [docs/modules/bte.md](/bloc/docs/modules/bte.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-
-### ACS or `hbbft` changes
-
-Read:
-
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [sbc/hbbft/README.md](/bloc/sbc/hbbft/README.md)
-- [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- [docs/modules/hbbft.md](/bloc/docs/modules/hbbft.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-
-### Documentation-only changes
-
-Read:
-
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [docs/DEVELOPMENT.md](/bloc/docs/DEVELOPMENT.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- this file
-
-### Validation or debugging work
-
-Read:
-
-- [docs/STATUS.md](/bloc/docs/STATUS.md)
-- [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-- the relevant module README
-- any matching archived historical note only if the failure mode is the same
-
-## Repo Rules
+## Repository Rules
 
 - Keep durable cross-cutting documentation in root `docs/`.
-- Treat [docs/STATUS.md](/bloc/docs/STATUS.md) as the live source of truth for current milestone state and next actions.
-- Keep module READMEs focused on module-local usage and entry points.
-- Do not create duplicate design or workflow docs when a canonical file already exists.
-- No new standalone `.md` notes unless they are:
-  - a temporary scratchpad,
-  - a task artifact,
-  - or a historical note intended for `docs/archive/`.
-- Record major design choices in [docs/DECISIONS.md](/bloc/docs/DECISIONS.md).
-- Record implementation-level changes in [docs/CHANGELOG.md](/bloc/docs/CHANGELOG.md).
+- Keep operational deployment detail in the matching `deploy/*/README.md`.
+- Prefer updating canonical docs over creating standalone Markdown notes.
+- Temporary scratchpads must remain task-scoped; preserved historical evidence
+  belongs under `docs/archive/`.
+- Record major choices in `docs/DECISIONS.md` and implementation changes in
+  `docs/CHANGELOG.md`.
+- Keep generated evaluator output and local experiment logs in ignored
+  `results/` directories.
 
 ## Git Workflow Ownership
 
-Agents own routine repository hygiene for the work they perform. Do not leave
-branch, staging, or commit management for a later cleanup task.
+- Begin and end every task by checking the branch, worktree status, and upstream
+  divergence.
+- Use one short-lived `codex/<task>` branch for non-trivial changes and do not
+  reuse an old task branch for a new objective.
+- Preserve user changes and stage only files belonging to the active task.
+- Make focused commits after relevant validation passes.
+- Before integration, fetch current remote refs and prove whether the task branch
+  descends from `main`. Prefer fast-forward integration when it preserves the
+  validated history.
+- Never force-push shared history or delete an unmerged branch.
+- Report the final branch, commit, validation, publication state, retained
+  divergent work, and `STATUS.md` review outcome.
 
-- Begin and end every task by checking the active branch, worktree status, and
-  upstream divergence.
-- Keep `main` releasable. Use a short-lived `codex/<task>` branch for non-trivial
-  or interruptible work, and do not reuse an old task branch for a new objective.
-- Preserve user changes and stage only the files that belong to the active
-  task. Make focused commits after the relevant validation passes.
-- Before integration, fetch current remote refs and prove whether the task
-  branch is a descendant of `main`. Prefer a fast-forward integration when it
-  preserves the validated history; otherwise review the divergence explicitly
-  before rebasing or merging.
-- When publication or branch consolidation is authorized, push the validated
-  `main` ref and prune only task branches that are proven ancestors of it.
-- Never force-push shared history, rewrite published commits, or delete an
-  unmerged branch. Preserve divergent legacy work until it is deliberately
-  ported, rejected, or archived with its unique commits documented.
-- Report the final branch, commit, validation, push status, and any intentionally
-  retained divergent branch at handoff.
+## Validation Shortcuts
 
-## Development and Validation Shortcuts
-
-Run module tests from the relevant module directory:
+Run tests from the affected module root:
 
 ```sh
 cd bloc-node && go test ./...
@@ -163,7 +131,7 @@ cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
 ```
 
-Useful local prototype runs:
+Useful local prototype checks:
 
 ```sh
 cd bloc-node
@@ -171,13 +139,12 @@ go run ./cmd/bloc-node eval-local --nodes 4 --batch-sizes 8
 ./scripts/demo-local.sh
 ```
 
-BTE benchmark entry point:
-
-```sh
-cd bte/btd-impl-main
-go test ./be -run '^$' -bench '^BenchmarkHybridFullPath'
-```
+Use [docs/VALIDATION.md](docs/VALIDATION.md) to select stronger checks. Cloud
+operations are never implied by an ordinary code or documentation task.
 
 ## Security Reminder
 
-Current configs may contain prototype trusted-dealer BTE shares and libp2p private keys. Treat them as local demo material only. Do not claim production readiness without DKG, stronger share verification, hardened identity handling, and a real execution or signing boundary.
+Prototype configs can contain trusted-dealer BTE shares and libp2p private keys.
+Treat them as local demo material only. Do not claim production readiness without
+DKG, public share verification, hardened custody, a cryptographic common coin,
+and a real execution or signing boundary.

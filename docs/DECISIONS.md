@@ -159,7 +159,8 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: `docs/ARCHITECTURE.md` owns the trust model, module boundaries, end-to-end handoffs, identities, and cross-module invariants. `docs/modules/{bloc-node,mempool-il,hbbft,bte}.md` own stage algorithms, state, wire formats, concurrency, failure semantics, paper mapping, tests, and limitations. Module READMEs remain operational entry points.
 - Rationale: A layered structure lets thesis reviewers understand the complete protocol before drilling into source-backed implementation detail, while giving future changes one unambiguous documentation owner.
 - Consequences: Architecture work must update the affected module deep dive as well as the root document when a cross-module boundary changes. `CLUSTER_BTE.md` remains only as a compatibility pointer. Historical review findings live under `docs/archive/` and are not competing current architecture.
-- Related files: `docs/ARCHITECTURE.md`, `docs/modules/`, `docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`, `AGENTS.md`, `docs/CODEX_GUIDE.md`
+- Related files: `docs/ARCHITECTURE.md`, `docs/modules/`,
+  `docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md`, `AGENTS.md`
 
 ## 0014. Separate public setup material from operator-local secrets and bind transport identity
 
@@ -275,3 +276,33 @@ Use this file for major architecture, protocol, and workflow decisions.
   evidence target.
 - Related files: `deploy/ec2/terraform-three-region/`,
   `deploy/ec2/run-m3-three-region.sh`, `latency-charts/`, `docs/VALIDATION.md`
+
+## 0018. Use a compact live status and module-local operational runbooks
+
+- Date: 2026-07-19
+- Status: Accepted
+- Context: Agent guidance had three conflicting read orders, `STATUS.md` mixed
+  live state with historical campaign narratives, and EC2 commands were
+  duplicated across long workflow and validation documents. This made stale
+  statements difficult to identify and forced narrow tasks to load excessive
+  context.
+- Options considered: Keep the existing documents and correct individual stale
+  lines; add automated documentation enforcement; or consolidate the agent
+  router, define a strict editorial status contract, and move operational detail
+  to environment-local runbooks.
+- Decision: `AGENTS.md` is the sole mandatory agent router. `STATUS.md` contains
+  only current prototype state, the latest completed and explicitly selected
+  active milestones, unresolved blockers, immediate actions, and the accepted
+  baseline. Deployment commands live in `deploy/*/README.md`; root workflows and
+  validation retain generic process and evidence semantics. Status coherence is
+  maintained through task ownership and review rather than new checker code.
+- Rationale: One entry point and clear ownership reduce agent context, while a
+  concise status surface makes contradictions visible without inventing a new
+  validation subsystem.
+- Consequences: Tasks that change milestone, blocker, evidence, baseline, or
+  next-action state must update status in the same change. Resolved blockers are
+  removed instead of retained as current risks. Agents cannot select a new
+  milestone without explicit authorization, and handoffs report status-review
+  outcome.
+- Related files: `AGENTS.md`, `docs/STATUS.md`, `docs/DEVELOPMENT.md`,
+  `docs/WORKFLOWS.md`, `docs/VALIDATION.md`, `deploy/`

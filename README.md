@@ -19,30 +19,34 @@ Supporting material lives in:
 
 ## Current Project State
 
-For the current implementation status, active milestone, next steps, and last known good baseline, see [docs/STATUS.md](/bloc/docs/STATUS.md).
+For the current implementation status, active milestone, next steps, and last known good baseline, see [docs/STATUS.md](docs/STATUS.md).
 
 ## Documentation Guide
 
 Start here depending on what you need:
 
-- System design and protocol boundaries: [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md)
-- Protocol implementation deep dives: [docs/modules/](/bloc/docs/modules/)
-- Current status and next development step: [docs/STATUS.md](/bloc/docs/STATUS.md)
-- Validation commands and evidence model: [docs/VALIDATION.md](/bloc/docs/VALIDATION.md)
-- Roadmap and milestone sequence: [docs/ROADMAP.md](/bloc/docs/ROADMAP.md)
-- Developer process and workflow: [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md)
-- Key design rationale: [docs/DECISIONS.md](/bloc/docs/DECISIONS.md)
-- Shared terminology: [docs/GLOSSARY.md](/bloc/docs/GLOSSARY.md)
+- System design and protocol boundaries: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Protocol implementation deep dives: [docs/modules/](docs/modules/)
+- Current status and next development step: [docs/STATUS.md](docs/STATUS.md)
+- Validation commands and evidence model: [docs/VALIDATION.md](docs/VALIDATION.md)
+- Roadmap and milestone sequence: [docs/ROADMAP.md](docs/ROADMAP.md)
+- Developer process and workflow: [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
+- Local Compose operation: [deploy/docker-compose/README.md](deploy/docker-compose/README.md)
+- VM/EC2 operation and campaigns: [deploy/ec2/README.md](deploy/ec2/README.md)
+- Key design rationale: [docs/DECISIONS.md](docs/DECISIONS.md)
+- Shared terminology: [docs/GLOSSARY.md](docs/GLOSSARY.md)
 
-If you are using Codex or another agent, agent-specific instructions live in [AGENTS.md](/bloc/AGENTS.md).
+If you are using Codex or another agent, agent-specific instructions live in [AGENTS.md](AGENTS.md).
 
 ## Module Entry Points
 
-- [bloc-node/README.md](/bloc/bloc-node/README.md)
-- [mempool-il/README.md](/bloc/mempool-il/README.md)
-- [bte/btd-impl-main/README.md](/bloc/bte/btd-impl-main/README.md)
-- [sbc/hbbft/README.md](/bloc/sbc/hbbft/README.md)
-- [latency-charts/README.md](/bloc/latency-charts/README.md)
+- [bloc-node/README.md](bloc-node/README.md)
+- [mempool-il/README.md](mempool-il/README.md)
+- [bte/btd-impl-main/README.md](bte/btd-impl-main/README.md)
+- [sbc/hbbft/README.md](sbc/hbbft/README.md)
+- [latency-charts/README.md](latency-charts/README.md)
+- [deploy/docker-compose/README.md](deploy/docker-compose/README.md)
+- [deploy/ec2/README.md](deploy/ec2/README.md)
 
 ## Quick Validation
 
@@ -56,4 +60,4 @@ cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
 ```
 
-For the standard local prototype smoke flow and experiment paths, see [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md) and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+For the standard local prototype smoke flow and experiment paths, see [docs/WORKFLOWS.md](docs/WORKFLOWS.md) and [docs/VALIDATION.md](docs/VALIDATION.md).

@@ -14,22 +14,22 @@ snapshot artifact, not an ACS decision or a `bloc-node` agreed-set identity.
 It does not decide the final transaction set, release BTE shares, validate an
 execution payload, or implement a production Ethereum inclusion-list API.
 
-System-level context is in [ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+System-level context is in [ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ## Source Map
 
 | Stage | Principal source and symbols |
 | --- | --- |
-| Process wiring | [`cmd/service/main.go`](/bloc/mempool-il/cmd/service/main.go): source selection, polling, list bounds, HTTP lifecycle |
-| Source contracts | [`internal/mempool/reader.go`](/bloc/mempool-il/internal/mempool/reader.go): `Source`, `SlotSource`, `Reader` |
-| RPC normalization | [`internal/mempool/rpc.go`](/bloc/mempool-il/internal/mempool/rpc.go): `RPCClient`, `flatten`, `normalizeTx` |
-| Public pending block | [`internal/mempool/public_rpc.go`](/bloc/mempool-il/internal/mempool/public_rpc.go): `PublicRPCClient.Fetch` |
-| Alchemy filter cache | [`internal/mempool/alchemy_pending.go`](/bloc/mempool-il/internal/mempool/alchemy_pending.go): `AlchemyPendingClient`, `upsert`, `expire` |
-| Placeholder parsing | [`internal/mempool/classifier.go`](/bloc/mempool-il/internal/mempool/classifier.go): `ClassifyAndParse`, `ParsePlaceholderCalldata` |
-| Replay source | [`internal/mempool/replay_placeholder.go`](/bloc/mempool-il/internal/mempool/replay_placeholder.go): corpus parsing, encryption, placeholder signing |
-| Snapshot ownership | [`internal/mempool/store.go`](/bloc/mempool-il/internal/mempool/store.go): `Store.ReplaceAll`, `Store.Snapshot` |
-| List construction | [`internal/inclusion/builder.go`](/bloc/mempool-il/internal/inclusion/builder.go): `Builder.Build` |
-| HTTP boundary | [`internal/api/server.go`](/bloc/mempool-il/internal/api/server.go): `/healthz`, `/snapshot`, `/inclusion-list` |
+| Process wiring | [`cmd/service/main.go`](../../mempool-il/cmd/service/main.go): source selection, polling, list bounds, HTTP lifecycle |
+| Source contracts | [`internal/mempool/reader.go`](../../mempool-il/internal/mempool/reader.go): `Source`, `SlotSource`, `Reader` |
+| RPC normalization | [`internal/mempool/rpc.go`](../../mempool-il/internal/mempool/rpc.go): `RPCClient`, `flatten`, `normalizeTx` |
+| Public pending block | [`internal/mempool/public_rpc.go`](../../mempool-il/internal/mempool/public_rpc.go): `PublicRPCClient.Fetch` |
+| Alchemy filter cache | [`internal/mempool/alchemy_pending.go`](../../mempool-il/internal/mempool/alchemy_pending.go): `AlchemyPendingClient`, `upsert`, `expire` |
+| Placeholder parsing | [`internal/mempool/classifier.go`](../../mempool-il/internal/mempool/classifier.go): `ClassifyAndParse`, `ParsePlaceholderCalldata` |
+| Replay source | [`internal/mempool/replay_placeholder.go`](../../mempool-il/internal/mempool/replay_placeholder.go): corpus parsing, encryption, placeholder signing |
+| Snapshot ownership | [`internal/mempool/store.go`](../../mempool-il/internal/mempool/store.go): `Store.ReplaceAll`, `Store.Snapshot` |
+| List construction | [`internal/inclusion/builder.go`](../../mempool-il/internal/inclusion/builder.go): `Builder.Build` |
+| HTTP boundary | [`internal/api/server.go`](../../mempool-il/internal/api/server.go): `/healthz`, `/snapshot`, `/inclusion-list` |
 
 ## Inputs, Outputs, State, And Identities
 
@@ -234,7 +234,7 @@ rate limits, or a production API schema.
 
 ## Paper Correspondence And Deviations
 
-The repository's [BLOC design paper](/bloc/papers/BLOC_Final.pdf) motivates an
+The repository's [BLOC design paper](../../papers/BLOC_Final.pdf) motivates an
 external source of encrypted candidate transactions and inclusion lists. This
 module implements that boundary as a deterministic HTTP service and mock
 placeholder producer. It does not implement a standardized Ethereum
@@ -243,7 +243,7 @@ searcher/submitter identity.
 
 BEAT-MEV applies only to the encryption operation invoked by replay mode. The
 BTE construction and its implementation deviations are documented in
-[the BTE deep dive](/bloc/docs/modules/bte.md).
+[the BTE deep dive](../../docs/modules/bte.md).
 
 ## Test Evidence
 
@@ -273,4 +273,4 @@ Run the complete module suite with `go test ./...` from `mempool-il`.
   chain reorganization handling, base-fee-aware ordering, or production
   inclusion-list standard.
 - Confirmed security and correctness concerns are tracked in the
-  [implementation review](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+  [implementation review](../../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).

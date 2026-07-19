@@ -21,13 +21,13 @@ paper's setup and key-custody assumptions.
 
 | Layer | Principal source and symbols |
 | --- | --- |
-| Pairing suite adapter | [`curves/curves.go`](/bloc/bte/btd-impl-main/curves/curves.go): `Suite`, `GTBase`, `PickGT` |
-| Puncturable PRF | [`prf/prf.go`](/bloc/bte/btd-impl-main/prf/prf.go): setup, puncture, direct/punctured/exponential evaluation |
-| Threshold ElGamal | [`elgamal/elgamal.go`](/bloc/bte/btd-impl-main/elgamal/elgamal.go): key generation, additive ciphertexts, partial decryption, interpolation |
-| BTD construction | [`be/btd.go`](/bloc/bte/btd-impl-main/be/btd.go): `BTD`, `CT`, `Proof`, `EncWithContext`, `VerifyCT`, batch decryption/combine |
-| Cluster-facing API | [`be/cluster.go`](/bloc/bte/btd-impl-main/be/cluster.go): `ClusterBTE`, `Ciphertext`, `DecodedBatch`, `BatchPlan`, `DecryptionShare` |
-| Integrated tests/benchmarks | [`be/cluster_test.go`](/bloc/bte/btd-impl-main/be/cluster_test.go) |
-| Inherited benchmark harness | [`main_test.go`](/bloc/bte/btd-impl-main/main_test.go), [`bench.sh`](/bloc/bte/btd-impl-main/bench.sh) |
+| Pairing suite adapter | [`curves/curves.go`](../../bte/btd-impl-main/curves/curves.go): `Suite`, `GTBase`, `PickGT` |
+| Puncturable PRF | [`prf/prf.go`](../../bte/btd-impl-main/prf/prf.go): setup, puncture, direct/punctured/exponential evaluation |
+| Threshold ElGamal | [`elgamal/elgamal.go`](../../bte/btd-impl-main/elgamal/elgamal.go): key generation, additive ciphertexts, partial decryption, interpolation |
+| BTD construction | [`be/btd.go`](../../bte/btd-impl-main/be/btd.go): `BTD`, `CT`, `Proof`, `EncWithContext`, `VerifyCT`, batch decryption/combine |
+| Cluster-facing API | [`be/cluster.go`](../../bte/btd-impl-main/be/cluster.go): `ClusterBTE`, `Ciphertext`, `DecodedBatch`, `BatchPlan`, `DecryptionShare` |
+| Integrated tests/benchmarks | [`be/cluster_test.go`](../../bte/btd-impl-main/be/cluster_test.go) |
+| Inherited benchmark harness | [`main_test.go`](../../bte/btd-impl-main/main_test.go), [`bench.sh`](../../bte/btd-impl-main/bench.sh) |
 
 ## Public Types And Boundaries
 
@@ -329,7 +329,7 @@ plan being used concurrently.
 ## Paper Correspondence And Deviations
 
 The lower-level construction follows
-[BEAT-MEV: Epochless Approach to Batched Threshold Encryption for MEV Prevention](/bloc/papers/BEAT-MEV.pdf):
+[BEAT-MEV: Epochless Approach to Batched Threshold Encryption for MEV Prevention](../../papers/BEAT-MEV.pdf):
 
 - `PRFSetup`/`KeyGen` correspond to setup and threshold-key generation;
 - `EncWithContext` corresponds to indexed BTE encryption plus proof;
@@ -379,7 +379,7 @@ file covers normal and optimization comparison surfaces; cluster benchmarks
 cover the hybrid full path and planning attribution.
 
 Run `go test ./...` from `bte/btd-impl-main`. Benchmark and fuzz commands remain
-in [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md).
+in [TESTING.md](../../bte/btd-impl-main/TESTING.md).
 
 ## Known Limitations
 
@@ -397,4 +397,4 @@ in [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md).
   stable cross-language wire commitment, or independent cryptographic audit.
 - `SuiteID` is metadata only and is not negotiated in ciphertext encodings.
 - Detailed confirmed findings and follow-up priorities are in the
-  [implementation review](/bloc/docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+  [implementation review](../../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).

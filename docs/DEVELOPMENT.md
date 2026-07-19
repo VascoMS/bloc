@@ -4,6 +4,8 @@
 
 - Keep cross-cutting durable documentation in root `docs/`.
 - Keep module READMEs focused on local usage, commands, and entry points.
+- Keep environment-specific operational procedures in the matching
+  `deploy/*/README.md`.
 - Prefer updating canonical docs over creating new standalone `.md` files.
 - Use `docs/archive/` for historical notes that still matter but are no longer canonical.
 
@@ -52,12 +54,26 @@
 
 - `README.md`: repo entry point
 - `AGENTS.md`: task router and agent operating contract
+- `docs/STATUS.md`: live milestone, blocker, evidence, and next-action state
 - `docs/ARCHITECTURE.md`: canonical system design
 - `docs/modules/*.md`: canonical protocol implementation details by module
-- `docs/WORKFLOWS.md`: implementation and documentation process
+- `docs/WORKFLOWS.md`: generic implementation, documentation, and artifact process
 - `docs/VALIDATION.md`: what to run and why
+- `deploy/*/README.md`: environment-specific operational runbooks
 - `docs/DECISIONS.md`: major design decisions
 - `docs/CHANGELOG.md`: implementation-level history
+
+## Status Maintenance
+
+`docs/STATUS.md` is concise live state, not an experiment diary. Review it when
+a task changes milestone state, blockers, accepted or rejected evidence, the
+last known good baseline, or immediate next actions. Update it in the same task
+when any of those facts changes, remove resolved blockers, and move historical
+detail to evidence reports or the changelog.
+
+No agent may select a new active milestone unless that decision is explicitly in
+scope. Every task handoff states whether status was reviewed and whether it
+required an update.
 
 ## When To Create A New Doc
 
@@ -66,6 +82,7 @@ Create a new standalone Markdown file only if it is:
 - a canonical root doc under `docs/`,
 - a canonical protocol deep dive under `docs/modules/`,
 - a module entry-point README,
+- an environment runbook under `deploy/`,
 - a temporary scratchpad for one task,
 - or a historical note that will live under `docs/archive/`.
 

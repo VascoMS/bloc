@@ -4,11 +4,11 @@ Proof-of-concept implementation of the BEAT-MEV batched threshold encryption sch
 
 This module is still prototype-grade and should not be treated as production cryptography.
 
-For the system role of this module, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+For the system role of this module, read [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 For the cryptographic construction, hybrid envelope, wire format, planner, and
-known security limitations, read [docs/modules/bte.md](/bloc/docs/modules/bte.md).
-For test coverage and benchmarks, read [TESTING.md](/bloc/bte/btd-impl-main/TESTING.md)
-and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
+known security limitations, read [docs/modules/bte.md](../../docs/modules/bte.md).
+For test coverage and benchmarks, read [TESTING.md](../../bte/btd-impl-main/TESTING.md)
+and [docs/VALIDATION.md](../../docs/VALIDATION.md).
 
 ## Notes
 
@@ -22,7 +22,7 @@ and [docs/VALIDATION.md](/bloc/docs/VALIDATION.md).
   shared setup seed. The artifact still contains inherited diagonal elements
   marked insecure for a real setup, so this is only partial hardening and not a
   production CRS.
-- [CLUSTER_BTE.md](/bloc/bte/btd-impl-main/CLUSTER_BTE.md) is retained only as a compatibility pointer to the canonical deep dive.
+- [CLUSTER_BTE.md](../../bte/btd-impl-main/CLUSTER_BTE.md) is retained only as a compatibility pointer to the canonical deep dive.
 
 ## Tests and Benchmarks
 

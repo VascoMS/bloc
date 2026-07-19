@@ -8,11 +8,14 @@
 - protobuf operator messaging over libp2p streams,
 - evaluation and reporting commands.
 
-For the cross-module system design, read [docs/ARCHITECTURE.md](/bloc/docs/ARCHITECTURE.md).
+For the cross-module system design, read [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 For the node's protocol state machine, merge/share path, and failure semantics,
-read [docs/modules/bloc-node.md](/bloc/docs/modules/bloc-node.md). For the
-validation matrix, read [docs/VALIDATION.md](/bloc/docs/VALIDATION.md). For the
-standard demo and experiment flow, read [docs/WORKFLOWS.md](/bloc/docs/WORKFLOWS.md).
+read [docs/modules/bloc-node.md](../docs/modules/bloc-node.md). For the
+validation matrix, read [docs/VALIDATION.md](../docs/VALIDATION.md). For the
+standard demo and experiment flow, read [docs/WORKFLOWS.md](../docs/WORKFLOWS.md).
+Compose and VM/EC2 operation live in
+[deploy/docker-compose/README.md](../deploy/docker-compose/README.md) and
+[deploy/ec2/README.md](../deploy/ec2/README.md).
 
 This module is a prototype harness, not a production DVT client. It still uses
 a trusted setup/key generator and a local evaluation environment.
@@ -124,6 +127,31 @@ Run the professor-facing demo flow:
 ./scripts/demo-local.sh
 ```
 
+The demo runs three four-operator scenarios:
+
+- `normal`: signed Ethereum transaction payloads complete over libp2p;
+- `blockspace-cap`: `--max-decrypted-txs 4` deterministically bounds the
+  decrypted set; and
+- `withhold-share`: one operator withholds BTE shares while the remaining
+  threshold completes.
+
+Artifacts are written under `results/mvp-demo/<timestamp>/` and include
+`summary.json`, `summary.csv`, generated public configuration, per-node logs,
+per-node results, and an aggregated `DEMO_REPORT.md`. Regenerate a report with:
+
+```sh
+go run ./cmd/bloc-node report \
+  --dir results/mvp-demo/<timestamp> \
+  --out results/mvp-demo/<timestamp>/DEMO_REPORT.md
+```
+
+The scripted runs demonstrate agreement and deterministic post-ACS processing
+for their exercised schedules, threshold completion under one withheld share,
+syntactically valid signed Ethereum payloads, and deterministic blockspace
+bounds. They do not prove Byzantine ACS safety, broadcast or execute a
+transaction on Ethereum, provide PBS/Builder/DVT integration, replace the
+trusted dealer with DKG, or establish production-hardened libp2p operation.
+
 Useful fault-injection examples:
 
 ```sh
@@ -150,7 +178,7 @@ one persistent cluster per operator count, but constructs a fresh ACS and clean
 protocol state for every slot. Cluster startup, slot preparation, and transaction
 submission are recorded separately from protocol latency. The suite keeps raw
 per-node results, uses the slowest correct node as the run-level latency, and produces p50/p95 summaries. See
-[docs/VALIDATION.md](/bloc/docs/VALIDATION.md) for metric boundaries and the
+[docs/VALIDATION.md](../docs/VALIDATION.md) for metric boundaries and the
 short smoke command.
 
 Use `--execution-mode isolated` when validating process startup and teardown on

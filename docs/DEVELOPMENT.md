@@ -30,6 +30,24 @@
 - Keep evaluator output, demo runs, and ad hoc experiment logs under ignored `results/` directories.
 - Treat local demo key material and cluster configs as prototype-only artifacts.
 
+## Git Workflow
+
+- Keep `main` in a validated, releasable state and use one short-lived
+  `codex/<task>` branch per non-trivial objective.
+- Do not accumulate unrelated work on a branch whose name describes an older
+  task. Integrate or close the branch before starting the next objective.
+- Commit coherent changes with their tests and canonical documentation. Do not
+  mix generated `results/` artifacts into source commits.
+- Prefer `git merge --ff-only` when the validated task history descends directly
+  from `main`. Review true divergence rather than creating an automatic merge
+  commit.
+- Delete only branches whose tips are reachable from the published `main`.
+  Unique or obsolete work must be reviewed and documented before it is ported
+  or removed.
+- Do not force-push shared branches. Agents are responsible for checking status,
+  divergence, validation, commits, and branch cleanup as part of the task that
+  created the changes.
+
 ## Documentation Ownership
 
 - `README.md`: repo entry point

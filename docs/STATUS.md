@@ -56,16 +56,16 @@ macOS and Linux. All eight active local/EC2 runners support side-effect-free
 `--validate-only`, EC2 image paths enforce `linux/amd64`, and structured
 artifact work is shared through a Python-standard-library helper. The complete
 ACS safety campaign and one current-code Merge/Plan baseline phase have passed
-through the Bash runners on macOS; EC2 runners
-have only static, fixture, Terraform, and cleanup-simulation validation in this
-change, and no AWS resources were created.
+through the Bash runners on macOS. The three-region runner also completed its
+real `n=4` probe and accepted `n=4/n=7` campaign, then destroyed and
+authenticated the absence of every scoped AWS resource.
 
-The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred until after distributed sidecar deployment evidence exists.
+The current implemented prototype does not yet include DKG-generated shares, public decryption-share verifiability, real DVT threshold signing, execution-client validation of decrypted transactions, Builder API compatibility, or PBS prefix enforcement. Builder/PBS integration remains deferred to the later integration milestones now that the M3 distributed evidence exists.
 
-## Active Milestone
+## Latest Milestone
 
 - Milestone: `M3. Distributed Sidecar Metrics Collection`
-- Status: `in progress`
+- Status: `complete` for the accepted honest-path three-region latency scope
 - Evidence posture: local `eval-local`/`eval-suite` runs are the clean protocol
   baseline for ACS/BTE behavior under controlled conditions. Docker Compose is
   a local deployment-mechanics rehearsal. The primary distributed thesis
@@ -87,13 +87,14 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 
 ## Immediate Next Actions
 
-1. Complete the module, ACS safety, Bash portability, chart, Terraform, and
-   `linux/amd64` image gates for the three-region campaign, then commit and
-   freeze the source SHA.
-2. Run the `n=4`, batches `8,128`, one-warmup/three-measurement probe and accept
-   it only with complete connectivity, finalized evidence, and empty teardown.
-3. Run the accepted `n=4` then `n=7` matrix, destroying and verifying `n=4`
-   before allocating `n=7`.
+1. Archive the accepted three-region artifact root with checksums and keep the
+   source SHA, image digest, raw CSV/JSON, report, and cleanup evidence together.
+2. Decide whether the thesis needs one independent confirmation campaign and a
+   current-build same-region control before making causal cross-region-overhead
+   claims; the accepted standalone campaign already supports scoped p50/p95
+   characterization.
+3. Plan M4 coordination, cryptographic, and resource-overhead characterization
+   without mixing it into the frozen M3 evidence.
 4. Continue the mixed-root RBC, conflicting BBA AUX, delayed-message, and
    secure-CRS/DKG work without describing latency evidence as Byzantine-safety
    or production-confidentiality evidence.
@@ -147,7 +148,14 @@ The current implemented prototype does not yet include DKG-generated shares, pub
 ## Last Known Good State
 
 - Date: `2026-07-18`
-- Meaning: the corrected ACS/BBA and resource-bounded path passed the Bash safety campaign on macOS Bash 3.2: 1,000 fixed reordered-delivery schedules, race validation, a persistent n4/batch-128 gate with 100/100 successful consistent measurements, and an n4/n7 batch `8/32/128` matrix with 180/180 successful consistent measurements. The optimized same-AZ Compute Flex `n=4/n=7` attribution evidence from 2026-07-14 remains the latest accepted cloud performance baseline; migrated EC2 runners require a separately approved pilot before producing new cloud evidence.
+- Meaning: source `8de4af179465f9cd77920eacdcca163ca5cef01d`
+  completed the three-region `t3.small` campaign in `us-east-1`, `eu-west-1`,
+  and `eu-central-1`. The `n=4/n=7`, batch `8/32/128` matrix retained 180/180
+  successful consistent measured slots and 990/990 finalized measured node
+  rows under one image digest. Pre/post Prometheus and five-attempt ordered-pair
+  health gates passed, every sampled operator remained running with zero
+  restarts/OOMs, Terraform destroyed 40 then 43 resources, and authenticated
+  cleanup found no remaining scoped AWS resources.
 - Data-realism addendum: `mempool-il` now has a corpus-backed `replay-placeholder` mode that validates real signed Ethereum target transactions, encrypts them once using BLOC public cluster material, and exposes mock placeholder candidates through the existing inclusion-list API. `bloc-node` can consume these encrypted payloads via the mempool provider without changing synthetic evaluator defaults.
 - Baseline commands:
   - `bash bloc-node/scripts/run-acs-safety-campaign.sh`
@@ -156,6 +164,7 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 3 --out-dir results/acs-bba-self-vote-matrix`
   - `cd bloc-node && go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 7,10 --batch-sizes 8,32,128 --warmups 0 --repetitions 5 --out-dir results/acs-all-rbc-stress`
 - Evidence location:
+  - `results/ec2/m3-three-region-synthetic-accepted-20260718-1/` (ignored accepted standalone three-region evidence: raw per-slot/per-node JSON, merged CSVs, manifests, placement, network/resource/Prometheus checks, analysis tables/charts/report, one image digest, and authenticated empty teardown for both phases)
   - `results/local/acs-common-subset-safety/acs-common-subset-20260715/` (ignored local safety campaign: repeated 1,000-seed reordered-delivery tests and Linux race validation passed; persistent n4/batch-128 gate passed 100/100 measured slots; n4/n7 batches 8/32/128 matrix passed 180/180 measured slots; bloc-node/BTE identity suites and focused Merge + Plan benchmarks passed; no AWS resources were allocated)
   - `results/ec2/m3-cross-az-synthetic-optimized-20260714-v2/` (ignored invalid optimized cross-AZ attempt, clean reproduction probe, operator logs, run report, and authenticated empty cleanup verification; batches 8/32 passed 30/30 but batch 128 exposed divergent ACS decisions, so no thesis-grade before/after campaign was accepted)
   - `results/ec2/merge-plan-attribution-free-20260714/` (ignored accepted Compute Flex `n=4/n=7` measurements, analysis tables/charts/report, and separately labeled invalid T3 diagnostic artifacts)
@@ -169,15 +178,15 @@ The current implemented prototype does not yet include DKG-generated shares, pub
   - `bloc-node/results/acs-bba-self-vote-matrix/` (27/27 successful across 4/7/10 nodes and 8/32/128 batches)
   - `bloc-node/results/acs-all-rbc-stress/` (30/30 successful across 7/10 nodes and 8/32/128 batches)
 
-## Current M3 Target
+## Current M3 Outcome
 
-- Run repeated remote-evaluator campaigns against VM/EC2-per-sidecar deployments, using Compose only as a local deployment rehearsal, then produce thesis-ready distributed latency/performance artifacts.
-- Current target campaign: plan-check and probe the full-mesh three-region
-  deployment, then collect the standalone `n=4/n=7`, batch `8/32/128`,
-  30-sample latency matrix on `t3.small`. Placement is `node_id % 3` across
-  US/Ireland/Frankfurt, with the controller in the US. Older same-AZ/cross-AZ
-  and two-region data is historical context because it predates this evidence
-  candidate.
+- The full-mesh three-region target is complete: standalone `n=4/n=7`, batch
+  `8/32/128`, 30-sample protocol latency on `t3.small`, with `node_id % 3`
+  placement across US/Ireland/Frankfurt and the controller in the US.
+- The dataset is accepted honest-path prototype evidence for p50/p95, stage,
+  pairwise-network, and critical-node-region reporting. Older same-AZ/cross-AZ
+  and two-region data remains historical context because it predates this
+  source and image.
 
 ## Deferred Later Milestones
 

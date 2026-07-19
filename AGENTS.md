@@ -128,6 +128,29 @@ Read:
 - Record major design choices in [docs/DECISIONS.md](/bloc/docs/DECISIONS.md).
 - Record implementation-level changes in [docs/CHANGELOG.md](/bloc/docs/CHANGELOG.md).
 
+## Git Workflow Ownership
+
+Agents own routine repository hygiene for the work they perform. Do not leave
+branch, staging, or commit management for a later cleanup task.
+
+- Begin and end every task by checking the active branch, worktree status, and
+  upstream divergence.
+- Keep `main` releasable. Use a short-lived `codex/<task>` branch for non-trivial
+  or interruptible work, and do not reuse an old task branch for a new objective.
+- Preserve user changes and stage only the files that belong to the active
+  task. Make focused commits after the relevant validation passes.
+- Before integration, fetch current remote refs and prove whether the task
+  branch is a descendant of `main`. Prefer a fast-forward integration when it
+  preserves the validated history; otherwise review the divergence explicitly
+  before rebasing or merging.
+- When publication or branch consolidation is authorized, push the validated
+  `main` ref and prune only task branches that are proven ancestors of it.
+- Never force-push shared history, rewrite published commits, or delete an
+  unmerged branch. Preserve divergent legacy work until it is deliberately
+  ported, rejected, or archived with its unique commits documented.
+- Report the final branch, commit, validation, push status, and any intentionally
+  retained divergent branch at handoff.
+
 ## Development and Validation Shortcuts
 
 Run module tests from the relevant module directory:

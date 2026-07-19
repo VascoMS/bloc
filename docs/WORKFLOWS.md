@@ -463,10 +463,13 @@ measurements on `t3.small`, with a 60-second slot timeout. Placement is `2/1/1`
 for `n=4` and `3/2/2` for `n=7`. `--plan-only` checks both node-count plans and
 the exact three-VPC/three-peering/six-peer-route allowlist without creating
 resources. Real applies may be billable and require operator authorization.
-The runner verifies 8/4/4 vCPU headroom, records pre/post five-attempt pairwise health matrices,
-CPU/T3 credit metrics, resource samples, region/AZ attribution, and one image
-digest. It always destroys, retries Terraform teardown, removes regional keys,
-and authenticates empty cleanup for each node-count phase before continuing.
+The runner verifies 8/4/4 vCPU headroom and records pre/post five-attempt
+pairwise health matrices, resource samples, region/AZ attribution, and one image
+digest. It configures explicit T3 credit mode and detailed EC2 monitoring but does
+not query CloudWatch; the accepted latency evidence comes from protocol-stage and
+pairwise HTTP measurements. It always destroys, retries Terraform teardown,
+removes regional keys, and authenticates empty cleanup for each node-count phase
+before continuing.
 There is no preserve-on-failure mode. The report includes protocol p50/p95, four-stage, four
 region-pair classes, and critical-node-region attribution. Inter-region data
 transfer and T3 Unlimited surplus credits may be billable.

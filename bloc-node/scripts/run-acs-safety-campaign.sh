@@ -111,7 +111,9 @@ write_artifacts() {
     --arg at "$(bloc_sha256 "$repo_root/sbc/hbbft/acs_test.go")" \
     --arg b "$(bloc_sha256 "$repo_root/sbc/hbbft/bba.go")" \
     --arg bt "$(bloc_sha256 "$repo_root/sbc/hbbft/bba_test.go")" \
-    '{"sbc/hbbft/acs.go":$a,"sbc/hbbft/acs_test.go":$at,"sbc/hbbft/bba.go":$b,"sbc/hbbft/bba_test.go":$bt}')"
+    --arg r "$(bloc_sha256 "$repo_root/sbc/hbbft/rbc.go")" \
+    --arg rt "$(bloc_sha256 "$repo_root/sbc/hbbft/rbc_test.go")" \
+    '{"sbc/hbbft/acs.go":$a,"sbc/hbbft/acs_test.go":$at,"sbc/hbbft/bba.go":$b,"sbc/hbbft/bba_test.go":$bt,"sbc/hbbft/rbc.go":$r,"sbc/hbbft/rbc_test.go":$rt}')"
   jq -n \
     --argjson schema_version 1 --arg campaign_id "$campaign_id" --arg status "$campaign_status" \
     --arg failure_stage "$failure_stage" --arg failure_message "$failure_message" \
@@ -148,7 +150,7 @@ if [[ "$report_only" -eq 1 ]]; then campaign_status="$resumed_status"; write_art
 
 set +e
 if run_stage safety; then bloc_run_recorded "$records_file" "hbbft repeated safety tests" "$logs_root/hbbft-count20.log" "$hbbft_root" go test ./... -count=20 -timeout=10m || failure_stage="hbbft repeated safety tests"; fi
-if [[ -z "$failure_stage" ]] && run_stage race && [[ "$skip_race" -ne 1 ]]; then bloc_run_recorded "$records_file" "hbbft race tests" "$logs_root/hbbft-race.log" "$hbbft_root" go test -race ./... -run 'Test(ACS|BBA|SlotACS)' -count=1 -timeout=10m || failure_stage="hbbft race tests"; fi
+if [[ -z "$failure_stage" ]] && run_stage race && [[ "$skip_race" -ne 1 ]]; then bloc_run_recorded "$records_file" "hbbft race tests" "$logs_root/hbbft-race.log" "$hbbft_root" go test -race ./... -run 'Test(RBC|ACS|BBA|SlotACS)' -count=1 -timeout=10m || failure_stage="hbbft race tests"; fi
 if [[ -z "$failure_stage" ]] && run_stage gate; then
   bloc_run_recorded "$records_file" "n4 batch-128 sustained gate" "$logs_root/gate-n4-b128.log" "$module_root" go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4 --batch-sizes 128 --warmups 5 --repetitions "$gate_repetitions" --max-restarts 1 --timeout 30s --seed 640 --experiment-id "$campaign_id-gate" --out-dir "$gate_root" || failure_stage="n4 batch-128 sustained gate"
   [[ -n "$failure_stage" ]] || bloc_python "$repo_root" assert-evaluator --csv "$gate_root/run_measurements.csv" --expected "4/128=$gate_repetitions" || failure_stage="n4 batch-128 sustained gate"

@@ -451,10 +451,10 @@ The suite tests sender binding, exact/oversized envelope reads, outbound size
 rejection, proposal bounds, share retention/pruning, and bounded n=10 recovery.
 It also covers pending/success/failure/wrong-slot result reads, repeated failure
 reads, failed-slot replacement, late-success rejection, evaluator 422 handling,
-failure-before-start ordering, synchronous start failure routing, legacy
-`eval-local` failure rows, and failure exclusion from latency summaries. It does
-not yet exercise an oversized malicious remote stream end-to-end or cover a
-deterministic invalid-Ethereum fallback.
+failure/success-before-start ordering, synchronous start failure routing,
+legacy `eval-local` failure rows, and failure exclusion from latency summaries.
+It does not yet exercise an oversized malicious remote stream end-to-end or
+cover a deterministic invalid-Ethereum fallback.
 
 Run `go test ./...` from `bloc-node`.
 

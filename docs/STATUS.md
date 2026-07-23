@@ -1,9 +1,9 @@
 # Status
 
-- Last reviewed: `2026-07-23`
+- Last reviewed: `2026-07-24`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `f1580c8cb46a1099093f94b4b5b3a6fae14519c5`
+- Last known good source: `5b781714d59bd9b9c66e8a3bc7abb651fa404093`
 
 ## Current Prototype State
 
@@ -85,11 +85,11 @@ same-region-versus-cross-region evidence.
 
 ## Last Known Good Baseline
 
-- Date: `2026-07-23`
-- Source: `f1580c8cb46a1099093f94b4b5b3a6fae14519c5`
+- Date: `2026-07-24`
+- Source: `5b781714d59bd9b9c66e8a3bc7abb651fa404093`
 - Terminal-failure validation: full bloc-node normal and race suites, including
-  pending/success/failure/wrong-slot lifecycle, failure-before-start ordering,
-  synchronous start failure, and both evaluator artifact formats.
+  pending/success/failure/wrong-slot lifecycle, failure/success-before-start
+  ordering, synchronous start failure, and both evaluator artifact formats.
 - Local safety evidence:
   `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
 - Linux RBC/ACS/BBA race evidence:

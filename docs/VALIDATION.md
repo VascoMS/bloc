@@ -145,7 +145,8 @@ polling must preserve these outcomes:
   and remains available as the authoritative 422 `/result`, rather than leaking
   the underlying dynamic error or bypassing evaluator polling;
 - a wrong-slot read remains HTTP 409;
-- late protocol progress cannot replace a terminal failure with success;
+- late protocol progress cannot replace a terminal failure with success, and
+  local start cannot replace a peer-driven terminal success or failure;
 - a failed slot can be replaced only by a strictly greater slot; and
 - evaluator JSON, JSONL, and both CSV formats retain a run-level failure reason
   even with zero successful node results, while successful-only latency

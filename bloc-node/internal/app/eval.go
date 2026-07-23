@@ -285,6 +285,16 @@ func pollResults(client *http.Client, nodes, baseHTTP int, timeout time.Duration
 			}
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusUnprocessableEntity {
+				var failure slotFailureResponse
+				if err := json.Unmarshal(body, &failure); err != nil {
+					return results, err
+				}
+				if failure.Status != string(slotFailed) {
+					return results, fmt.Errorf("node %d returned invalid terminal failure", id)
+				}
+				return results, fmt.Errorf("node %d reported terminal failure for slot %d: %s", id, failure.Slot, failure.Reason)
+			}
 			if resp.StatusCode != http.StatusOK {
 				break
 			}

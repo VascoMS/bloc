@@ -408,6 +408,16 @@ func pollResultsOnce(client *http.Client, nodes int, slotID uint64, urlFor func(
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusUnprocessableEntity {
+			var failure slotFailureResponse
+			if err := json.Unmarshal(body, &failure); err != nil {
+				return results, missing, fmt.Errorf("decode terminal failure from node %d: %w", id, err)
+			}
+			if failure.Status != string(slotFailed) || failure.Slot != slotID {
+				return results, missing, fmt.Errorf("node %d returned invalid terminal failure for slot %d", id, slotID)
+			}
+			return results, missing, fmt.Errorf("node %d reported terminal failure for slot %d: %s", id, failure.Slot, failure.Reason)
+		}
 		if resp.StatusCode != http.StatusOK {
 			missing = append(missing, id)
 			continue

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -58,6 +59,116 @@ func TestPrepareSlotRequiresCompletedIncreasingSlot(t *testing.T) {
 	if err := n.prepareSlot(2); err == nil {
 		t.Fatal("accepted a non-increasing slot id")
 	}
+}
+
+func TestPrepareSlotAcceptsTerminalFailureAndResetsIt(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.markSlotFailed("decode")
+	if n.phase != slotFailed || n.failure == nil {
+		t.Fatalf("slot did not become terminally failed: phase=%s failure=%+v", n.phase, n.failure)
+	}
+	if err := n.prepareSlot(2); err != nil {
+		t.Fatalf("prepare failed slot: %v", err)
+	}
+	if n.id != 2 || n.phase != slotPrepared || n.failure != nil {
+		t.Fatalf("replacement state retained failure: id=%d phase=%s failure=%+v", n.id, n.phase, n.failure)
+	}
+}
+
+func TestMarkSlotFailedIsIdempotentAndBounded(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.markSlotFailed("decode")
+	first := *n.failure
+	n.markSlotFailed("arbitrary dynamic error")
+	if n.failedSlots != 1 {
+		t.Fatalf("failed slots = %d, want 1", n.failedSlots)
+	}
+	if *n.failure != first {
+		t.Fatalf("terminal failure changed: first=%+v current=%+v", first, *n.failure)
+	}
+	if first.Slot != 1 || first.Reason != "decode" || first.FailedAtUnixNano == 0 {
+		t.Fatalf("unexpected terminal failure: %+v", first)
+	}
+	now := time.Now()
+	n.finishEmptyMaterializedSet(now, now, now, now, now, AgreedInclusionSet{}, MergedEncryptedSet{})
+	if n.result != nil || n.phase != slotFailed {
+		t.Fatalf("late success replaced terminal failure: phase=%s result=%+v", n.phase, n.result)
+	}
+
+	unknown := lifecycleTestNode(t)
+	unknown.markSlotFailed("an arbitrarily long dynamic error must not become a metric or API label")
+	if unknown.failure == nil || unknown.failure.Reason != "unknown" {
+		t.Fatalf("dynamic failure reason was not bounded: %+v", unknown.failure)
+	}
+}
+
+func TestResultEndpointDistinguishesPendingSuccessFailureAndWrongSlot(t *testing.T) {
+	t.Run("pending", func(t *testing.T) {
+		n := lifecycleTestNode(t)
+		rec := httptest.NewRecorder()
+		n.handleResult(rec, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+		if rec.Code != http.StatusAccepted || rec.Body.String() != "{\"status\":\"pending\"}\n" {
+			t.Fatalf("pending response = %d %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		n := lifecycleTestNode(t)
+		n.mu.Lock()
+		n.phase = slotCompleted
+		n.result = &Result{Slot: 1, NodeID: 0}
+		n.mu.Unlock()
+		rec := httptest.NewRecorder()
+		n.handleResult(rec, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("success response = %d %s", rec.Code, rec.Body.String())
+		}
+		var result Result
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Slot != 1 || result.NodeID != 0 {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	})
+
+	t.Run("terminal failure is stable", func(t *testing.T) {
+		n := lifecycleTestNode(t)
+		n.markSlotFailed("planning")
+		var first string
+		for attempt := 0; attempt < 2; attempt++ {
+			rec := httptest.NewRecorder()
+			n.handleResult(rec, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("failure response = %d %s", rec.Code, rec.Body.String())
+			}
+			if attempt == 0 {
+				first = rec.Body.String()
+			} else if rec.Body.String() != first {
+				t.Fatalf("repeated failure changed: first=%s second=%s", first, rec.Body.String())
+			}
+			var body struct {
+				Status string `json:"status"`
+				SlotFailure
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Status != "failed" || body.Slot != 1 || body.Reason != "planning" || body.FailedAtUnixNano == 0 {
+				t.Fatalf("unexpected failure body: %+v", body)
+			}
+		}
+	})
+
+	t.Run("wrong slot", func(t *testing.T) {
+		n := lifecycleTestNode(t)
+		n.markSlotFailed("decode")
+		rec := httptest.NewRecorder()
+		n.handleResult(rec, httptest.NewRequest(http.MethodGet, "/result?slot=9", nil))
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("wrong-slot response = %d %s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestStaleEnvelopeDoesNotTouchActiveMetrics(t *testing.T) {

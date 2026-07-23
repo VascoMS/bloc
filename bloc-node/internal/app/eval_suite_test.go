@@ -362,3 +362,92 @@ func TestPollResultsReportsNonPrefixCompletions(t *testing.T) {
 		t.Fatalf("non-prefix result was not retained: %+v", results)
 	}
 }
+
+func TestPollResultsStopsOnTerminalFailureAndRetainsReason(t *testing.T) {
+	muxes := make([]*http.ServeMux, 3)
+	servers := make([]*httptest.Server, 3)
+	for i := range muxes {
+		muxes[i] = http.NewServeMux()
+		servers[i] = httptest.NewServer(muxes[i])
+		defer servers[i].Close()
+	}
+	muxes[0].HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, Result{Slot: 12, NodeID: 0, Metrics: Metrics{MetricsFinalized: true}})
+	})
+	muxes[1].HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusUnprocessableEntity, struct {
+			Status string `json:"status"`
+			SlotFailure
+		}{Status: "failed", SlotFailure: SlotFailure{Slot: 12, Reason: "share", FailedAtUnixNano: 42}})
+	})
+	muxes[2].HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
+	})
+
+	started := time.Now()
+	results, err := pollResultsForSlotWithURL(http.DefaultClient, 3, 12, time.Minute, func(id int) string {
+		return servers[id].URL + "/result"
+	})
+	if err == nil {
+		t.Fatal("expected terminal failure")
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("terminal failure was treated as pending: %v", time.Since(started))
+	}
+	if len(results) != 1 || results[0].NodeID != 0 {
+		t.Fatalf("completed results were not retained: %+v", results)
+	}
+	if got := err.Error(); got != "node 1 reported terminal failure for slot 12: share" {
+		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestTerminalFailureRemainsVisibleAndExcludedFromLatencySummary(t *testing.T) {
+	scenario := evalScenario{ID: "n4-b128-libp2p", Nodes: 4, BatchSize: 128, Network: "libp2p"}
+	run := EvalRun{
+		RunID: "measured-r001-n4-b128-libp2p", ScenarioID: scenario.ID, Phase: "measured",
+		Slot: 12, Nodes: 4, BatchSize: 128, Network: "libp2p",
+		Error: "node 1 reported terminal failure for slot 12: share",
+	}
+	path := filepath.Join(t.TempDir(), "run_measurements.csv")
+	if err := writeRunMeasurements(path, []EvalRun{run}); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	rows, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("CSV rows = %d, want 2", len(rows))
+	}
+	errorColumn := -1
+	for i, name := range rows[0] {
+		if name == "error" {
+			errorColumn = i
+			break
+		}
+	}
+	if errorColumn < 0 || rows[1][errorColumn] != run.Error {
+		t.Fatalf("terminal reason missing from CSV: %v", rows)
+	}
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded EvalRun
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Error != run.Error {
+		t.Fatalf("terminal reason missing from JSONL shape: %+v", decoded)
+	}
+	summary := summarizeScenarios([]evalScenario{scenario}, []EvalRun{run})[0]
+	if summary.Attempted != 1 || summary.Succeeded != 0 || summary.Failed != 1 || summary.Metrics["total_slot_us"].Count != 0 {
+		t.Fatalf("terminal failure entered latency summary: %+v", summary)
+	}
+}

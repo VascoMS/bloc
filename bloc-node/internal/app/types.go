@@ -161,7 +161,21 @@ const (
 	slotPrepared  slotPhase = "prepared"
 	slotRunning   slotPhase = "running"
 	slotCompleted slotPhase = "completed"
+	slotFailed    slotPhase = "failed"
 )
+
+// SlotFailure is the stable terminal failure shape returned by /result. Reason
+// is restricted to the bounded failure labels accepted by node metrics.
+type SlotFailure struct {
+	Slot             uint64 `json:"slot"`
+	Reason           string `json:"reason"`
+	FailedAtUnixNano int64  `json:"failed_at_unix_nano"`
+}
+
+type slotFailureResponse struct {
+	Status string `json:"status"`
+	SlotFailure
+}
 
 // slotState contains everything that must be fresh for an independent
 // protocol sample. Node embeds the active state so the protocol path remains
@@ -185,6 +199,7 @@ type slotState struct {
 	shareCandidates     map[int]*operatorShareCandidates
 	combineAttemptsLeft []int
 	result              *Result
+	failure             *SlotFailure
 	metrics             Metrics
 	metricTimes         metricTimes
 }

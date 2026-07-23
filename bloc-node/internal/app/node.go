@@ -184,21 +184,7 @@ func (n *Node) listenHTTP(outPath string) error {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 	}))
-	mux.HandleFunc("/result", n.instrumentHTTP("result", func(w http.ResponseWriter, r *http.Request) {
-		n.lifecycleMu.RLock()
-		defer n.lifecycleMu.RUnlock()
-		if err := n.validateRequestedSlotLocked(r); err != nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
-		}
-		n.mu.Lock()
-		defer n.mu.Unlock()
-		if n.result == nil {
-			writeJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
-			return
-		}
-		writeJSON(w, http.StatusOK, n.result)
-	}))
+	mux.HandleFunc("/result", n.instrumentHTTP("result", n.handleResult))
 	server := &http.Server{Addr: n.self.httpListenAddr(), Handler: mux}
 	log.Printf("event=http_listen node_id=%d listen_addr=%s advertise_url=%s", n.self.ID, n.self.httpListenAddr(), n.self.httpAdvertiseURL())
 	go func() {
@@ -212,11 +198,31 @@ func (n *Node) listenHTTP(outPath string) error {
 	return nil
 }
 
+func (n *Node) handleResult(w http.ResponseWriter, r *http.Request) {
+	n.lifecycleMu.RLock()
+	defer n.lifecycleMu.RUnlock()
+	if err := n.validateRequestedSlotLocked(r); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.result != nil {
+		writeJSON(w, http.StatusOK, n.result)
+		return
+	}
+	if n.failure != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, slotFailureResponse{Status: string(slotFailed), SlotFailure: *n.failure})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
+}
+
 type prepareSlotRequest struct {
 	Slot uint64 `json:"slot"`
 }
 
-// handlePrepareSlot replaces a completed slot while retaining the process,
+// handlePrepareSlot replaces a terminal slot while retaining the process,
 // cryptographic material, HTTP server, and libp2p mesh.
 func (n *Node) handlePrepareSlot(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -241,7 +247,7 @@ func (n *Node) prepareSlot(slotID uint64) error {
 	n.mu.Lock()
 	phase := n.phase
 	n.mu.Unlock()
-	if phase != slotCompleted {
+	if phase != slotCompleted && phase != slotFailed {
 		return fmt.Errorf("slot %d is %s and cannot be replaced", n.id, phase)
 	}
 	n.slot.Close()
@@ -263,7 +269,7 @@ func (n *Node) handleSlotStatus(w http.ResponseWriter, r *http.Request) {
 		"slot": n.id, "phase": n.phase, "node_id": n.self.ID,
 		"pending": len(n.pending), "planned": n.planned,
 		"shares": n.retainedShareCountLocked(), "combine_in_flight": n.combineInFlight,
-		"complete": n.result != nil,
+		"complete": n.result != nil, "failure": n.failure,
 	}
 	n.mu.Unlock()
 	if n.slot != nil {
@@ -611,7 +617,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	}
 	planAt := time.Now()
 	n.mu.Lock()
-	if n.planned {
+	if n.planned || n.failure != nil {
 		n.mu.Unlock()
 		return
 	}
@@ -716,7 +722,7 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt, decodedAt, agreedAt, merge
 	now := time.Now()
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.result != nil || n.planned {
+	if n.result != nil || n.failure != nil || n.planned {
 		return
 	}
 	n.planned = true
@@ -831,7 +837,7 @@ func (n *Node) tryCombine() {
 	}
 	n.mu.Lock()
 	n.combineInFlight = false
-	if n.result == nil {
+	if n.result == nil && n.failure == nil {
 		n.metricTimes.threshold = thresholdAt
 		n.metricTimes.combineDone = combineAt
 		n.metricTimes.materialized = materializedAt
@@ -866,7 +872,7 @@ type combineAttempt struct {
 func (n *Node) claimCombine() (combineAttempt, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.result != nil || !n.planned || !n.shareGenerationDone || n.combineInFlight {
+	if n.result != nil || n.failure != nil || !n.planned || !n.shareGenerationDone || n.combineInFlight {
 		return combineAttempt{}, false
 	}
 	shares := n.retainedSharesLocked()
@@ -917,7 +923,7 @@ func (n *Node) finishFailedCombine(attemptVersion uint64) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.combineInFlight = false
-	return n.result == nil && n.shareVersion > attemptVersion
+	return n.result == nil && n.failure == nil && n.shareVersion > attemptVersion
 }
 
 // addWireShare validates and converts a transport share into the BTE library
@@ -1145,12 +1151,21 @@ func (n *Node) recordOutbound(kind string, size int) {
 }
 
 func (n *Node) markSlotFailed(reason string) {
+	reason = normalizeFailureReason(reason)
+	failedAt := time.Now()
 	n.mu.Lock()
+	if n.result != nil || n.failure != nil {
+		n.mu.Unlock()
+		return
+	}
+	n.failure = &SlotFailure{Slot: n.id, Reason: reason, FailedAtUnixNano: failedAt.UnixNano()}
+	n.phase = slotFailed
 	n.failedSlots++
 	n.mu.Unlock()
 	if n.observability != nil {
 		n.observability.slotFailed(reason)
 	}
+	log.Printf("event=slot_failed node_id=%d slot=%d reason=%s", n.self.ID, n.id, reason)
 }
 
 // refreshMetricsLocked derives durations from monotonic readings. Several
@@ -1230,12 +1245,17 @@ func (n *Node) writeResultWhenReady(path string) {
 		n.lifecycleMu.RLock()
 		n.mu.Lock()
 		result := n.result
+		failure := n.failure
 		n.mu.Unlock()
 		n.lifecycleMu.RUnlock()
-		if result == nil {
+		if result == nil && failure == nil {
 			continue
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		var payload any = result
+		if failure != nil {
+			payload = slotFailureResponse{Status: string(slotFailed), SlotFailure: *failure}
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			log.Printf("marshal result: %v", err)
 			return

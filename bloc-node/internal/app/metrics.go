@@ -19,7 +19,7 @@ var (
 	failureMetricLabelNames  = []string{"cluster_id", "node_id", "reason"}
 	httpMetricLabelNames     = []string{"cluster_id", "node_id", "method", "handler", "code"}
 	slotStageNames           = []string{"total", "proposal_preparation", "acs", "merge_plan", "acs_output_decode", "agreed_set", "merge", "ciphertext_decode", "batch_plan", "share_generation", "threshold_wait", "combine", "materialization", "commit_to_plaintext"}
-	slotPhaseNames           = []slotPhase{slotPrepared, slotRunning, slotCompleted}
+	slotPhaseNames           = []slotPhase{slotPrepared, slotRunning, slotCompleted, slotFailed}
 )
 
 type nodeMetrics struct {
@@ -238,6 +238,8 @@ func (m *nodeMetrics) slotCompleted(snapshot Metrics) {
 
 func (m *nodeMetrics) slotFailed(reason string) {
 	m.slotFailedTotal.WithLabelValues(m.clusterID, m.nodeID, normalizeFailureReason(reason)).Inc()
+	m.setPhase(slotFailed)
+	m.setResultAvailable(false)
 }
 
 func (m *nodeMetrics) recordProtocol(direction, kind string, size int) {

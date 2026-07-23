@@ -166,19 +166,25 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-003 — RBC reconstruction mixes roots and omits the post-decode root check
 
 - Severity/category: **P0 — correctness/consensus safety**
+- Remediation status (2026-07-23): **remediated**. Reconstruction now filters
+  ECHOs by the selected root, remains retryable after an incomplete distinct
+  shard set, recomputes the Merkle commitment, and publishes output only when
+  that commitment matches.
 - Stage: reliable broadcast output
-- Evidence: `RBC.tryDecodeValue` checks `countReadys(hash)` and
-  `countEchos(hash)`, then copies every entry in `recvEchos` into Reed-Solomon
-  reconstruction without filtering `RootHash == hash`. It does not reconstruct
+- Original evidence: `RBC.tryDecodeValue` checked `countReadys(hash)` and
+  `countEchos(hash)`, then copied every entry in `recvEchos` into Reed-Solomon
+  reconstruction without filtering `RootHash == hash`. It did not reconstruct
   all shards and verify the Merkle root as required by the HoneyBadger RBC
   algorithm.
-- Impact: under a Byzantine proposer and mixed-root ECHOs, a node can
+- Original impact: under a Byzantine proposer and mixed-root ECHOs, a node could
   reconstruct from shards that did not authenticate to the root that satisfied
-  READY/ECHO thresholds. Existing tests cover one-fault delivery but not this
+  READY/ECHO thresholds. Existing tests covered one-fault delivery but not this
   equivocation schedule.
-- Follow-up: filter ECHOs to the target root, reconstruct, recompute/compare the
-  Merkle root, and add adversarial mixed-root/reordered tests before further
-  distributed evidence is accepted.
+- Validation: adversarial tests reproduce the former mixed output, require no
+  terminal output from mixed/insufficient root-A shards, verify later root-A
+  completion, and reject a reconstructed value whose root is not the selected
+  commitment. The complete ACS safety campaign passed repeated/race tests,
+  `100/100` sustained slots, and the `180/180` n4/n7 matrix.
 
 ### PIR-004 — Application quorum sender is not bound to authenticated libp2p peer
 
@@ -360,19 +366,17 @@ mean the repository has represented this prototype as production-ready.
 These items require a focused patch or adversarial harness before the exact
 impact can be closed:
 
-1. Construct mixed-root RBC schedules for `N=4/7` and determine every possible
-   divergent/corrupted output before implementing PIR-003.
-2. Add conflicting-AUX and multi-epoch-future schedules to bound PIR-006 and
+1. Add conflicting-AUX and multi-epoch-future schedules to bound PIR-006 and
    PIR-007 against the corrected ACS completion rule.
-3. Add a real libp2p integration test that opens a stream as one peer while
+2. Add a real libp2p integration test that opens a stream as one peer while
    claiming another operator ID.
-4. Measure and cap memory/CPU growth for oversized envelopes and many invalid
+3. Measure and cap memory/CPU growth for oversized envelopes and many invalid
    share identities; do not optimize subset search before membership bounds are
    correct.
-5. Audit every public in-memory BTE API with nil/mutated Kyber objects. Decoder
+4. Audit every public in-memory BTE API with nil/mutated Kyber objects. Decoder
    inputs are hardened, but direct callers can construct structures that bypass
    deserialization invariants.
-6. Decide the terminal failure schema and invalid-Ethereum fallback before
+5. Decide the terminal failure schema and invalid-Ethereum fallback before
    implementing either behavior.
 
 ## Paper-To-Code Traceability
@@ -382,7 +386,7 @@ impact can be closed:
 | External encrypted candidate/inclusion-list pipeline | `mempool-il` replay source and `bloc-node` provider | Adapted | Deterministic prototype boundary; no production inclusion-list standard |
 | One slot of encrypted agreement followed by reveal | `SlotACS` plus `bloc-node.handleACSOutput` | Adapted | Implemented integration; Builder/DVT/execution boundary deferred |
 | HoneyBadger `N` RBC + `N` ABA ACS | `rbc.go`, `bba.go`, `acs.go` | Implemented/adapted | Corrected ACS selection rule follows BBA decisions |
-| HoneyBadger erasure/Merkle RBC reconstruction | `RBC.tryDecodeValue` | Contradicted | Mixed-root filtering and root recomputation are missing |
+| HoneyBadger erasure/Merkle RBC reconstruction | `RBC.tryDecodeValue` | Implemented | Reconstruction is root-filtered, retryable, and accepted only after Merkle-root recomputation |
 | Unpredictable common coin | `BBA.tryOutputAgreement` | Contradicted/deferred | Deterministic epoch parity is only a placeholder |
 | Authenticated asynchronous channels | libp2p plus protobuf envelope | Implemented for configured prototype membership | Remote peer IDs are uniquely mapped to operators and bind envelope/share sender claims |
 | BEAT-MEV puncturable-PRF BTE | `prf`, `elgamal`, `be/btd.go` | Implemented at prototype level | Core operations and proof equations present |

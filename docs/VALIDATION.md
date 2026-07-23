@@ -122,8 +122,9 @@ Acceptance requires:
 - retained failure diagnostics containing RBC outputs, BBA decisions, truthy
   proposer IDs, and the ACS waiting reason.
 
-The current gate does not cover mixed-root RBC reconstruction, conflicting AUX
-equivocation, or sufficiently delayed future-epoch messages.
+The gate includes mixed-root RBC rejection and post-decode Merkle commitment
+checks. It does not cover conflicting AUX equivocation or sufficiently delayed
+future-epoch messages.
 
 ## Resource-Safety Gate
 
@@ -320,9 +321,10 @@ go run simulation/main.go
 go run bench/main.go
 ```
 
-The module tests cover ordinary RBC, BBA, ACS, queue, and slot-adapter behavior.
-They do not establish the missing mixed-root, equivocation, future-message, or
-cryptographic-common-coin properties.
+The module tests cover ordinary and mixed-root RBC behavior, post-decode Merkle
+commitment verification, BBA, ACS, queue, and slot-adapter behavior. They do not
+establish the missing equivocation, future-message, or cryptographic-common-coin
+properties.
 
 ## Campaign Runner Portability
 

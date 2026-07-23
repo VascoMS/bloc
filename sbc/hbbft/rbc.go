@@ -314,10 +314,12 @@ func (r *RBC) tryDecodeValue(hash []byte) error {
 		return nil
 	}
 	// At this point we can decode the shards. First we create a new slice of
-	// only sortable proof values.
-	r.outputDecoded = true
+	// only sortable proof values committed to the selected root.
 	var prfs proofs
 	for _, echo := range r.recvEchos {
+		if !bytes.Equal(hash, echo.RootHash) {
+			continue
+		}
 		prfs = append(prfs, echo.ProofRequest)
 	}
 	sort.Sort(prfs)
@@ -330,11 +332,20 @@ func (r *RBC) tryDecodeValue(hash []byte) error {
 	if err := r.enc.Reconstruct(shards); err != nil {
 		return nil
 	}
+	reconstructedProofs, err := makeProofRequests(shards)
+	if err != nil {
+		return err
+	}
+	if len(reconstructedProofs) == 0 ||
+		!bytes.Equal(hash, reconstructedProofs[0].RootHash) {
+		return nil
+	}
 	var value []byte
 	for _, data := range shards[:r.numDataShards] {
 		value = append(value, data...)
 	}
 	r.output = value
+	r.outputDecoded = true
 	return nil
 }
 

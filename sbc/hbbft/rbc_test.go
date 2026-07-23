@@ -8,6 +8,7 @@ import (
 	"github.com/klauspost/reedsolomon"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test RBC where 1 node will not provide its value. We use 4 nodes that will
@@ -153,6 +154,88 @@ func TestMakeProofRequests(t *testing.T) {
 	for _, r := range reqs {
 		assert.True(t, validateProof(r))
 	}
+}
+
+func TestRBCRejectsMixedRootReconstruction(t *testing.T) {
+	rbc := NewRBC(Config{ID: 0, N: 4, F: 1}, 0)
+	t.Cleanup(rbc.stop)
+
+	valueA := []byte("root-A-payload!!")
+	valueB := []byte("root-B-payload!!")
+
+	shardsA, err := makeShards(rbc.enc, valueA)
+	require.NoError(t, err)
+	proofsA, err := makeProofRequests(shardsA)
+	require.NoError(t, err)
+
+	shardsB, err := makeShards(rbc.enc, valueB)
+	require.NoError(t, err)
+	proofsB, err := makeProofRequests(shardsB)
+	require.NoError(t, err)
+
+	handleEcho := func(senderID uint64, proof *ProofRequest) {
+		t.Helper()
+		require.NoError(t, rbc.HandleMessage(senderID, &BroadcastMessage{
+			Payload: &EchoRequest{ProofRequest: *proof},
+		}))
+	}
+	handleReady := func(senderID uint64, root []byte) {
+		t.Helper()
+		require.NoError(t, rbc.HandleMessage(senderID, &BroadcastMessage{
+			Payload: &ReadyRequest{RootHash: root},
+		}))
+	}
+
+	// Two senders echo the same root-A shard, so root A has the required
+	// sender count but only one distinct shard. A root-B shard must not be used
+	// to make that reconstruction possible.
+	handleEcho(0, proofsA[2])
+	handleEcho(1, proofsA[2])
+	handleEcho(2, proofsB[0])
+	handleReady(0, proofsA[0].RootHash)
+	handleReady(1, proofsA[0].RootHash)
+	handleReady(2, proofsA[0].RootHash)
+
+	assert.Nil(t, rbc.Output())
+	assert.False(t, rbc.progress().OutputDecoded)
+
+	// A second distinct root-A shard makes reconstruction valid and must still
+	// be accepted after the earlier incomplete attempt.
+	handleEcho(3, proofsA[3])
+	assert.Equal(t, valueA, rbc.Output())
+	assert.True(t, rbc.progress().OutputDecoded)
+}
+
+func TestRBCRejectsReconstructionWithWrongRoot(t *testing.T) {
+	rbc := NewRBC(Config{ID: 0, N: 4, F: 1}, 0)
+	t.Cleanup(rbc.stop)
+
+	shardsA, err := makeShards(rbc.enc, []byte("root-A-payload!!"))
+	require.NoError(t, err)
+	proofsA, err := makeProofRequests(shardsA)
+	require.NoError(t, err)
+
+	shardsB, err := makeShards(rbc.enc, []byte("root-B-payload!!"))
+	require.NoError(t, err)
+
+	rootA := proofsA[0].RootHash
+	for senderID := uint64(0); senderID < 2; senderID++ {
+		index := int(senderID)
+		proof := proofsA[index]
+		rbc.recvEchos[senderID] = &EchoRequest{ProofRequest: ProofRequest{
+			RootHash: rootA,
+			Proof:    [][]byte{shardsB[index]},
+			Index:    proof.Index,
+			Leaves:   proof.Leaves,
+		}}
+	}
+	for senderID := uint64(0); senderID < 3; senderID++ {
+		rbc.recvReadys[senderID] = rootA
+	}
+
+	require.NoError(t, rbc.tryDecodeValue(rootA))
+	assert.Nil(t, rbc.Output())
+	assert.False(t, rbc.progress().OutputDecoded)
 }
 
 type bcResult struct {

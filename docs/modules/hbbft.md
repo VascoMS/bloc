@@ -104,12 +104,11 @@ For a matching root:
 - `2F+1` READYs plus `F+1` ECHOs make the current implementation attempt
   reconstruction.
 
-The paper algorithm reconstructs from ECHOs matching the decided root and
-recomputes the Merkle root after erasure decoding. The current
-`tryDecodeValue` checks matching counts but then places every stored ECHO shard,
-including other roots, into reconstruction and does not recompute the root.
-This is a confirmed deviation and correctness finding, not an intended BLOC
-adaptation.
+`tryDecodeValue` reconstructs only from ECHOs whose root matches the selected
+READY/ECHO threshold root. It leaves decoding retryable when the matching
+ECHOs do not yet provide enough distinct shards, recomputes the Merkle root
+after erasure decoding, and stores output only when that root equals the
+selected commitment.
 
 ### 3. BBA BV-broadcast
 
@@ -257,7 +256,6 @@ Important deviations from the paper model are:
 
 - a deterministic epoch-parity value replaces the cryptographic common coin;
 - transport authentication and sender-ID binding are delegated to the caller;
-- RBC reconstruction does not filter/recheck the chosen Merkle root correctly;
 - Byzantine AUX equivocation is overwritten rather than rejected; and
 - the default block-body and RBC length wrapper use Go gob and are not stable
   cross-language protocol formats.
@@ -267,7 +265,8 @@ Important deviations from the paper model are:
 Existing tests cover:
 
 - correct-sender and one-fault RBC delivery, proof construction, shard
-  reconstruction, and consumptive output;
+  reconstruction, mixed-root rejection, post-decode commitment verification,
+  retry after an incomplete distinct-shard set, and consumptive output;
 - BBA all-good/faulty inputs, per-value BVAL tracking, validated AUX admission,
   and epoch advancement;
 - ACS common-subset agreement, required truthy RBC outputs, all-BBA completion,
@@ -277,9 +276,9 @@ Existing tests cover:
   and post-agreement hooks; and
 - the inherited HoneyBadger driver and local transport separately.
 
-The current tests do not cover mixed-root RBC reconstruction, authenticated
-peer-to-sender binding, conflicting AUX messages from one Byzantine sender, or
-future messages more than one epoch ahead. These gaps are recorded in the
+The current tests do not cover authenticated peer-to-sender binding, conflicting
+AUX messages from one Byzantine sender, or future messages more than one epoch
+ahead. These gaps are recorded in the
 [implementation review](../../docs/archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
 Run `go test ./...` from `sbc/hbbft`.
@@ -288,8 +287,8 @@ Run `go test ./...` from `sbc/hbbft`.
 
 - The common coin is not cryptographic and does not satisfy the paper's
   asynchronous liveness assumption against an adaptive scheduler.
-- The current RBC reconstruction and BBA equivocation/future-queue behaviors
-  require correctness patches before adversarial deployment.
+- The current BBA equivocation/future-queue behaviors require correctness
+  patches before broader adversarial deployment.
 - Constructors assume valid, unique membership configuration.
 - The package contains inherited spelling, error-handling, and API issues;
   several state accessors are safe only under the active caller discipline.

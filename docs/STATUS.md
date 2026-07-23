@@ -15,7 +15,8 @@ transactions.
 
 The active integration uses libp2p-authenticated operator messaging, scoped BTE
 decoding, deterministic BEAT-MEV `Opt-2` sub-batching, bounded proposal and
-envelope sizes, bounded share retention/recovery, split public configuration and
+envelope sizes, root-bound RBC reconstruction with post-decode commitment
+verification, bounded share retention/recovery, split public configuration and
 operator-local secrets, Prometheus metrics, local evaluators, and VM/EC2 remote
 evaluation. The source-led protocol review and current module boundaries are
 documented in [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the
@@ -50,10 +51,6 @@ same-region-versus-cross-region evidence.
 
 ## Open Blockers And Risks
 
-- **RBC reconstruction:** inherited reconstruction can combine ECHO shards from
-  different roots without recomputing the selected Merkle root. Current results
-  must not be presented as Byzantine-safety evidence until this is corrected and
-  covered by adversarial tests.
 - **Terminal failure publication:** failed slots do not yet expose a durable
   terminal result that controllers can distinguish from a pending timeout.
 - **Mempool provider timeout:** `mempool-http` uses the default HTTP client without
@@ -77,7 +74,7 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the M4 mixed-root RBC, terminal-failure, and mempool-timeout issues.
+1. Complete the remaining M4 terminal-failure and mempool-timeout issues.
 2. Add the p99, resource, scale-extension, and fault-evidence support required by
    the accepted research-question contract.
 3. Freeze and validate one release-candidate source SHA and image digest before

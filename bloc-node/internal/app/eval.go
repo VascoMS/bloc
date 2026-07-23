@@ -470,52 +470,67 @@ func writeEvalOutputs(outDir string, runs []EvalRun) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "success", "consistent", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
+	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "success", "consistent", "error", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		for _, result := range run.Results {
-			record := []string{
-				run.RunID,
-				run.Network,
-				strconv.Itoa(run.Nodes),
-				strconv.Itoa(run.Threshold),
-				strconv.Itoa(run.BMax),
-				strconv.Itoa(run.BatchSize),
-				strconv.Itoa(run.TxSize),
-				strconv.FormatUint(run.TxGas, 10),
-				strconv.FormatUint(run.MaxDecryptedGas, 10),
-				strconv.Itoa(run.MaxDecryptedTxs),
-				strconv.FormatBool(run.Success),
-				strconv.FormatBool(run.Consistent),
-				strconv.FormatUint(result.NodeID, 10),
-				strconv.Itoa(result.Metrics.AgreedLists),
-				strconv.Itoa(result.Metrics.AgreedCiphertexts),
-				strconv.Itoa(result.Metrics.SelectedCiphertexts),
-				strconv.Itoa(result.Metrics.SkippedCiphertexts),
-				strconv.FormatUint(result.Metrics.SelectedGas, 10),
-				strconv.Itoa(result.Ciphertexts),
-				strconv.FormatInt(result.Metrics.TotalSlotMS, 10),
-				strconv.FormatInt(result.Metrics.ACSMS, 10),
-				strconv.FormatInt(result.Metrics.CommitToPlaintextMS, 10),
-				strconv.FormatInt(result.Metrics.TotalSlotUS, 10),
-				strconv.FormatInt(result.Metrics.ProposalPreparationUS, 10),
-				strconv.FormatInt(result.Metrics.ACSUS, 10),
-				strconv.FormatInt(result.Metrics.MergePlanUS, 10),
-				strconv.FormatInt(result.Metrics.ShareGenerationUS, 10),
-				strconv.FormatInt(result.Metrics.ThresholdWaitUS, 10),
-				strconv.FormatInt(result.Metrics.CombineUS, 10),
-				strconv.Itoa(result.Metrics.CombineAttempts),
-				strconv.FormatInt(result.Metrics.MaterializationUS, 10),
-				strconv.FormatInt(result.Metrics.CommitToPlaintextUS, 10),
-				strconv.FormatBool(result.Metrics.MetricsFinalized),
-				strconv.FormatInt(result.Metrics.OutboundBytes["acs"], 10),
-				strconv.FormatInt(result.Metrics.OutboundBytes["share"], 10),
+		if len(run.Results) == 0 {
+			if err := w.Write(evalSummaryRecord(run, nil)); err != nil {
+				return err
 			}
-			if err := w.Write(record); err != nil {
+			continue
+		}
+		for _, result := range run.Results {
+			if err := w.Write(evalSummaryRecord(run, &result)); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func evalSummaryRecord(run EvalRun, result *Result) []string {
+	record := []string{
+		run.RunID,
+		run.Network,
+		strconv.Itoa(run.Nodes),
+		strconv.Itoa(run.Threshold),
+		strconv.Itoa(run.BMax),
+		strconv.Itoa(run.BatchSize),
+		strconv.Itoa(run.TxSize),
+		strconv.FormatUint(run.TxGas, 10),
+		strconv.FormatUint(run.MaxDecryptedGas, 10),
+		strconv.Itoa(run.MaxDecryptedTxs),
+		strconv.FormatBool(run.Success),
+		strconv.FormatBool(run.Consistent),
+		run.Error,
+	}
+	if result == nil {
+		return append(record, make([]string, 23)...)
+	}
+	return append(record,
+		strconv.FormatUint(result.NodeID, 10),
+		strconv.Itoa(result.Metrics.AgreedLists),
+		strconv.Itoa(result.Metrics.AgreedCiphertexts),
+		strconv.Itoa(result.Metrics.SelectedCiphertexts),
+		strconv.Itoa(result.Metrics.SkippedCiphertexts),
+		strconv.FormatUint(result.Metrics.SelectedGas, 10),
+		strconv.Itoa(result.Ciphertexts),
+		strconv.FormatInt(result.Metrics.TotalSlotMS, 10),
+		strconv.FormatInt(result.Metrics.ACSMS, 10),
+		strconv.FormatInt(result.Metrics.CommitToPlaintextMS, 10),
+		strconv.FormatInt(result.Metrics.TotalSlotUS, 10),
+		strconv.FormatInt(result.Metrics.ProposalPreparationUS, 10),
+		strconv.FormatInt(result.Metrics.ACSUS, 10),
+		strconv.FormatInt(result.Metrics.MergePlanUS, 10),
+		strconv.FormatInt(result.Metrics.ShareGenerationUS, 10),
+		strconv.FormatInt(result.Metrics.ThresholdWaitUS, 10),
+		strconv.FormatInt(result.Metrics.CombineUS, 10),
+		strconv.Itoa(result.Metrics.CombineAttempts),
+		strconv.FormatInt(result.Metrics.MaterializationUS, 10),
+		strconv.FormatInt(result.Metrics.CommitToPlaintextUS, 10),
+		strconv.FormatBool(result.Metrics.MetricsFinalized),
+		strconv.FormatInt(result.Metrics.OutboundBytes["acs"], 10),
+		strconv.FormatInt(result.Metrics.OutboundBytes["share"], 10),
+	)
 }

@@ -435,6 +435,39 @@ func TestTerminalFailureRemainsVisibleAndExcludedFromLatencySummary(t *testing.T
 	if errorColumn < 0 || rows[1][errorColumn] != run.Error {
 		t.Fatalf("terminal reason missing from CSV: %v", rows)
 	}
+	localDir := t.TempDir()
+	if err := writeEvalOutputs(localDir, []EvalRun{run}); err != nil {
+		t.Fatal(err)
+	}
+	localFile, err := os.Open(filepath.Join(localDir, "summary.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localFile.Close()
+	localRows, err := csv.NewReader(localFile).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(localRows) != 2 {
+		t.Fatalf("eval-local CSV rows = %d, want header plus failed run: %v", len(localRows), localRows)
+	}
+	localErrorColumn, nodeColumn, totalColumn := -1, -1, -1
+	for i, name := range localRows[0] {
+		switch name {
+		case "error":
+			localErrorColumn = i
+		case "node_id":
+			nodeColumn = i
+		case "total_slot_us":
+			totalColumn = i
+		}
+	}
+	if localErrorColumn < 0 || localRows[1][localErrorColumn] != run.Error {
+		t.Fatalf("terminal reason missing from eval-local CSV: %v", localRows)
+	}
+	if nodeColumn < 0 || totalColumn < 0 || localRows[1][nodeColumn] != "" || localRows[1][totalColumn] != "" {
+		t.Fatalf("failed run acquired a synthetic node or latency sample: %v", localRows[1])
+	}
 	encoded, err := json.Marshal(run)
 	if err != nil {
 		t.Fatal(err)

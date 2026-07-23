@@ -173,17 +173,7 @@ func (n *Node) listenHTTP(outPath string) error {
 	mux.HandleFunc("/slot/prepare", n.instrumentHTTP("slot_prepare", n.handlePrepareSlot))
 	mux.HandleFunc("/slot/status", n.instrumentHTTP("slot_status", n.handleSlotStatus))
 	mux.HandleFunc("/metrics", n.instrumentHTTP("metrics", n.handleMetrics))
-	mux.HandleFunc("/start", n.instrumentHTTP("start", func(w http.ResponseWriter, r *http.Request) {
-		if err := n.validateRequestedSlot(r); err != nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
-		}
-		if err := n.startConsensus(); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
-	}))
+	mux.HandleFunc("/start", n.instrumentHTTP("start", n.handleStart))
 	mux.HandleFunc("/result", n.instrumentHTTP("result", n.handleResult))
 	server := &http.Server{Addr: n.self.httpListenAddr(), Handler: mux}
 	log.Printf("event=http_listen node_id=%d listen_addr=%s advertise_url=%s", n.self.ID, n.self.httpListenAddr(), n.self.httpAdvertiseURL())
@@ -196,6 +186,25 @@ func (n *Node) listenHTTP(outPath string) error {
 		go n.writeResultWhenReady(outPath)
 	}
 	return nil
+}
+
+func (n *Node) handleStart(w http.ResponseWriter, r *http.Request) {
+	if err := n.validateRequestedSlot(r); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := n.startConsensus(); err != nil {
+		n.mu.Lock()
+		failure := n.failure
+		n.mu.Unlock()
+		if failure != nil {
+			writeJSON(w, http.StatusOK, slotFailureResponse{Status: string(slotFailed), SlotFailure: *failure})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 }
 
 func (n *Node) handleResult(w http.ResponseWriter, r *http.Request) {
@@ -415,11 +424,16 @@ func (n *Node) startConsensus() error {
 		defer n.inputMu.Unlock()
 		start := time.Now()
 		n.mu.Lock()
+		if n.failure != nil {
+			err = fmt.Errorf("slot %d already failed: %s", n.failure.Slot, n.failure.Reason)
+			n.mu.Unlock()
+			return
+		}
 		n.phase = slotRunning
-		n.mu.Unlock()
 		if n.observability != nil {
 			n.observability.slotStarted()
 		}
+		n.mu.Unlock()
 		list, buildErr := n.buildInclusionList()
 		if buildErr != nil {
 			err = buildErr

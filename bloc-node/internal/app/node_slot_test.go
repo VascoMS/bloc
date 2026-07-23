@@ -171,6 +171,44 @@ func TestResultEndpointDistinguishesPendingSuccessFailureAndWrongSlot(t *testing
 	})
 }
 
+func TestStartPublishesSynchronousFailureThroughResult(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.cfg.Provider.Mode = "unsupported"
+	start := httptest.NewRecorder()
+	n.handleStart(start, httptest.NewRequest(http.MethodPost, "/start?slot=1", nil))
+	if start.Code/100 != 2 {
+		t.Fatalf("start bypassed terminal result: %d %s", start.Code, start.Body.String())
+	}
+	result := httptest.NewRecorder()
+	n.handleResult(result, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+	if result.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("terminal result = %d %s", result.Code, result.Body.String())
+	}
+	var body struct {
+		Status string `json:"status"`
+		SlotFailure
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "failed" || body.Slot != 1 || body.Reason != "proposal" {
+		t.Fatalf("unexpected terminal result: %+v", body)
+	}
+}
+
+func TestFailureBeforeStartRemainsTerminalAndReplaceable(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.cfg.Provider.Mode = "unsupported"
+	n.markSlotFailed("decode")
+	_ = n.startConsensus()
+	if n.phase != slotFailed || n.failure == nil || n.failure.Reason != "decode" {
+		t.Fatalf("start reverted terminal failure: phase=%s failure=%+v", n.phase, n.failure)
+	}
+	if err := n.prepareSlot(2); err != nil {
+		t.Fatalf("terminal slot was no longer replaceable: %v", err)
+	}
+}
+
 func TestStaleEnvelopeDoesNotTouchActiveMetrics(t *testing.T) {
 	n := lifecycleTestNode(t)
 	n.mu.Lock()

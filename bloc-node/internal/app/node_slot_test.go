@@ -209,6 +209,26 @@ func TestFailureBeforeStartRemainsTerminalAndReplaceable(t *testing.T) {
 	}
 }
 
+func TestSuccessBeforeStartRemainsTerminalAndReplaceable(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.cfg.Provider.Mode = "unsupported"
+	n.mu.Lock()
+	n.phase = slotCompleted
+	n.result = &Result{Slot: 1, NodeID: 0}
+	n.mu.Unlock()
+	start := httptest.NewRecorder()
+	n.handleStart(start, httptest.NewRequest(http.MethodPost, "/start?slot=1", nil))
+	if start.Code/100 != 2 {
+		t.Fatalf("start bypassed terminal success: %d %s", start.Code, start.Body.String())
+	}
+	if n.phase != slotCompleted || n.result == nil {
+		t.Fatalf("start reverted terminal success: phase=%s result=%+v", n.phase, n.result)
+	}
+	if err := n.prepareSlot(2); err != nil {
+		t.Fatalf("completed slot was no longer replaceable: %v", err)
+	}
+}
+
 func TestStaleEnvelopeDoesNotTouchActiveMetrics(t *testing.T) {
 	n := lifecycleTestNode(t)
 	n.mu.Lock()

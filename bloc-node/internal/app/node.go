@@ -196,9 +196,14 @@ func (n *Node) handleStart(w http.ResponseWriter, r *http.Request) {
 	if err := n.startConsensus(); err != nil {
 		n.mu.Lock()
 		failure := n.failure
+		result := n.result
 		n.mu.Unlock()
 		if failure != nil {
 			writeJSON(w, http.StatusOK, slotFailureResponse{Status: string(slotFailed), SlotFailure: *failure})
+			return
+		}
+		if result != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"status": slotCompleted, "slot": result.Slot})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -426,6 +431,11 @@ func (n *Node) startConsensus() error {
 		n.mu.Lock()
 		if n.failure != nil {
 			err = fmt.Errorf("slot %d already failed: %s", n.failure.Slot, n.failure.Reason)
+			n.mu.Unlock()
+			return
+		}
+		if n.result != nil {
+			err = fmt.Errorf("slot %d already completed", n.result.Slot)
 			n.mu.Unlock()
 			return
 		}

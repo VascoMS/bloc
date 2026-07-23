@@ -10,6 +10,7 @@ coverage.out
 
 # Python environments and caches
 .venv/
+.worktrees/
 __pycache__/
 .pytest_cache/
 *.pyc

@@ -183,8 +183,11 @@ mean the repository has represented this prototype as production-ready.
 - Validation: adversarial tests reproduce the former mixed output, require no
   terminal output from mixed/insufficient root-A shards, verify later root-A
   completion, and reject a reconstructed value whose root is not the selected
-  commitment. The complete ACS safety campaign passed repeated/race tests,
-  `100/100` sustained slots, and the `180/180` n4/n7 matrix.
+  commitment. Clean source `ebb69c53e593309fa8c124aad35b80bd9c50f640`
+  passed the complete `acs-safety-issue9-ebb69c5` campaign, including
+  repeated/race tests, `100/100` sustained slots, and the `180/180` n4/n7
+  matrix. The same source and RBC hashes also passed the exact race selection
+  under Linux/arm64 in `results/local/rbc-mixed-root/ebb69c5/`.
 
 ### PIR-004 — Application quorum sender is not bound to authenticated libp2p peer
 

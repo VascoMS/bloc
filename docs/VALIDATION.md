@@ -126,6 +126,12 @@ The gate includes mixed-root RBC rejection and post-decode Merkle commitment
 checks. It does not cover conflicting AUX equivocation or sufficiently delayed
 future-epoch messages.
 
+The runner records its host OS in `manifest.json`. When the full campaign runs
+on a non-Linux host, retain a separate Linux execution of the same
+`Test(RBC|ACS|BBA|SlotACS)` race selection and bind that result to the same clean
+commit and RBC source hashes. A passing non-Linux race stage alone does not
+satisfy the Linux acceptance item.
+
 ## Resource-Safety Gate
 
 Changes to proposal ingestion, transport envelopes, share admission, or BTE

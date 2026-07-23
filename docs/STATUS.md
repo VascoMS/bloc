@@ -3,7 +3,7 @@
 - Last reviewed: `2026-07-23`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `8de4af179465f9cd77920eacdcca163ca5cef01d`
+- Last known good source: `ebb69c53e593309fa8c124aad35b80bd9c50f640`
 
 ## Current Prototype State
 
@@ -86,10 +86,12 @@ same-region-versus-cross-region evidence.
 
 ## Last Known Good Baseline
 
-- Date: `2026-07-18`
-- Source: `8de4af179465f9cd77920eacdcca163ca5cef01d`
+- Date: `2026-07-23`
+- Source: `ebb69c53e593309fa8c124aad35b80bd9c50f640`
 - Local safety evidence:
-  `results/local/acs-common-subset-safety/acs-common-subset-20260715/`
+  `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
+- Linux RBC/ACS/BBA race evidence:
+  `results/local/rbc-mixed-root/ebb69c5/`
 - Accepted distributed evidence:
   `results/ec2/m3-three-region-synthetic-accepted-20260718-1/`
 - Canonical validation commands and evidence semantics:

@@ -63,6 +63,42 @@
 - `docs/DECISIONS.md`: major design decisions
 - `docs/CHANGELOG.md`: implementation-level history
 
+## Planning And Task Tracking
+
+Planning is deliberately split by altitude:
+
+- `docs/ROADMAP.md` defines milestone objectives, ordering, deliverables, and
+  completion criteria.
+- `docs/STATUS.md` records the active milestone, current blockers, accepted
+  evidence, baseline, and immediate next actions.
+- `docs/VALIDATION.md` defines the research-question evidence contract,
+  experiment semantics, and acceptance rules.
+- The [BLOC Thesis Prototype GitHub
+  Project](https://github.com/users/VascoMS/projects/1) tracks operational state.
+- Repository issues contain granular task scope, dependencies, acceptance
+  criteria, validation commands, progress notes, and links to resulting pull
+  requests or evidence.
+- `docs/CHANGELOG.md`, module deep dives, and deployment runbooks record durable
+  implementation or operational conclusions after a task changes them.
+
+Do not create one local Markdown progress log per issue. Update the issue while
+work is in flight and update the canonical local owner when durable behavior,
+evidence semantics, or operating procedure changes.
+
+### Issue lifecycle
+
+1. Before work starts, assign one roadmap milestone, Project area and priority,
+   explicit dependencies, acceptance criteria, validation, and documentation
+   impact.
+2. Set Project status to `In progress` when implementation begins. Record a
+   short start comment with the intended branch and validation gate.
+3. Set status to `Blocked` only with a concrete blocking condition and update
+   `STATUS.md` when the blocker is milestone-level rather than task-local.
+4. Post material checkpoints and rejected evidence; routine command transcripts
+   stay in local artifacts.
+5. On completion, link the commit or pull request, summarize validation, update
+   every named canonical document, set status to `Done`, and close the issue.
+
 ## Status Maintenance
 
 `docs/STATUS.md` is concise live state, not an experiment diary. Review it when

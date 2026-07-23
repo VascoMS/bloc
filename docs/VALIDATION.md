@@ -340,55 +340,140 @@ they are no longer awaiting their first real EC2 pilot.
 
 ## Research-Question-Oriented Validation
 
-### RQ1: Slot-Level Timing
+The evaluated system begins with mempool inclusion-list collection and ends when
+the distributed BLOC sidecars publish the same deterministic ordered plaintext
+transaction set. Builder API adaptation, execution payload construction,
+DVT/SSV signing, and block publication are not part of any measured interval.
 
-The prototype supports local multi-slot p50/p95 evaluation and accepted
-three-region honest-path p50/p95 measurement. Available intervals cover proposal,
-ACS, Merge + Plan and its substages, share generation, threshold wait, combine,
-materialization, and total slot time.
+### Shared Final-Campaign Contract
 
-It does not include DVT threshold signing, block publication, or
-execution-client validation latency.
+The primary honest-path matrix is:
+
+| Dimension | Values |
+|---|---|
+| Operators and threshold | `n=4,t=3`; `n=7,t=5` |
+| Batch | `8`, `32`, `128` |
+| Environment | persistent local; matched same-region VM; matched three-region VM |
+| Sampling | 10 retained warmups; 1,000 measured observations per scenario |
+| Scheduling | balanced measurement blocks; scenario order and seed retained |
+
+The scale extension adds `n=10,t=7` at batches `8/32/128` and batch `512` at
+`n=4/7/10`. Each extension scenario begins with a separate 30-observation pilot.
+If the pilot is viable, run 1,000 independent final observations. If it clearly
+exceeds the 12-second envelope or fails frequently, retain 100 independent
+boundary observations and report that no p99 feasibility claim is made.
+
+Matched VM campaigns use the same source SHA, image digest, instance class,
+transaction source and corpus, configuration, warmup policy, and block schedule.
+Warmups, failures, inconsistent runs, and timeouts are retained. Successful-run
+latency quantiles never hide the attempted-run completion rate.
+
+Headline statistics are Type-7 p50, p95, and p99, maximum, attempted/successful
+counts, and the fraction completing consistently within 12 seconds. Quantile
+tables include non-parametric order-statistic confidence intervals. A scenario
+supports a positive timing conclusion only when at least 99% of attempts finish
+consistently within 12 seconds, empirical p99 is below 12 seconds, and no
+successful attempt contains divergent outputs. Campaign acceptance is based on
+artifact integrity and completeness, not on obtaining a positive result.
+
+### RQ1: Sidecar Timing Feasibility
+
+Question: can the distributed sidecar produce a common deterministic plaintext
+transaction set within an Ethereum-slot-compatible time budget?
+
+Measure critical-path latency from the slot trigger until the slowest correct
+node publishes its result, commit-to-plaintext latency, every existing protocol
+stage, deadline completion, and cross-node consistency. Report local,
+same-region, and three-region results separately and express latency as both
+milliseconds and a fraction of the 12-second slot.
+
+The answer applies only to the BLOC sidecar. It does not establish complete
+block building, signing, publication, or execution-client feasibility.
 
 ### RQ2: Coordination And Cryptographic Overhead
 
-Evaluator and Prometheus outputs expose ACS/share message and byte counts,
-selected work, stage timing, and bounded recovery attempts. BTE benchmarks cover
-hybrid full-path and optimization dimensions. Complete M4-style CPU, memory,
-bandwidth, plaintext-baseline, and signing-overhead characterization is not yet
-accepted evidence.
+Question: what latency, communication, throughput, and resource overhead do
+distributed sidecar coordination and BTE introduce?
+
+For every primary scenario record proposal, ACS, merge/planning, share
+generation, threshold wait, combine, and materialization time; ACS/share message
+and byte counts; CPU seconds; peak resident memory; selected work; and derived
+transactions per second. Stage totals and merge/plan substages must satisfy their
+documented additivity tolerances.
+
+Benchmark client encryption, ciphertext expansion, share generation,
+reconstruction, allocations, and normal/`sqrt(B)`/`2*sqrt(B)`/parallel BTE
+variants. Use a benchmark-only plaintext/raw-submission control for relative
+client overhead. Do not add a second production protocol mode solely to create a
+baseline.
+
+The answer identifies dominant stages, computational versus network effects,
+and how overhead changes with batch, operator count, threshold, topology, and
+BTE optimization. It does not include DVT threshold-signing overhead.
 
 ### RQ3: Faults And Adversarial Behavior
 
-Local fault modes cover omitted/empty proposals, withheld shares, corrupted
-shares, and fixed send delay. Consistency checks compare `BatchID`, merged-set
-identity, plaintext ordering, and parsed Ethereum hashes.
+Question: how robust is the sidecar under operator faults and adversarial
+behavior?
 
-The prototype does not yet provide targeted ciphertext censorship, public share
-attribution, a cryptographic common coin, mixed-root RBC protection, or complete
-Byzantine equivocation/future-message tests.
+The experimental fault model is `n=3f+1`, `t=2f+1`: `n=4,f=1,t=3` and
+`n=7,f=2,t=5`, with selected `n=10,f=3,t=7` threshold confirmation. Run 30
+measured repetitions for operational proposal omission, target omission by
+faulty operators, share withholding/corruption, and bounded delay. Use
+deterministic tests and reordered-delivery simulations for mixed RBC roots,
+equivocation, malformed encodings/proofs, wrong slot or cluster scope,
+commitment mismatch, conflicting shares, and future/conflicting BBA messages.
 
-### RQ4: Economic And Resource Cost
+Within-bound liveness scenarios must complete with identical outputs at all
+correct nodes. A target present in every correct proposal must survive up to
+`f` faulty omissions. Up to `f` withheld shares must reconstruct. A
+threshold-breaking case may fail, but it must publish a bounded durable failure
+and never an inconsistent success. Malformed inputs must be rejected or fail the
+slot without producing divergent accepted output.
 
-Existing evidence records ciphertext size, protocol bytes/messages, selected gas
-and transactions, stage timing, process resource observations, and EC2 campaign
-metadata. It does not yet provide a complete proposer-reward model, historical
-fee-market analysis, or a controlled infrastructure-cost comparison.
+Experiments demonstrate only exercised behavior. Pending-plaintext secrecy
+relies on the BTE construction and state-transition tests; it is not proven by a
+campaign. General asynchronous Byzantine liveness is not claimed while the
+common coin remains deterministic. Trusted setup and absent public share proofs
+remain explicit prototype limitations.
+
+### RQ4: Submission And Operational Cost
+
+Question: what incremental submission and operational costs does BLOC impose on
+users and sidecar operators?
+
+Use at least 100 deterministic valid signed transactions spanning simple
+transfers and multiple calldata sizes. Measure client encryption latency, raw
+transaction bytes, BTE ciphertext bytes, placeholder/carrier bytes, submission
+expansion, and a gas-equivalent carrier estimate. The carrier estimate is not
+reported as paid gas unless a future on-chain path actually includes it; target
+execution gas remains outside this off-chain sidecar measurement.
+
+Translate accepted RQ2 measurements into CPU seconds, peak memory, inbound and
+outbound bytes, dedicated-cluster hourly cost, and amortized cost per slot and
+transaction. Record the provider, region, instance type, pricing date, transfer
+assumptions, and formula. Separate dedicated provisioning cost from truly
+incremental resource use.
+
+Do not claim proposer profitability, lost MEV, PBS competitiveness, historical
+congestion effects, or actual on-chain user fees.
 
 ## Milestone Evidence Map
 
 | Milestone | Primary evidence |
 |---|---|
 | `M0. Current Prototype Baseline` | module tests, demo smoke, documented protocol boundary |
-| `M1. Slot Timing and Baseline Latency Evidence` | local `eval-suite`; full corrected 315-sample refresh remains outstanding |
+| `M1. Slot Timing and Baseline Latency Evidence` | historical local `eval-suite` baseline; the final p99-capable local campaign belongs to M5 |
 | `M2. Distributed Deployment-Ready BLOC Sidecar` | Compose rehearsal, Prometheus/Grafana, `eval-remote` |
 | `M3. Distributed Sidecar Metrics Collection` | accepted three-region VM/EC2 campaign and raw artifacts |
-| `M4. Coordination, Cryptographic, and Resource Overhead Characterization` | future evaluator counters, BTE sweeps, and CPU/memory/bandwidth evidence |
-| `M5. Fault and Adversarial Robustness Validation` | future adversarial tests and fault campaigns |
-| `M6. Builder API Boundary` | future Builder-facing adapter serving agreed transaction sets |
+| `M4. Evaluation Readiness And Prototype Hardening` | correctness blockers, terminal failures, mempool timeout, release-candidate validation and freeze |
+| `M5. Performance, Scaling, And Resource Evidence` | final p99 local/VM campaigns, resource evidence, BTE/client benchmarks, `n=10`/batch-512 extension |
+| `M6. Fault And Adversarial Robustness Evidence` | deterministic adversarial regressions and 30-observation operational fault campaigns |
+| `M7. Cost Analysis And Thesis Evidence Synthesis` | user/operator cost model, RQ answer matrix, figures, limitations, checksummed final archive |
 
-M3 is the latest completed milestone. No next active milestone is currently
-selected; see [STATUS.md](STATUS.md).
+M3 is the latest completed milestone and M4 is active; see
+[STATUS.md](STATUS.md). Granular task state is tracked in the [BLOC Thesis
+Prototype GitHub Project](https://github.com/users/VascoMS/projects/1).
 
 ## Review Checklist
 

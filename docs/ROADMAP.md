@@ -1,11 +1,18 @@
 # Roadmap
 
-This roadmap is now ordered around the thesis path from local protocol baseline evidence to VM/EC2-per-sidecar distributed evidence, then to later Builder API and DVT integration work.
+This roadmap is ordered around answering the thesis research questions for BLOC
+as an independently operating distributed sidecar. The evaluated path ends when
+correct operators produce the same deterministic plaintext transaction set.
+Builder API and DVT integration are future integration strategies rather than
+requirements of the current evaluation.
 
 Milestone state is maintained in [`STATUS.md`](STATUS.md). M3 is the latest
-completed milestone, and no next active milestone has been selected.
+completed milestone and M4 is the active milestone. Granular execution is
+tracked in the [BLOC Thesis Prototype GitHub
+Project](https://github.com/users/VascoMS/projects/1).
 
-Builder API compatibility, production mev-boost behavior, real proposer signing, and PBS prefix enforcement are explicitly deferred until the sidecar can first be deployed, observed, and evaluated across independently hosted operator machines.
+Builder API compatibility, production mev-boost behavior, proposer signing, and
+PBS prefix enforcement are explicitly outside the two-week evidence programme.
 
 ## M0. Current Prototype Baseline
 
@@ -34,7 +41,8 @@ Builder API compatibility, production mev-boost behavior, real proposer signing,
 ## M2. Distributed Deployment-Ready BLOC Sidecar
 
 - RQs advanced: `RQ1`, `RQ2`
-- Objective: make `bloc-node` deployable as a DVT-adjacent sidecar cluster with first-class visibility.
+- Objective: make `bloc-node` deployable as an independently operating
+  distributed sidecar cluster with first-class visibility.
 - Deliverables:
   - multi-stage `bloc-node` Docker image,
   - local/container listen-vs-advertise config support,
@@ -71,52 +79,116 @@ rehearsal under `deploy/k8s/`. They are retained as optional historical
 artifacts in case they are useful later, but Kubernetes is not part of the
 current roadmap, validation path, or thesis metric collection plan.
 
-## M4. Coordination, Cryptographic, and Resource Overhead Characterization
+## M4. Evaluation Readiness And Prototype Hardening
 
-- RQs advanced: `RQ2`, `RQ4`
-- Objective: isolate the cost of ACS coordination, BTE cryptography, and sidecar resource usage.
+- Status: active.
+- RQs advanced: prerequisite for `RQ1`–`RQ4`.
+- Objective: freeze an admissible release candidate whose known defects cannot
+  invalidate correctness or experimental interpretation.
 - Deliverables:
-  - ACS/share message and byte counts,
-  - BTE share-generation, combine, and optimization sweeps,
-  - CPU/memory/bandwidth characterization for sidecar deployments.
+  - mixed-root RBC reconstruction rejection and adversarial regression tests;
+  - durable terminal slot failures distinguishable from pending results;
+  - a bounded mempool-provider HTTP timeout;
+  - p99/confidence-interval reporting, balanced long-campaign scheduling, and
+    non-contaminating operator-resource collection support;
+  - the deterministic transaction corpus and client-overhead benchmark needed
+    by the final evidence campaigns;
+  - final RQ definitions, experiment matrix, artifact contract, and GitHub task
+    hierarchy;
+  - a complete release-candidate validation gate and frozen source/image ID.
 - Done criteria:
-  - overhead evidence is separated from orchestration/setup overhead,
-  - results can support comparison tables in the thesis.
+  - all four Go module suites, targeted race/fuzz checks, campaign-runner tests,
+    and the local ACS safety gate pass;
+  - measurement-threatening blockers are resolved or explicitly shown not to
+    affect the selected campaigns;
+  - deterministic common coin, trusted setup/DKG, and absent public share
+    proofs are documented as bounded prototype limitations rather than claimed
+    production properties;
+  - the frozen source SHA and image digest are recorded in `STATUS.md`.
 
-## M5. Fault and Adversarial Robustness Validation
+## M5. Performance, Scaling, And Resource Evidence
 
-- RQs advanced: `RQ3`
-- Objective: validate safety and liveness behavior under omission, withholding, malformed data, and near-threshold faults.
+- RQs advanced: `RQ1`, `RQ2`, `RQ4`.
+- Objective: collect the final honest-path timing, coordination, cryptographic,
+  resource, and scaling evidence from the frozen release candidate.
+- Primary matrix:
+  - `n=4,t=3` and `n=7,t=5`;
+  - batches `8/32/128`;
+  - local, matched same-region VM, and three-region VM environments;
+  - 10 warmups and 1,000 measured observations per scenario for p99.
+- Scale extension:
+  - `n=10,t=7` at batches `8/32/128`;
+  - batch `512` at `n=4/7/10`;
+  - a separate 30-observation pilot, followed by 1,000 measurements when the
+    scenario remains viable or 100 boundary observations when it clearly
+    exceeds the slot envelope.
 - Deliverables:
-  - documented fault scenarios,
-  - targeted correctness tests,
-  - remote or local evaluator runs showing expected success/failure behavior.
+  - p50/p95/p99, maximum, deadline completion, confidence intervals, and stage
+    attribution;
+  - CPU, peak memory, allocations, messages, bytes, and throughput;
+  - accepted results from the deterministic transaction corpus and client
+    encryption/expansion benchmark;
+  - share generation, reconstruction, and BTE optimization benchmarks;
+  - exact local/same-region/three-region artifact bundles.
 - Done criteria:
-  - correct operators agree on the same accepted encrypted set under tested faults,
-  - liveness failure conditions are explicit.
+  - planned observations are retained without unexplained filtering;
+  - failures and timeouts remain visible outside successful-run quantiles;
+  - matched VM campaigns use the same source, image, instance class, corpus,
+    configuration, and balanced execution blocks;
+  - accepted artifacts pass the evidence contract in `VALIDATION.md`.
 
-## M6. Builder API Boundary
+## M6. Fault And Adversarial Robustness Evidence
 
-- RQs advanced: future `RQ1`, `RQ4`
-- Objective: expose BLOC-agreed transaction sets through a Builder-facing development boundary.
+- RQs advanced: `RQ3`.
+- Objective: characterize agreement, liveness, rejection, and bounded failure
+  under the explicit `n=3f+1`, `t=2f+1` prototype fault model.
 - Deliverables:
-  - stable BLOC candidate artifact,
-  - Builder-API-shaped development adapter,
-  - clear labeling that the adapter is not yet production Ethereum block building.
+  - deterministic mixed-root, equivocation, malformed-input, wrong-scope,
+    commitment-mismatch, and conflicting-share tests;
+  - 30-observation operational campaigns for proposal omission, target
+    censorship, share withholding/corruption, and bounded delay at `n=4/7`;
+  - selected `n=10,f=3` threshold-withholding confirmation;
+  - a matrix separating demonstrated behavior, tested invariants, inherited
+    cryptographic assumptions, and unresolved limitations.
 - Done criteria:
-  - the adapter serves the real BLOC-agreed ordered transaction set,
-  - real execution payload construction remains clearly separated unless implemented later.
+  - no tested scenario produces divergent successful outputs;
+  - within-bound liveness scenarios complete consistently;
+  - threshold-breaking and malformed selected-input scenarios publish bounded,
+    durable failure rather than hanging or accepting inconsistent output;
+  - claims are restricted to exercised schedules because the prototype common
+    coin is not cryptographic.
 
-## M7. SSV/DVT Signing Integration
+## M7. Cost Analysis And Thesis Evidence Synthesis
 
-- RQs advanced: future `RQ1`, `RQ3`, `RQ4`
-- Objective: integrate the BLOC sidecar with a real DVT workflow after deployment and Builder-boundary evidence exists.
+- RQs advanced: `RQ1`–`RQ4`.
+- Objective: translate accepted technical evidence into thesis-ready answers,
+  cost models, figures, tables, and limitations.
 - Deliverables:
-  - pre-sign verification design,
-  - signing-boundary tests,
-  - explicit SSV integration notes or adapter implementation.
+  - user byte-expansion and clearly qualified carrier-gas estimates derived
+    from the accepted M5 corpus and client benchmarks;
+  - operator CPU/memory/network demand and dated dedicated-infrastructure cost
+    estimates per slot and transaction;
+  - an RQ-to-evidence matrix, fault outcome table, figures, confidence
+    intervals, limitations, and a final evidence archive with checksums.
 - Done criteria:
-  - integration claims are backed by a real signing or pre-sign verification path, not by architectural intent alone.
+  - every RQ has a scoped answer or an explicit negative/inconclusive result;
+  - raw measurements and financial assumptions are traceable;
+  - no claims are made about paid on-chain placeholder gas, proposer rewards,
+    lost MEV, Builder/PBS economics, or complete block-publication latency;
+  - the final evidence bundle is reproducible and integrity-verifiable.
+
+## Future Integration Target: Builder API Boundary
+
+- Expose the agreed ordered transaction set through a Builder-facing adapter.
+- Treat execution payload construction and real mev-boost behavior as new work,
+  not implied by the sidecar evaluation.
+
+## Future Integration Target: SSV/DVT Signing
+
+- Integrate the Builder-facing boundary with a real DVT workflow only after the
+  independent sidecar evaluation is complete.
+- Require real pre-sign verification and signing evidence before making DVT
+  integration claims.
 
 ## Deferred Target: PBS Prefix Enforcement
 

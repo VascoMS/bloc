@@ -1,7 +1,7 @@
 # Status
 
-- Last reviewed: `2026-07-19`
-- Active milestone: `not selected`
+- Last reviewed: `2026-07-23`
+- Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
 - Last known good source: `8de4af179465f9cd77920eacdcca163ca5cef01d`
 
@@ -54,35 +54,38 @@ same-region-versus-cross-region evidence.
   different roots without recomputing the selected Merkle root. Current results
   must not be presented as Byzantine-safety evidence until this is corrected and
   covered by adversarial tests.
-- **BBA liveness and equivocation:** the common coin is deterministic rather than
-  cryptographic, and conflicting/future-message behavior still needs hardening.
-- **Setup and key custody:** the CRS retains inherited insecure diagonal
-  elements, and one trusted generator still creates all operator shares. A
-  secure setup ceremony and DKG remain unimplemented.
-- **Share verification:** admission and recovery work are bounded, but shares do
-  not carry public correctness proofs. Invalid candidates are discovered through
-  bounded reconstruction attempts.
 - **Terminal failure publication:** failed slots do not yet expose a durable
   terminal result that controllers can distinguish from a pending timeout.
 - **Mempool provider timeout:** `mempool-http` uses the default HTTP client without
   an explicit request timeout.
-- **Evidence completeness:** the accepted M3 campaign characterizes one
-  three-region topology. An independent confirmation and matched current-build
-  same-region control are still required before stronger repeatability or causal
-  topology-overhead claims. The full corrected 315-sample M1 baseline also
-  remains outstanding.
+- **Evidence completeness:** the final evidence contract requires p99-capable
+  local, same-region, and three-region campaigns, complete operator resource
+  measurements, RQ3 fault campaigns, and user/operator cost analysis. The
+  accepted M3 campaign remains valid historical p50/p95 evidence but is not the
+  final release-candidate campaign.
+
+## Bounded Prototype Limitations
+
+- BBA uses a deterministic rather than cryptographic common coin; RQ3 liveness
+  claims will be restricted to the exercised schedules and fault model.
+- The CRS retains inherited insecure diagonal elements and a trusted generator
+  creates all shares; secure setup and DKG are future work.
+- Shares have no public correctness proof. Admission and subset recovery remain
+  bounded, and invalid shares are detected through reconstruction failure.
+- Builder API integration, DVT/SSV signing, execution payload construction, and
+  block publication are future integration work and outside the measured path.
 
 ## Immediate Next Actions
 
-1. Archive the accepted three-region artifact root with checksums while keeping
-   its source SHA, image digest, raw CSV/JSON, report, and cleanup evidence
-   together.
-2. Decide whether to collect an independent M3 confirmation and a matched
-   same-region control before making stronger repeatability or causal claims.
-3. Select the next active milestone in a separately authorized planning task.
-4. Continue the RBC, BBA/common-coin, secure-CRS/DKG, public-share-verification,
-   terminal-failure, and mempool-timeout work without overstating existing
-   latency evidence.
+1. Complete the M4 mixed-root RBC, terminal-failure, and mempool-timeout issues.
+2. Add the p99, resource, scale-extension, and fault-evidence support required by
+   the accepted research-question contract.
+3. Freeze and validate one release-candidate source SHA and image digest before
+   running the final local and VM campaigns.
+4. Track granular work in the [BLOC Thesis Prototype GitHub
+   Project](https://github.com/users/VascoMS/projects/1) while keeping this file
+   limited to milestone state, major blockers, accepted evidence, and next
+   actions.
 
 ## Last Known Good Baseline
 
@@ -97,14 +100,12 @@ same-region-versus-cross-region evidence.
 - Reproduction and deployment procedures: [WORKFLOWS.md](WORKFLOWS.md) and the
   module-local deployment runbooks.
 
-## Deferred Work
+## Planned And Deferred Work
 
-- `M4. Coordination, Cryptographic, and Resource Overhead Characterization`
-- `M5. Fault and Adversarial Robustness Validation`
-- `M6. Builder API Boundary`
-- `M7. SSV/DVT Signing Integration`
-- `Deferred Target: PBS Prefix Enforcement`
+- Planned after M4: `M5. Performance, Scaling, And Resource Evidence`
+- Planned after M5: `M6. Fault And Adversarial Robustness Evidence`
+- Planned after M6: `M7. Cost Analysis And Thesis Evidence Synthesis`
+- Deferred: Builder API boundary, SSV/DVT signing integration, secure CRS/DKG,
+  public share proofs, cryptographic common coin, and PBS prefix enforcement.
 
-These roadmap items remain deferred until a separate task explicitly selects an
-active milestone. See [ROADMAP.md](ROADMAP.md) for their objectives and done
-criteria.
+See [ROADMAP.md](ROADMAP.md) for milestone objectives and done criteria.

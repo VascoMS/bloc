@@ -92,6 +92,27 @@ the live status surface.
 Every handoff must state whether `STATUS.md` was reviewed and whether it required
 an update.
 
+## GitHub Task Tracking Contract
+
+The [BLOC Thesis Prototype project](https://github.com/users/VascoMS/projects/1)
+is the operational tracker for roadmap execution. `docs/ROADMAP.md` owns the
+top-down milestone objectives, `docs/STATUS.md` owns current milestone and
+blocker state, and GitHub issues own task-level scope, progress, acceptance
+criteria, and validation evidence.
+
+- Every non-trivial roadmap task must have one repository issue and project
+  item before implementation begins.
+- Set the issue's GitHub milestone and Project `Roadmap target` to the matching
+  roadmap milestone. Keep `Status`, `Priority`, and `Area` current.
+- Post material progress, blockers, evidence decisions, and validation outcomes
+  to the issue. Do not reproduce that task diary in `STATUS.md`.
+- Each issue must name the canonical local documents it can change. Update
+  those documents in the same pull request as the behavior or evidence change.
+- When work changes milestone state, major blockers, accepted evidence, the
+  baseline, or immediate actions, update `STATUS.md` as well as the issue.
+- Close an issue only after its acceptance and validation sections are
+  satisfied or after recording why it was deliberately superseded.
+
 ## Repository Rules
 
 - Keep durable cross-cutting documentation in root `docs/`.

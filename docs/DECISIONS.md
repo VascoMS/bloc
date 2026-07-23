@@ -306,3 +306,57 @@ Use this file for major architecture, protocol, and workflow decisions.
   outcome.
 - Related files: `AGENTS.md`, `docs/STATUS.md`, `docs/DEVELOPMENT.md`,
   `docs/WORKFLOWS.md`, `docs/VALIDATION.md`, `deploy/`
+
+## 0019. Evaluate BLOC as an independent distributed sidecar
+
+- Date: 2026-07-23
+- Status: Accepted
+- Context: The proposal paper framed BLOC as a multi-proposer component directly
+  integrated into an SSV/DVT stack and included block signing/publication in its
+  evaluation. The implemented thesis prototype and current contribution instead
+  focus on mempool inclusion-list collection, ACS, deterministic merge/planning,
+  BTE decryption, and common transaction-set materialization.
+- Options considered: resume direct SSV integration before evaluation; imply the
+  sidecar timings cover block production; or make the sidecar output the measured
+  boundary and retain Builder API/DVT work as a future integration strategy.
+- Decision: The thesis evaluates BLOC as an independently operating cluster run
+  alongside operator infrastructure. The measured path starts at mempool/slot
+  input and ends at the identical ordered plaintext transaction set. Builder API
+  adaptation, execution payload construction, DVT signing, and publication are
+  explicitly outside the current timing and correctness claims.
+- Rationale: This boundary matches the implemented contribution, can be
+  evaluated rigorously within the thesis schedule, and avoids presenting an
+  unimplemented integration as experimental evidence.
+- Consequences: RQ1 is necessary-but-not-sufficient sidecar timing feasibility;
+  RQ2 measures sidecar coordination/BTE rather than DVT signing; RQ3 uses a
+  sidecar operator fault model; RQ4 covers submission and operating cost rather
+  than proposer economics. Builder API and SSV/DVT remain future targets.
+- Related files: `docs/ROADMAP.md`, `docs/VALIDATION.md`, `docs/STATUS.md`,
+  `docs/ARCHITECTURE.md`
+
+## 0020. Use canonical roadmap/status docs with GitHub issues for execution
+
+- Date: 2026-07-23
+- Status: Accepted
+- Context: The thesis evidence programme needs enough granularity to coordinate
+  hardening, instrumentation, local/cloud campaigns, fault experiments, and
+  analysis without turning `STATUS.md` into a task diary or creating one local
+  progress document per task.
+- Options considered: track everything only in Markdown; make GitHub the sole
+  source of project truth; or split ownership between canonical top-down docs
+  and issue-level operational state.
+- Decision: `ROADMAP.md` owns milestone objectives and done criteria,
+  `STATUS.md` owns live milestone/blocker/evidence state, and `VALIDATION.md`
+  owns the RQ evidence contract. The BLOC GitHub Project tracks workflow fields
+  and repository issues own granular task scope, dependencies, progress,
+  acceptance, and validation. Durable implementation conclusions update the
+  canonical local owner in the same change.
+- Rationale: The split preserves an agent-readable repository state while using
+  GitHub for assignment, prioritization, dependencies, and work-in-progress
+  communication.
+- Consequences: Non-trivial roadmap work requires a project issue. Issue closure
+  requires evidence and canonical-document updates. Project state never replaces
+  the `STATUS.md` maintenance contract, and issue diaries are not copied into
+  local Markdown.
+- Related files: `AGENTS.md`, `docs/DEVELOPMENT.md`, `docs/ROADMAP.md`,
+  `docs/STATUS.md`, `docs/VALIDATION.md`

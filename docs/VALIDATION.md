@@ -141,10 +141,14 @@ polling must preserve these outcomes:
 - success returns HTTP 200 with the stable materialized `Result`;
 - the first terminal failure returns HTTP 422 with stable slot, bounded reason,
   and failure timestamp on every read;
+- a synchronous failure reached through `/start` returns a bounded 2xx notice
+  and remains available as the authoritative 422 `/result`, rather than leaking
+  the underlying dynamic error or bypassing evaluator polling;
 - a wrong-slot read remains HTTP 409;
 - late protocol progress cannot replace a terminal failure with success;
 - a failed slot can be replaced only by a strictly greater slot; and
-- evaluator JSONL/CSV retains the failure reason while successful-only latency
+- evaluator JSON, JSONL, and both CSV formats retain a run-level failure reason
+  even with zero successful node results, while successful-only latency
   summaries receive no sample from that run.
 
 Run both the normal and race suites:

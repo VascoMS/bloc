@@ -80,7 +80,9 @@ The active process exposes:
 - `/tx`: accept and encrypt direct candidates while the slot is prepared;
 - `/slot/prepare`: replace a completed or failed slot with a strictly greater ID;
 - `/slot/status`: phase, pending/plan/share state, and diagnostic ACS progress;
-- `/start`: build and input the local proposal once;
+- `/start`: build and input the local proposal once; a synchronous terminal
+  failure returns a bounded HTTP 200 failure notice so controllers proceed to
+  the authoritative `/result` response;
 - `/result`: HTTP 202 while pending, 200 with the stable success `Result`, or
   422 with the stable terminal failure; and
 - `/metrics`: Prometheus collectors.
@@ -346,9 +348,10 @@ selected ciphertext decoding/planning, or share generation call
 paths cannot replace that outcome. Reasons are normalized to the bounded
 `proposal`, `acs`, `decode`, `planning`, `share`, `combine`, or `unknown`
 labels. `/result` returns the same HTTP 422 failure on repeated reads, while
-`/slot/status` includes it for diagnostics. Local and remote evaluators stop
-polling on 422, retain the bounded reason in JSONL/CSV error fields, and exclude
-the failed observation from latency summaries.
+`/slot/status` includes it for diagnostics. Local, persistent, and remote
+evaluators stop polling on 422, retain the bounded reason in JSON/JSONL and both
+CSV formats, emit a run-level row even when no node succeeded, and exclude the
+failed observation from latency summaries.
 
 Some inbound ACS/share errors are only logged and do not call
 `markSlotFailed`, because another valid message may still allow progress.
@@ -448,9 +451,10 @@ The suite tests sender binding, exact/oversized envelope reads, outbound size
 rejection, proposal bounds, share retention/pruning, and bounded n=10 recovery.
 It also covers pending/success/failure/wrong-slot result reads, repeated failure
 reads, failed-slot replacement, late-success rejection, evaluator 422 handling,
-and failure exclusion from latency summaries. It does not yet exercise an
-oversized malicious remote stream end-to-end or cover a deterministic
-invalid-Ethereum fallback.
+failure-before-start ordering, synchronous start failure routing, legacy
+`eval-local` failure rows, and failure exclusion from latency summaries. It does
+not yet exercise an oversized malicious remote stream end-to-end or cover a
+deterministic invalid-Ethereum fallback.
 
 Run `go test ./...` from `bloc-node`.
 

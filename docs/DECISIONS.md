@@ -376,9 +376,11 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Add a mutually exclusive `failed` slot phase and bounded
   `SlotFailure{slot, reason, failed_at_unix_nano}`. `/result` keeps HTTP 202 for
   pending and 200 for success, returns HTTP 422 for terminal failure, and keeps
-  HTTP 409 for a wrong slot. The first terminal outcome is immutable until a
-  strictly greater slot replaces it. Evaluators stop polling on 422, retain the
-  reason, and exclude that run from successful latency samples.
+  HTTP 409 for a wrong slot. A synchronous `/start` failure returns a bounded
+  2xx notice so evaluators continue to the authoritative 422 result instead of
+  aborting on a dynamic internal error. The first terminal outcome is immutable
+  until a strictly greater slot replaces it. Evaluators stop polling on 422,
+  retain the reason, and exclude that run from successful latency samples.
 - Rationale: One idempotent result boundary gives local and remote controllers
   a deterministic classification without adding protocol messages or allowing
   failed observations into latency claims. Normalized reasons keep API payloads

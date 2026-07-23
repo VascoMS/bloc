@@ -63,16 +63,14 @@ Prometheus collectors.
 
 `slotState` owns everything that must be fresh for one protocol execution:
 
-- slot ID and `prepared/running/completed` phase;
+- slot ID and `prepared/running/completed/failed` phase;
 - one `SlotACS` and its serialization lock;
 - pending encrypted candidates and deduplication set;
 - immutable-use batch plan and materialization prefix;
 - accepted shares and deduplication/version state;
 - share-generation and combine single-flight flags;
-- result, stage timestamps, and per-slot metrics.
-
-There is no terminal `failed` phase. Failure recording increments counters but
-leaves the slot without a successful result.
+- mutually exclusive success result or bounded terminal `SlotFailure`;
+- stage timestamps and per-slot metrics.
 
 ## HTTP And Process Lifecycle
 
@@ -80,21 +78,21 @@ The active process exposes:
 
 - `/healthz`: ready only after libp2p is connected to every configured peer;
 - `/tx`: accept and encrypt direct candidates while the slot is prepared;
-- `/slot/prepare`: replace a completed slot with a strictly greater ID;
+- `/slot/prepare`: replace a completed or failed slot with a strictly greater ID;
 - `/slot/status`: phase, pending/plan/share state, and diagnostic ACS progress;
 - `/start`: build and input the local proposal once;
-- `/result`: HTTP 202 until a result exists, then the stable JSON result; and
+- `/result`: HTTP 202 while pending, 200 with the stable success `Result`, or
+  422 with the stable terminal failure; and
 - `/metrics`: Prometheus collectors.
 
 Requests may include `?slot=`. When present it must equal the active slot;
 omitting it preserves compatibility with older evaluator clients.
 
 `prepareSlot` holds the lifecycle write lock, requires the current phase to be
-`completed`, closes the old ACS tree, installs a fresh `slotState`, and retains
-the process, HTTP server, BTE object, and libp2p mesh. The lifecycle lock also
-waits for in-flight sends/handlers before replacement. A failed/pending slot
-cannot currently be replaced through this API; the evaluator must restart the
-cluster.
+`completed` or `failed`, closes the old ACS tree, installs a fresh `slotState`,
+and retains the process, HTTP server, BTE object, and libp2p mesh. The lifecycle
+lock also waits for in-flight sends/handlers before replacement. A pending slot
+cannot be replaced through this API.
 
 ## Proposal Construction
 
@@ -343,11 +341,14 @@ and the finalized metrics snapshot.
 
 Failures during proposal construction, ACS input, accepted-list decoding,
 selected ciphertext decoding/planning, or share generation call
-`markSlotFailed`. That increments failure observability but does not set a
-terminal phase, store a reason in `slotState`, or create an error result. The
-slot therefore remains fail-closed—no plaintext/result is published—but remote
-controllers observe it as pending until timeout and cannot prepare the next
-slot without restarting the process.
+`markSlotFailed`. The first call atomically fixes phase `failed` and stores
+`SlotFailure{slot, reason, failed_at_unix_nano}`; later calls and late success
+paths cannot replace that outcome. Reasons are normalized to the bounded
+`proposal`, `acs`, `decode`, `planning`, `share`, `combine`, or `unknown`
+labels. `/result` returns the same HTTP 422 failure on repeated reads, while
+`/slot/status` includes it for diagnostics. Local and remote evaluators stop
+polling on 422, retain the bounded reason in JSONL/CSV error fields, and exclude
+the failed observation from latency summaries.
 
 Some inbound ACS/share errors are only logged and do not call
 `markSlotFailed`, because another valid message may still allow progress.
@@ -445,8 +446,11 @@ Current `bloc-node` tests cover:
 
 The suite tests sender binding, exact/oversized envelope reads, outbound size
 rejection, proposal bounds, share retention/pruning, and bounded n=10 recovery.
-It does not yet exercise an oversized malicious remote stream end-to-end or
-cover terminal failure results and a deterministic invalid-Ethereum fallback.
+It also covers pending/success/failure/wrong-slot result reads, repeated failure
+reads, failed-slot replacement, late-success rejection, evaluator 422 handling,
+and failure exclusion from latency summaries. It does not yet exercise an
+oversized malicious remote stream end-to-end or cover a deterministic
+invalid-Ethereum fallback.
 
 Run `go test ./...` from `bloc-node`.
 
@@ -459,7 +463,6 @@ Run `go test ./...` from `bloc-node`.
   bounded by shared v2 configuration. Public share correctness proofs are still
   unavailable, so bounded subset recovery remains a prototype fallback.
 - `mempool-http` proposal fetch has no explicit timeout.
-- Failure is fail-closed but not represented as a terminal slot/result state.
 - Ethereum validation is syntactic only and invalid raw bytes still produce a
   completed result with per-item errors.
 - There is no execution payload, Builder API, DVT signing, slashing,

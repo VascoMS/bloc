@@ -218,8 +218,9 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Consequences: Old v2 configs receive defaults and generated configs emit them
   explicitly. Oversized proposals/envelopes and conflicting or out-of-scope
   shares are rejected with bounded-label metrics. A low recovery cap can reject
-  a batch for which a later valid subset exists. Terminal failure publication,
-  public share verification, and mempool timeouts remain separate work.
+  a batch for which a later valid subset exists. Public share verification and
+  mempool timeouts remain separate work; terminal failure publication was
+  completed later in M4 without changing this resource-limit decision.
 - Related files: `bloc-node/internal/app/config.go`,
   `bloc-node/internal/app/transport_libp2p.go`, `bloc-node/internal/app/node.go`,
   `bte/btd-impl-main/be/cluster.go`
@@ -360,3 +361,32 @@ Use this file for major architecture, protocol, and workflow decisions.
   local Markdown.
 - Related files: `AGENTS.md`, `docs/DEVELOPMENT.md`, `docs/ROADMAP.md`,
   `docs/STATUS.md`, `docs/VALIDATION.md`
+
+## 0021. Publish bounded terminal slot failures through the result boundary
+
+- Date: 2026-07-23
+- Status: Accepted
+- Context: Fail-closed proposal, ACS, decode, planning, and share errors
+  incremented metrics but remained externally indistinguishable from pending
+  work. Controllers timed out, and fault campaigns could not classify an
+  expected protocol failure separately from infrastructure unavailability.
+- Options considered: keep timeout-only inference; return transient errors from
+  `/start`; add a new failure endpoint; or make the existing slot/result
+  lifecycle publish one stable terminal failure.
+- Decision: Add a mutually exclusive `failed` slot phase and bounded
+  `SlotFailure{slot, reason, failed_at_unix_nano}`. `/result` keeps HTTP 202 for
+  pending and 200 for success, returns HTTP 422 for terminal failure, and keeps
+  HTTP 409 for a wrong slot. The first terminal outcome is immutable until a
+  strictly greater slot replaces it. Evaluators stop polling on 422, retain the
+  reason, and exclude that run from successful latency samples.
+- Rationale: One idempotent result boundary gives local and remote controllers
+  a deterministic classification without adding protocol messages or allowing
+  failed observations into latency claims. Normalized reasons keep API payloads
+  and Prometheus label cardinality bounded.
+- Consequences: Failed slots can prepare forward without restarting the
+  cluster. Late success cannot overwrite failure. Results remain active-slot
+  scoped, and transport unavailability is still distinct from an HTTP terminal
+  response.
+- Related files: `bloc-node/internal/app/types.go`,
+  `bloc-node/internal/app/node.go`, `bloc-node/internal/app/eval.go`,
+  `bloc-node/internal/app/eval_persistent.go`, `docs/VALIDATION.md`

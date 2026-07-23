@@ -132,6 +132,29 @@ on a non-Linux host, retain a separate Linux execution of the same
 commit and RBC source hashes. A passing non-Linux race stage alone does not
 satisfy the Linux acceptance item.
 
+## Terminal Failure Gate
+
+Changes to slot lifecycle, protocol failure handling, `/result`, or evaluator
+polling must preserve these outcomes:
+
+- pending returns HTTP 202 and is distinguishable from unavailable transport;
+- success returns HTTP 200 with the stable materialized `Result`;
+- the first terminal failure returns HTTP 422 with stable slot, bounded reason,
+  and failure timestamp on every read;
+- a wrong-slot read remains HTTP 409;
+- late protocol progress cannot replace a terminal failure with success;
+- a failed slot can be replaced only by a strictly greater slot; and
+- evaluator JSONL/CSV retains the failure reason while successful-only latency
+  summaries receive no sample from that run.
+
+Run both the normal and race suites:
+
+```sh
+cd bloc-node
+go test ./...
+go test -race ./...
+```
+
 ## Resource-Safety Gate
 
 Changes to proposal ingestion, transport envelopes, share admission, or BTE

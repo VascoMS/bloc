@@ -379,8 +379,9 @@ impact can be closed:
 4. Audit every public in-memory BTE API with nil/mutated Kyber objects. Decoder
    inputs are hardened, but direct callers can construct structures that bypass
    deserialization invariants.
-5. Decide the terminal failure schema and invalid-Ethereum fallback before
-   implementing either behavior.
+5. Decide the deterministic invalid-Ethereum fallback. The terminal failure
+   schema is implemented as a bounded, idempotent HTTP 422 `SlotFailure` and is
+   covered by lifecycle, evaluator, artifact, and race tests.
 
 ## Paper-To-Code Traceability
 

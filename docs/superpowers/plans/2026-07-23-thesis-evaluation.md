@@ -86,10 +86,10 @@
 
 **Interface:** add `slotFailed` plus bounded `SlotFailure{Slot uint64, Reason string, FailedAtUnixNano int64}`. `/result` remains 202 for pending and 200 with `Result` for success; terminal failure returns 422 with status, slot, and bounded reason. Evaluators stop polling and retain that reason as a failed attempt.
 
-- [ ] Add failing tests for pending, success, terminal failure, repeated reads, wrong-slot reads, and evaluator 422 handling.
-- [ ] Implement idempotent failure storage/reset at the slot lifecycle boundary and expose it from `/result`.
-- [ ] Update JSONL/CSV writers so expected and unexpected terminal failures remain visible and never enter successful latency summaries.
-- [ ] Run `cd bloc-node && go test ./...`, update docs/status, and commit `feat: publish durable terminal slot failures`.
+- [x] Add failing tests for pending, success, terminal failure, repeated reads, wrong-slot reads, and evaluator 422 handling.
+- [x] Implement idempotent failure storage/reset at the slot lifecycle boundary and expose it from `/result`.
+- [x] Update JSONL/CSV writers so expected and unexpected terminal failures remain visible and never enter successful latency summaries.
+- [x] Run `cd bloc-node && go test ./...`, update docs/status, and commit `feat: publish durable terminal slot failures`.
 
 ### Task 4: Bound mempool provider requests
 

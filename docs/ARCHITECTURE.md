@@ -139,7 +139,7 @@ decryption.
 | --- | --- | --- | --- | --- | --- |
 | Source ingestion | `mempool-il` or `bloc-node` | RPC candidates, corpus entries, or direct raw bytes | Normalized candidate metadata | RPC/HTTP outside consensus | Source errors prevent proposal construction or polling refresh |
 | Hybrid encryption | Submitter-side BTE or a prototype adapter | Raw bytes, index, cluster ID, slot | Canonical `Ciphertext`; AEAD and proof context bind cluster, slot, and index | None inside BTE | Encryption or serialization error rejects the item/request |
-| Proposal construction | `bloc-node` | Local encrypted candidates | Protobuf `InclusionList(slot, operator, items)`; local canonical JSON hash is diagnostic before ACS | Proposal becomes RBC input | Provider/encoding failure marks the active slot failed |
+| Proposal construction | `bloc-node` | Local encrypted candidates | Protobuf `InclusionList(slot, operator, items)`; local canonical JSON hash is diagnostic before ACS | Proposal becomes RBC input | Provider/encoding failure publishes a bounded terminal slot failure |
 | Reliable broadcast | `hbbft` RBC | One opaque proposal per proposer | Available proposal bytes associated with proposer ID | PROOF, ECHO, and READY messages | Invalid/duplicate messages are rejected; no timeout exists in the asynchronous core |
 | Binary agreement and ACS | `hbbft` BBA/ACS | RBC completion signals and BBA messages | Common subset of proposer IDs and proposal bytes | BVAL and AUX messages | ACS waits for all BBA decisions and every truthy RBC result |
 | Accepted-list decoding | `bloc-node` | Proposer-tagged ACS output | Lists whose slot equals the active slot and operator equals proposer | None | Any malformed or mismatched accepted list fails the slot closed |

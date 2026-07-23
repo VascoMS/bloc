@@ -3,7 +3,7 @@
 - Last reviewed: `2026-07-23`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `ebb69c53e593309fa8c124aad35b80bd9c50f640`
+- Last known good source: `8b7d5af2589a530e69efa30fe0e057c4d8f23365`
 
 ## Current Prototype State
 
@@ -17,10 +17,11 @@ The active integration uses libp2p-authenticated operator messaging, scoped BTE
 decoding, deterministic BEAT-MEV `Opt-2` sub-batching, bounded proposal and
 envelope sizes, root-bound RBC reconstruction with post-decode commitment
 verification, bounded share retention/recovery, split public configuration and
-operator-local secrets, Prometheus metrics, local evaluators, and VM/EC2 remote
-evaluation. The source-led protocol review and current module boundaries are
-documented in [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the
-[PIR evidence register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+operator-local secrets, durable bounded terminal slot failures, Prometheus
+metrics, local evaluators, and VM/EC2 remote evaluation. The source-led protocol
+review and current module boundaries are documented in
+[ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
+register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
 This remains a research prototype. It does not provide production DKG or key
 custody, public decryption-share verification, a cryptographic common coin,
@@ -51,8 +52,6 @@ same-region-versus-cross-region evidence.
 
 ## Open Blockers And Risks
 
-- **Terminal failure publication:** failed slots do not yet expose a durable
-  terminal result that controllers can distinguish from a pending timeout.
 - **Mempool provider timeout:** `mempool-http` uses the default HTTP client without
   an explicit request timeout.
 - **Evidence completeness:** the final evidence contract requires p99-capable
@@ -74,7 +73,7 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the remaining M4 terminal-failure and mempool-timeout issues.
+1. Complete the remaining M4 mempool-timeout issue.
 2. Add the p99, resource, scale-extension, and fault-evidence support required by
    the accepted research-question contract.
 3. Freeze and validate one release-candidate source SHA and image digest before
@@ -87,7 +86,9 @@ same-region-versus-cross-region evidence.
 ## Last Known Good Baseline
 
 - Date: `2026-07-23`
-- Source: `ebb69c53e593309fa8c124aad35b80bd9c50f640`
+- Source: `8b7d5af2589a530e69efa30fe0e057c4d8f23365`
+- Terminal-failure validation: full bloc-node normal and race suites, including
+  pending/success/failure/wrong-slot lifecycle and evaluator artifact tests.
 - Local safety evidence:
   `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
 - Linux RBC/ACS/BBA race evidence:

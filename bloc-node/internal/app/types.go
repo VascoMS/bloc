@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,13 +16,15 @@ const (
 	clusterConfigVersion = "bloc-cluster-v2"
 	nodeSecretVersion    = "bloc-node-secret-v1"
 
-	defaultMaxProposalBytes               = 8 << 20
-	defaultMaxEnvelopeBytes               = 16 << 20
-	defaultMaxCombineAttemptsPerSubBatch  = 256
-	absoluteMaxProposalBytes              = 32 << 20
-	absoluteMaxEnvelopeBytes              = 64 << 20
-	absoluteMaxCombineAttemptsPerSubBatch = 4096
-	minimumEnvelopeHeadroomBytes          = 64 << 10
+	defaultMaxProposalBytes                     = 8 << 20
+	defaultMaxEnvelopeBytes                     = 16 << 20
+	defaultMaxCombineAttemptsPerSubBatch        = 256
+	defaultMempoolTimeoutMS               int64 = 2000
+	maximumMempoolTimeoutMS               int64 = (1<<63 - 1) / int64(time.Millisecond)
+	absoluteMaxProposalBytes                    = 32 << 20
+	absoluteMaxEnvelopeBytes                    = 64 << 20
+	absoluteMaxCombineAttemptsPerSubBatch       = 4096
+	minimumEnvelopeHeadroomBytes                = 64 << 10
 )
 
 // ConfigFile is the public JSON configuration shared by all BLOC nodes in a
@@ -89,8 +92,9 @@ type NodeSecretConfig struct {
 
 // ProviderConfig selects where a node gets its local inclusion-list proposal.
 type ProviderConfig struct {
-	Mode       string `json:"mode,omitempty"`
-	MempoolURL string `json:"mempool_url,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	MempoolURL       string `json:"mempool_url,omitempty"`
+	MempoolTimeoutMS int64  `json:"mempool_timeout_ms,omitempty"`
 }
 
 // NetworkConfig records the node-to-node transport schema. libp2p is the only
@@ -226,6 +230,7 @@ type Node struct {
 	p2pPrivateKeyHex string
 	suite            curves.Suite
 	transport        Transport
+	mempoolClient    *http.Client
 	faults           FaultConfig
 
 	lifecycleMu    sync.RWMutex

@@ -14,29 +14,30 @@ import (
 )
 
 type ec2ConfigOptions struct {
-	InventoryPath   string
-	ClusterOut      string
-	CRSOut          string
-	SecretsDir      string
-	RemoteEvalOut   string
-	ClusterID       string
-	Nodes           int
-	Threshold       int
-	BMax            int
-	Slot            uint64
-	HTTPPort        int
-	P2PPort         int
-	HTTPHostMode    string
-	P2PHostMode     string
-	ProviderMode    string
-	MempoolURL      string
-	MaxDecryptedGas uint64
-	MaxDecryptedTxs int
-	DefaultTxGas    uint64
-	Limits          ResourceLimits
-	PrometheusURL   string
-	GrafanaURL      string
-	ControllerURL   string
+	InventoryPath    string
+	ClusterOut       string
+	CRSOut           string
+	SecretsDir       string
+	RemoteEvalOut    string
+	ClusterID        string
+	Nodes            int
+	Threshold        int
+	BMax             int
+	Slot             uint64
+	HTTPPort         int
+	P2PPort          int
+	HTTPHostMode     string
+	P2PHostMode      string
+	ProviderMode     string
+	MempoolURL       string
+	MempoolTimeoutMS int64
+	MaxDecryptedGas  uint64
+	MaxDecryptedTxs  int
+	DefaultTxGas     uint64
+	Limits           ResourceLimits
+	PrometheusURL    string
+	GrafanaURL       string
+	ControllerURL    string
 }
 
 type ec2Inventory struct {
@@ -109,6 +110,7 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "libp2p advertised host: private-ip, private-dns, public-ip, or public-dns")
 	fs.StringVar(&options.ProviderMode, "provider", "direct", "inclusion-list provider: direct or mempool-http")
 	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for provider=mempool-http")
+	fs.Int64Var(&options.MempoolTimeoutMS, "mempool-timeout-ms", defaultMempoolTimeoutMS, "mempool-il request timeout in milliseconds; 0 uses the 2000 ms default")
 	fs.Uint64Var(&options.MaxDecryptedGas, "max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	fs.IntVar(&options.MaxDecryptedTxs, "max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
 	fs.Uint64Var(&options.DefaultTxGas, "default-tx-gas", 21000, "default gas assigned to raw/synthetic submissions")
@@ -131,6 +133,9 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 		return ec2ConfigOptions{}, fmt.Errorf("bmax, http-port, and p2p-port must be positive")
 	}
 	if err := validateResourceLimits(options.Limits); err != nil {
+		return ec2ConfigOptions{}, err
+	}
+	if err := validateProviderConfig(ProviderConfig{MempoolTimeoutMS: options.MempoolTimeoutMS}); err != nil {
 		return ec2ConfigOptions{}, err
 	}
 	if _, err := validateEC2HostMode(options.HTTPHostMode); err != nil {
@@ -160,6 +165,15 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		options.Limits = defaultResourceLimits()
 	}
 	if err := validateResourceLimits(options.Limits); err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
+	}
+	provider := ProviderConfig{
+		Mode:             options.ProviderMode,
+		MempoolURL:       options.MempoolURL,
+		MempoolTimeoutMS: options.MempoolTimeoutMS,
+	}
+	normalizeProviderConfig(&provider)
+	if err := validateProviderConfig(provider); err != nil {
 		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 	}
 	nodes := len(inventory.Nodes)
@@ -222,7 +236,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 			MaxDecryptedTxs: options.MaxDecryptedTxs,
 			DefaultTxGas:    options.DefaultTxGas,
 		},
-		Provider: ProviderConfig{Mode: options.ProviderMode, MempoolURL: options.MempoolURL},
+		Provider: provider,
 		Network:  NetworkConfig{Mode: "libp2p"},
 		Limits:   options.Limits,
 	}

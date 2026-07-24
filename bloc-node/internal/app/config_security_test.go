@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
@@ -39,6 +40,9 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	if cfg.Limits != defaultResourceLimits() {
 		t.Fatalf("generated resource limits = %+v, want %+v", cfg.Limits, defaultResourceLimits())
 	}
+	if cfg.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
+		t.Fatalf("generated mempool timeout = %d ms, want %d", cfg.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
+	}
 	var legacyV2 map[string]any
 	if err := json.Unmarshal(publicJSON, &legacyV2); err != nil {
 		t.Fatal(err)
@@ -47,6 +51,7 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 		t.Fatal("generated public config omitted explicit resource limits")
 	}
 	delete(legacyV2, "limits")
+	legacyV2["provider"] = map[string]any{"mode": "direct"}
 	legacyJSON, err := json.Marshal(legacyV2)
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +66,9 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	if legacyCfg.Limits != defaultResourceLimits() {
 		t.Fatalf("legacy v2 defaults = %+v, want %+v", legacyCfg.Limits, defaultResourceLimits())
 	}
+	if legacyCfg.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
+		t.Fatalf("legacy v2 mempool timeout = %d ms, want %d", legacyCfg.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
+	}
 
 	secretPath := filepath.Join(dir, "secrets", "operator-2.json")
 	secret, err := readNodeSecrets(secretPath)
@@ -70,8 +78,12 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	if secret.OperatorID != 2 || secret.ClusterID != cfg.ClusterID {
 		t.Fatalf("unexpected operator secret: %+v", secret)
 	}
-	if _, err := newNode(cfg, secret, 2, FaultConfig{}); err != nil {
+	node, err := newNode(cfg, secret, 2, FaultConfig{})
+	if err != nil {
 		t.Fatalf("construct node from split config: %v", err)
+	}
+	if node.mempoolClient == nil || node.mempoolClient.Timeout != 2*time.Second {
+		t.Fatalf("node mempool client timeout = %v, want 2s", node.mempoolClient)
 	}
 
 	secret.OperatorID = 1
@@ -98,6 +110,17 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	}
 	if _, err := readConfig(clusterPath); err == nil || !strings.Contains(err.Error(), "public CRS hash mismatch") {
 		t.Fatalf("tampered CRS error = %v", err)
+	}
+}
+
+func TestGenConfigRejectsNegativeMempoolTimeout(t *testing.T) {
+	err := genConfig([]string{
+		"--nodes", "4",
+		"--mempool-timeout-ms", "-1",
+		"--out", filepath.Join(t.TempDir(), "cluster.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider.mempool_timeout_ms") {
+		t.Fatalf("negative mempool timeout error = %v, want field-specific rejection", err)
 	}
 }
 

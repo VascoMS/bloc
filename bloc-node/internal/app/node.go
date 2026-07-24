@@ -32,6 +32,9 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 	if err := validateResourceLimits(cfg.Limits); err != nil {
 		return nil, err
 	}
+	if err := validateProviderConfig(cfg.Provider); err != nil {
+		return nil, err
+	}
 	if secrets.ClusterID != cfg.ClusterID {
 		return nil, fmt.Errorf("node secrets cluster %q does not match config cluster %q", secrets.ClusterID, cfg.ClusterID)
 	}
@@ -93,6 +96,7 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 		p2pPrivateKeyHex: secrets.P2PPrivateKeyHex,
 		suite:            suite,
 		faults:           faults,
+		mempoolClient:    &http.Client{Timeout: time.Duration(cfg.Provider.MempoolTimeoutMS) * time.Millisecond},
 		lastSlot:         cfg.Slot,
 		observability:    newNodeMetrics(cfg.ClusterID, id),
 	}

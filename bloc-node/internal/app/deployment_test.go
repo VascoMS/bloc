@@ -260,6 +260,9 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	if cluster.Limits != defaultResourceLimits() {
 		t.Fatalf("generated resource limits = %+v, want %+v", cluster.Limits, defaultResourceLimits())
 	}
+	if cluster.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
+		t.Fatalf("generated mempool timeout = %d ms, want %d", cluster.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
+	}
 	if len(cluster.Nodes) != 4 || len(secrets) != 4 || len(crs) == 0 {
 		t.Fatalf("unexpected generated material: nodes=%d secrets=%d crs_bytes=%d", len(cluster.Nodes), len(secrets), len(crs))
 	}
@@ -281,6 +284,13 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	}
 	if remote.Deployment["environment"] != "ec2" || remote.Deployment["region"] != "us-east-1" || remote.Deployment["controller"] != "controller" {
 		t.Fatalf("unexpected deployment metadata: %+v", remote.Deployment)
+	}
+}
+
+func TestParseEC2ConfigRejectsNegativeMempoolTimeout(t *testing.T) {
+	_, err := parseEC2ConfigOptions([]string{"--mempool-timeout-ms", "-1"})
+	if err == nil || !strings.Contains(err.Error(), "provider.mempool_timeout_ms") {
+		t.Fatalf("negative mempool timeout error = %v, want field-specific rejection", err)
 	}
 }
 

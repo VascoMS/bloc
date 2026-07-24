@@ -32,6 +32,7 @@ func genConfig(args []string) error {
 	maxCombineAttempts := fs.Int("max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
 	mempoolURL := fs.String("mempool-url", "", "mempool-il base URL for provider=mempool-http")
+	mempoolTimeoutMS := fs.Int64("mempool-timeout-ms", defaultMempoolTimeoutMS, "mempool-il request timeout in milliseconds; 0 uses the 2000 ms default")
 	baseP2P := fs.Int("base-p2p-port", 10000, "first libp2p listen port")
 	addressMode := fs.String("address-mode", "local", "address preset: local, container, kubernetes")
 	httpListenTemplate := fs.String("http-listen-template", "", "HTTP listen template; supports {id}, {http_port}, {p2p_port}")
@@ -63,6 +64,11 @@ func genConfig(args []string) error {
 		MaxCombineAttemptsPerSubBatch: *maxCombineAttempts,
 	}
 	if err := validateResourceLimits(limits); err != nil {
+		return err
+	}
+	provider := ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL, MempoolTimeoutMS: *mempoolTimeoutMS}
+	normalizeProviderConfig(&provider)
+	if err := validateProviderConfig(provider); err != nil {
 		return err
 	}
 	if *crsOut == "" {
@@ -107,7 +113,7 @@ func genConfig(args []string) error {
 			MaxDecryptedTxs: *maxDecryptedTxs,
 			DefaultTxGas:    *defaultTxGas,
 		},
-		Provider: ProviderConfig{Mode: *providerMode, MempoolURL: *mempoolURL},
+		Provider: provider,
 		Network:  NetworkConfig{Mode: "libp2p"},
 		Limits:   limits,
 	}

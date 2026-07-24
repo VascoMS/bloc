@@ -55,6 +55,9 @@ func readConfig(path string) (ConfigFile, error) {
 	if err := validateResourceLimits(cfg.Limits); err != nil {
 		return ConfigFile{}, err
 	}
+	if err := validateProviderConfig(cfg.Provider); err != nil {
+		return ConfigFile{}, err
+	}
 	return cfg, nil
 }
 
@@ -190,9 +193,7 @@ func normalizeConfig(cfg *ConfigFile) {
 	if cfg.Blockspace.DefaultTxGas == 0 {
 		cfg.Blockspace.DefaultTxGas = 21000
 	}
-	if cfg.Provider.Mode == "" {
-		cfg.Provider.Mode = "direct"
-	}
+	normalizeProviderConfig(&cfg.Provider)
 	if cfg.Network.Mode == "" {
 		cfg.Network.Mode = "libp2p"
 	}
@@ -209,6 +210,25 @@ func normalizeConfig(cfg *ConfigFile) {
 	for i := range cfg.Nodes {
 		normalizeNodeConfig(&cfg.Nodes[i])
 	}
+}
+
+func normalizeProviderConfig(provider *ProviderConfig) {
+	if provider.Mode == "" {
+		provider.Mode = "direct"
+	}
+	if provider.MempoolTimeoutMS == 0 {
+		provider.MempoolTimeoutMS = defaultMempoolTimeoutMS
+	}
+}
+
+func validateProviderConfig(provider ProviderConfig) error {
+	if provider.MempoolTimeoutMS < 0 {
+		return fmt.Errorf("provider.mempool_timeout_ms must be non-negative")
+	}
+	if provider.MempoolTimeoutMS > maximumMempoolTimeoutMS {
+		return fmt.Errorf("provider.mempool_timeout_ms must be at most %d", maximumMempoolTimeoutMS)
+	}
+	return nil
 }
 
 func validateResourceLimits(limits ResourceLimits) error {

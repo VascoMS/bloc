@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,12 +46,24 @@ func (n *Node) validateProviderProposal(list InclusionList) (InclusionList, erro
 // fetchMempoolInclusionList adapts the standalone mempool-il HTTP response into
 // the bloc-node InclusionList type.
 func (n *Node) fetchMempoolInclusionList() (InclusionList, error) {
+	return n.fetchMempoolInclusionListContext(context.Background())
+}
+
+func (n *Node) fetchMempoolInclusionListContext(ctx context.Context) (InclusionList, error) {
 	if n.cfg.Provider.MempoolURL == "" {
 		return InclusionList{}, fmt.Errorf("provider mempool-http requires mempool_url")
 	}
-	resp, err := http.Get(fmt.Sprintf("%s/inclusion-list?slot=%d", strings.TrimRight(n.cfg.Provider.MempoolURL, "/"), n.id))
+	if n.mempoolClient == nil {
+		return InclusionList{}, fmt.Errorf("provider mempool-http client is not initialized")
+	}
+	requestURL := fmt.Sprintf("%s/inclusion-list?slot=%d", strings.TrimRight(n.cfg.Provider.MempoolURL, "/"), n.id)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
-		return InclusionList{}, err
+		return InclusionList{}, fmt.Errorf("create mempool inclusion-list request: %w", err)
+	}
+	resp, err := n.mempoolClient.Do(req)
+	if err != nil {
+		return InclusionList{}, fmt.Errorf("fetch mempool inclusion-list: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

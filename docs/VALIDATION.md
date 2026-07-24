@@ -160,6 +160,26 @@ go test ./...
 go test -race ./...
 ```
 
+## Mempool Provider Gate
+
+Changes to the `mempool-http` provider or cluster configuration must preserve:
+
+- one node-owned client and one request attempt, with no retry loop;
+- a generated and old-config compatibility default of 2,000 ms;
+- startup rejection of negative or duration-overflowing bounds;
+- successful response decoding and ordinary non-2xx status/body diagnostics;
+- caller cancellation through the request context; and
+- a blocking upstream terminating within the configured client timeout.
+
+Run the focused provider/configuration tests and the complete module suites:
+
+```sh
+cd bloc-node
+go test ./internal/app -run 'TestMempoolProvider|TestProviderConfig|TestGenConfig|TestParseEC2ConfigRejectsNegativeMempoolTimeout'
+go test ./...
+go test -race ./...
+```
+
 ## Resource-Safety Gate
 
 Changes to proposal ingestion, transport envelopes, share admission, or BTE

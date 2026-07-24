@@ -40,7 +40,7 @@ prototype control and evidence surface.
 - public CRS path and SHA-256 plus the BTE public key;
 - every node's HTTP/libp2p listen and advertise addresses and peer ID;
 - blockspace limits; and
-- provider/network modes.
+- provider/network modes, including the mempool request bound.
 
 `gen-config` requires at least four nodes, derives `F = floor((N-1)/3)`, and
 defaults BTE threshold to `2F+1`. It creates a versioned `cluster.crs`, public
@@ -51,15 +51,17 @@ rejects legacy combined config, cluster/operator mismatches, and a private key
 that does not derive the configured peer ID.
 
 `normalizeConfig` supplies compatibility defaults for old address fields,
-direct provider mode, libp2p, and default transaction gas. It does not fully
-validate `BMax`, threshold, membership uniqueness, peer-ID correspondence, or
-all cross-field relationships before constructing cryptographic state.
+direct provider mode, the 2,000 ms mempool request bound, libp2p, and default
+transaction gas. Negative or duration-overflowing mempool bounds are rejected.
+It does not fully validate `BMax`, threshold, membership uniqueness, peer-ID
+correspondence, or all cross-field relationships before constructing
+cryptographic state.
 
 ### Long-lived versus slot-scoped state
 
 `Node` owns configuration, membership, the node-local `ClusterBTE`, BTE secret
-share, curve suite, transport, fault controls, lifecycle counters, and
-Prometheus collectors.
+share, curve suite, transport, the bounded mempool HTTP client, fault controls,
+lifecycle counters, and Prometheus collectors.
 
 `slotState` owns everything that must be fresh for one protocol execution:
 
@@ -134,8 +136,12 @@ the legacy field permits the older raw fallback. The sidecar recomputes
 SHA-256 of extracted ciphertext bytes and does not trust the service's
 transaction or list hash as a BLOC protocol identity.
 
-The provider currently uses the default global HTTP client without an explicit
-timeout, so an unresponsive service can block proposal preparation.
+Each node uses its own `http.Client` with `Timeout` derived from
+`provider.mempool_timeout_ms`. Generated and old compatible configs default to
+2,000 ms. The request carries caller cancellation, covers connection and body
+reading within the same bound, and is attempted once without retries. Timeout,
+cancellation, and other fetch errors fail proposal preparation and are
+published through the bounded terminal slot-failure boundary.
 
 ### Inclusion-list proposal
 
@@ -453,6 +459,8 @@ It also covers pending/success/failure/wrong-slot result reads, repeated failure
 reads, failed-slot replacement, late-success rejection, evaluator 422 handling,
 failure/success-before-start ordering, synchronous start failure routing,
 legacy `eval-local` failure rows, and failure exclusion from latency summaries.
+Provider coverage includes success, ordinary HTTP errors, caller cancellation,
+blocking-server timeout, invalid bounds, and old-config defaulting.
 It does not yet exercise an oversized malicious remote stream end-to-end or
 cover a deterministic invalid-Ethereum fallback.
 
@@ -466,7 +474,6 @@ Run `go test ./...` from `bloc-node`.
 - Envelope/proposal bytes, retained share candidates, and recovery attempts are
   bounded by shared v2 configuration. Public share correctness proofs are still
   unavailable, so bounded subset recovery remains a prototype fallback.
-- `mempool-http` proposal fetch has no explicit timeout.
 - Ethereum validation is syntactic only and invalid raw bytes still produce a
   completed result with per-item errors.
 - There is no execution payload, Builder API, DVT signing, slashing,

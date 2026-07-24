@@ -218,9 +218,10 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Consequences: Old v2 configs receive defaults and generated configs emit them
   explicitly. Oversized proposals/envelopes and conflicting or out-of-scope
   shares are rejected with bounded-label metrics. A low recovery cap can reject
-  a batch for which a later valid subset exists. Public share verification and
-  mempool timeouts remain separate work; terminal failure publication was
-  completed later in M4 without changing this resource-limit decision.
+  a batch for which a later valid subset exists. Public share verification
+  remains separate work; terminal failure publication and the mempool request
+  bound were completed later in M4 without changing this resource-limit
+  decision.
 - Related files: `bloc-node/internal/app/config.go`,
   `bloc-node/internal/app/transport_libp2p.go`, `bloc-node/internal/app/node.go`,
   `bte/btd-impl-main/be/cluster.go`

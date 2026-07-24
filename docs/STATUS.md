@@ -3,7 +3,7 @@
 - Last reviewed: `2026-07-24`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `5b781714d59bd9b9c66e8a3bc7abb651fa404093`
+- Last known good source: `1ecead9b7b1653f8b047bec28b7c45e59620e643`
 
 ## Current Prototype State
 
@@ -17,9 +17,10 @@ The active integration uses libp2p-authenticated operator messaging, scoped BTE
 decoding, deterministic BEAT-MEV `Opt-2` sub-batching, bounded proposal and
 envelope sizes, root-bound RBC reconstruction with post-decode commitment
 verification, bounded share retention/recovery, split public configuration and
-operator-local secrets, durable bounded terminal slot failures, Prometheus
-metrics, local evaluators, and VM/EC2 remote evaluation. The source-led protocol
-review and current module boundaries are documented in
+operator-local secrets, durable bounded terminal slot failures, node-owned
+bounded mempool HTTP requests, Prometheus metrics, local evaluators, and VM/EC2
+remote evaluation. The source-led protocol review and current module boundaries
+are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
@@ -52,8 +53,6 @@ same-region-versus-cross-region evidence.
 
 ## Open Blockers And Risks
 
-- **Mempool provider timeout:** `mempool-http` uses the default HTTP client without
-  an explicit request timeout.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   local, same-region, and three-region campaigns, complete operator resource
   measurements, RQ3 fault campaigns, and user/operator cost analysis. The
@@ -73,12 +72,11 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the remaining M4 mempool-timeout issue.
-2. Add the p99, resource, scale-extension, and fault-evidence support required by
-   the accepted research-question contract.
-3. Freeze and validate one release-candidate source SHA and image digest before
-   running the final local and VM campaigns.
-4. Track granular work in the [BLOC Thesis Prototype GitHub
+1. Complete the M4 p99/statistics, non-contaminating resource, and transaction
+   corpus/client-overhead tooling tracked by issues `#11`, `#12`, and `#13`.
+2. Freeze and validate one release-candidate source SHA and image digest in
+   issue `#14` before running the final local and VM campaigns.
+3. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
@@ -86,10 +84,11 @@ same-region-versus-cross-region evidence.
 ## Last Known Good Baseline
 
 - Date: `2026-07-24`
-- Source: `5b781714d59bd9b9c66e8a3bc7abb651fa404093`
-- Terminal-failure validation: full bloc-node normal and race suites, including
-  pending/success/failure/wrong-slot lifecycle, failure/success-before-start
-  ordering, synchronous start failure, and both evaluator artifact formats.
+- Source: `1ecead9b7b1653f8b047bec28b7c45e59620e643`
+- M4 hardening validation: full bloc-node normal and race suites, including
+  terminal-failure lifecycle/evaluator coverage and mempool-provider success,
+  HTTP-error, cancellation, timeout, invalid-config, and compatibility-default
+  cases.
 - Local safety evidence:
   `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
 - Linux RBC/ACS/BBA race evidence:

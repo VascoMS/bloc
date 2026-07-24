@@ -73,7 +73,7 @@ All correct operators should report the same `batch_id`, merged-set hash, select
 - one `secrets/operator-<id>.json` containing only that operator's
   trusted-dealer BTE share and libp2p private key,
 - blockspace caps and defaults,
-- provider mode.
+- provider mode, mempool URL, and mempool request timeout,
 - shared resource limits for encoded proposals, libp2p envelopes, and
   per-sub-batch recovery attempts.
 
@@ -92,6 +92,11 @@ envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
 are restricted to authenticated configured operators, one batch identity, and
 one point per sub-batch; planning prunes the pre-plan `N*BMax` bound to
 `N*alpha`. Old v2 files without `limits` receive the defaults.
+
+The `mempool-http` provider uses a node-owned HTTP client with no retries.
+`mempool_timeout_ms` and `--mempool-timeout-ms` default to `2000`; zero in an
+older v2 config receives that default, while negative or unrepresentable
+durations are rejected during configuration validation.
 
 For deployment configs, use `--address-mode container`. The old `http_addr`
 and `p2p_addr` fields remain backward-compatible defaults for local configs,
@@ -236,7 +241,8 @@ For mock-placeholder runs, start the sidecars with a mempool-backed provider and
 run `eval-remote --tx-source mock-placeholder --mempool-url <mempool-il>`. In
 that mode the evaluator does not submit `/tx` payloads; sidecars fetch encrypted
 placeholder candidates from `mempool-il` and materialize the original target
-transactions after threshold decryption.
+transactions after threshold decryption. Set the sidecar request bound when
+generating its cluster config with `--mempool-timeout-ms <milliseconds>`.
 
 ## Local Campaign Runners
 

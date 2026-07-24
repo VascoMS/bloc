@@ -99,10 +99,10 @@
 
 **Interface:** add `ProviderConfig.MempoolTimeoutMS int64`, normalize zero to 2,000 ms, reject negatives, and use a node-owned `http.Client{Timeout: duration}` instead of `http.Get`.
 
-- [ ] Add `httptest.Server` coverage for success, HTTP error, cancellation, blocking timeout, invalid configuration, and old-config defaulting.
-- [ ] Run the timeout test and verify the unbounded implementation fails.
-- [ ] Implement the configuration and client boundary without retries.
-- [ ] Run `cd bloc-node && go test ./...`, update docs/status, and commit `fix: bound mempool provider requests`.
+- [x] Add `httptest.Server` coverage for success, HTTP error, cancellation, blocking timeout, invalid configuration, and old-config defaulting.
+- [x] Run the timeout test and verify the unbounded implementation fails.
+- [x] Implement the configuration and client boundary without retries.
+- [x] Run `cd bloc-node && go test ./...`, update docs/status, and commit `fix: bound mempool provider requests`.
 
 ### Task 5: Collect non-contaminating operator resource metrics
 

@@ -321,12 +321,19 @@ mean the repository has represented this prototype as production-ready.
 ### PIR-013 — Mempool provider fetch has no explicit timeout
 
 - Severity/category: **P2 — liveness/integration**
+- Remediation status (2026-07-24): **remediated**. Generated and compatible old
+  configs use a 2,000 ms default, invalid durations fail validation, and every
+  node owns a bounded client that issues one cancellable request without
+  retries.
 - Stage: proposal construction
-- Evidence: `fetchMempoolInclusionList` uses package-level `http.Get`.
+- Original evidence: `fetchMempoolInclusionList` used package-level `http.Get`.
 - Impact: an unresponsive source can block the one-shot start path indefinitely
   and leave the slot running without a proposal.
-- Follow-up: inject a bounded reusable client and expose timeout failure through
-  the terminal slot-failure boundary.
+- Resolution evidence: source
+  `1ecead9b7b1653f8b047bec28b7c45e59620e643` passed focused
+  success/error/cancellation/blocking/config/defaulting tests plus the full
+  normal and race suites. Fetch failures flow through the terminal slot-failure
+  boundary.
 
 ### PIR-014 — Public parameter field `N` represents the index domain, not committee size
 

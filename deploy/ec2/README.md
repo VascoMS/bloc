@@ -71,6 +71,11 @@ go run ./cmd/bloc-node gen-ec2-config \
   --bmax 128
 ```
 
+The generated cluster config uses the same 2,000 ms `mempool-http` request
+default as `gen-config`. Override it with
+`--mempool-timeout-ms <milliseconds>` when a deployment needs a different
+bounded provider deadline.
+
 Copy the shared JSON/CRS and only the matching secret to each operator, set
 `NODE_ID`, and start `operator-compose.yaml`. On the controller, derive
 `prometheus.ec2.yml` from `prometheus.ec2.example.yml`, start

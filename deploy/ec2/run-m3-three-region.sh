@@ -217,6 +217,32 @@ run_phase() (
     esac
   }
 
+  run_resource_phase() {
+    # Keep sampler overhead out of the primary latency/p99 phase.
+    local batch node id public region scenario remote_csv stop_file resource_dir next_resource_slot=100000
+    local parts=() summary_args=(resource-summary --input "$phase_root/resource_timeseries.csv" --output "$phase_root/resource-summary.csv")
+    mkdir -p "$phase_root/resource-parts"
+    for id in $(jq -r '.nodes|sort_by(.id)[]|.id' "$inventory"); do summary_args+=(--expected-node "$id"); done
+    for batch in "${batches[@]}"; do
+      scenario="n${node_count}-b${batch}"; resource_dir="$phase_root/resource-parts/$scenario"; mkdir -p "$resource_dir"
+      summary_args+=(--expected-configuration "$scenario:resource-measured")
+      while IFS= read -r node; do
+        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; region="$(jq -r .region <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
+        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "mkdir -p /opt/bloc/ec2/resources; rm -f '$stop_file'; nohup /opt/bloc/ec2/sample-container-resources.sh run --container ec2-bloc-node-1 --output '$remote_csv' --stop-file '$stop_file' --node '$id' --region '$region' --scenario '$scenario' --phase resource-measured >/opt/bloc/ec2/resources/$scenario.log 2>&1 &"
+      done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
+      remote_dir="/opt/bloc/ec2/results/$phase_id/resource-$scenario"
+      ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-resource-$scenario' --first-slot '$next_resource_slot' --batch-size '$batch' --warmups 0 --repetitions '$repetitions' --out-dir 'results/$phase_id/resource-$scenario' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
+      while IFS= read -r node; do
+        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
+        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "touch '$stop_file'; sleep 2; test -s '$remote_csv'"
+        scp -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public:$remote_csv" "$resource_dir/node-$id.csv"; parts+=("$resource_dir/node-$id.csv")
+      done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
+      next_resource_slot=$((next_resource_slot + repetitions))
+    done
+    bloc_python "$repo_root" merge-csv --output "$phase_root/resource_timeseries.csv" "${parts[@]}"
+    bloc_python "$repo_root" "${summary_args[@]}"
+  }
+
   collect_failure_logs() {
     [[ -f "$phase_root/inventory.json" ]] || return 0
     while IFS= read -r node; do
@@ -391,6 +417,8 @@ run_phase() (
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$phase_root/generated/secrets.ec2/operator-$id.json" "ubuntu@$public:/etc/bloc/operator.json"
     ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" 'sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json'
     scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$script_dir/operator-compose.yaml" "ubuntu@$public:/opt/bloc/ec2/operator-compose.yaml"
+    scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$script_dir/sample-container-resources.sh" "ubuntu@$public:/opt/bloc/ec2/sample-container-resources.sh"
+    ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" 'chmod 700 /opt/bloc/ec2/sample-container-resources.sh'
     ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "aws ecr get-login-password --region '$primary_region'|docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$id' BLOC_IMAGE='$runtime_image' docker compose -f operator-compose.yaml up -d"
   done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
   rm -rf "$phase_root/generated/secrets.ec2"
@@ -403,19 +431,18 @@ run_phase() (
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets-before.json"
   assert_prometheus_targets "$phase_root/prometheus-targets-before.json" "$node_count"
   collect_pairwise_network "$inventory" pre "$phase_root/network-pre.csv"; assert_network_matrix "$phase_root/network-pre.csv" $((node_count * node_count))
-  collect_resource_sample "$inventory" pre-campaign "" "$phase_root/resource-samples.csv"
   next_slot=1; specs=()
   for batch in "${batches[@]}"; do
-    collect_resource_sample "$inventory" before-batch "$batch" "$phase_root/resource-samples.csv"
     remote_dir="/opt/bloc/ec2/results/$phase_id/batch-$batch"
     ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions' --out-dir 'results/$phase_id/batch-$batch' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
     mkdir -p "$phase_root/scenarios/batch-$batch"; scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "ubuntu@$controller_public:$remote_dir" "$phase_root/scenarios/batch-$batch/results"
     bloc_python "$repo_root" assert-evaluator --csv "$phase_root/scenarios/batch-$batch/results/run_measurements.csv" --expected "$node_count/$batch=$repetitions"
-    specs+=("1:$phase_root/scenarios/batch-$batch/results"); collect_resource_sample "$inventory" during-batch "$batch" "$phase_root/resource-samples.csv"; collect_resource_sample "$inventory" after-batch "$batch" "$phase_root/resource-samples.csv"
+    specs+=("1:$phase_root/scenarios/batch-$batch/results")
     next_slot=$((next_slot + warmups + repetitions))
   done
   bloc_python "$repo_root" merge-scenarios --root "$phase_root" "${specs[@]}"
   bloc_python "$repo_root" annotate-placement --phase-root "$phase_root" --inventory "$inventory"
+  run_resource_phase
   collect_pairwise_network "$inventory" post "$phase_root/network-post.csv"; assert_network_matrix "$phase_root/network-post.csv" $((node_count * node_count))
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets.json"
   assert_prometheus_targets "$phase_root/prometheus-targets.json" "$node_count"
@@ -434,7 +461,7 @@ for node in "${nodes[@]}"; do
 done
 jq -s . "$phases_file" >"$campaign_root/phases.json"
 if [[ "$plan_only" -ne 1 ]]; then
-  for name in run_measurements.csv node_measurements.csv scenario_summary.csv network-pre.csv network-post.csv resource-samples.csv; do inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/$name"); done; bloc_python "$repo_root" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
+  for name in run_measurements.csv node_measurements.csv scenario_summary.csv network-pre.csv network-post.csv resource_timeseries.csv resource-summary.csv; do inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/$name"); done; bloc_python "$repo_root" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
   inputs=(); for node in "${nodes[@]}"; do inputs+=("$campaign_root/n$node/scenario_summary.json"); done; bloc_python "$repo_root" merge-json --output "$campaign_root/scenario_summary.json" "${inputs[@]}"
 fi
 write_campaign_manifest "$( [[ "$plan_only" -eq 1 ]] && echo planned || echo complete)" ""

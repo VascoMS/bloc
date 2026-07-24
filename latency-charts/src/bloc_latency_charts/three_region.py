@@ -121,13 +121,24 @@ def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFr
             raise ValueError(f"{root / name}: incomplete pairwise matrix")
         if not network["attempts"].eq(5).all() or not network["successes"].eq(5).all():
             raise ValueError(f"{root / name}: not all five pairwise health attempts succeeded")
-    resources = pd.read_csv(root / "resource-samples.csv")
-    if (
-        not resources["container_status"].eq("running").all()
-        or not resources["restart_count"].eq(0).all()
-        or resources["oom_killed"].astype(str).str.lower().eq("true").any()
-    ):
-        raise ValueError(f"{root}: stopped, restarted, or OOM-killed operator detected")
+    resources = pd.read_csv(root / "resource_timeseries.csv")
+    required_resource_columns = {
+        "timestamp", "sample_index", "node", "region", "scenario", "phase", "cpu_usage_us",
+        "memory_current_bytes", "memory_peak_bytes", "network_receive_bytes", "network_transmit_bytes",
+        "restart_count", "oom_killed",
+    }
+    if set(resources.columns) != required_resource_columns or not resources["phase"].eq("resource-measured").all():
+        raise ValueError(f"{root}: invalid resource phase evidence")
+    if not resources["node"].astype(int).isin(range(nodes)).all() or resources["restart_count"].ne(0).any() or resources["oom_killed"].astype(str).str.lower().eq("true").any():
+        raise ValueError(f"{root}: restarted or OOM-killed operator detected")
+    for (_, _, node), samples in resources.groupby(["scenario", "phase", "node"]):
+        indexes = sorted(samples["sample_index"].astype(int))
+        if len(indexes) < 2 or indexes != list(range(len(indexes))):
+            raise ValueError(f"{root}: resource samples are incomplete for node {node}")
+        for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
+            values = samples.sort_values("sample_index")[counter].astype(int).tolist()
+            if any(current < previous for previous, current in zip(values, values[1:])):
+                raise ValueError(f"{root}: resource counter reset")
     cleanup = json.loads((root / "cleanup-verification.json").read_text(encoding="utf-8-sig"))
     if _nonempty(cleanup):
         raise ValueError(f"{root}: teardown verification contains residual resources")
@@ -228,6 +239,29 @@ def _critical_region_summary(runs: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _resource_summary(root: Path, node_counts: list[int]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for nodes in node_counts:
+        resources = pd.read_csv(root / f"n{nodes}" / "resource_timeseries.csv")
+        for (scenario, phase, node), values in resources.groupby(["scenario", "phase", "node"], sort=True):
+            ordered = values.sort_values("sample_index")
+            first, last = ordered.iloc[0], ordered.iloc[-1]
+            rows.append({"scope": "node", "nodes": nodes, "node": int(node), "region": first.region,
+                         "scenario": scenario, "phase": phase, "samples": len(ordered),
+                         "cpu_usage_delta_us": int(last.cpu_usage_us - first.cpu_usage_us),
+                         "memory_current_max_bytes": int(ordered.memory_current_bytes.max()),
+                         "memory_peak_bytes": int(ordered.memory_peak_bytes.max()),
+                         "network_receive_delta_bytes": int(last.network_receive_bytes - first.network_receive_bytes),
+                         "network_transmit_delta_bytes": int(last.network_transmit_bytes - first.network_transmit_bytes)})
+    nodes_frame = pd.DataFrame(rows)
+    cluster = (nodes_frame.groupby(["nodes", "scenario", "phase"], as_index=False)
+               .agg(samples=("samples", "sum"), cpu_usage_delta_us=("cpu_usage_delta_us", "sum"),
+                    memory_current_max_bytes=("memory_current_max_bytes", "max"), memory_peak_bytes=("memory_peak_bytes", "max"),
+                    network_receive_delta_bytes=("network_receive_delta_bytes", "sum"), network_transmit_delta_bytes=("network_transmit_delta_bytes", "sum")))
+    cluster.insert(0, "scope", "cluster"); cluster.insert(2, "node", "all"); cluster.insert(3, "region", "cluster")
+    return pd.concat([nodes_frame, cluster[nodes_frame.columns]], ignore_index=True)
+
+
 def analyze_three_region(result_dir: str | Path, output_dir: str | Path | None = None) -> Path:
     root = Path(result_dir).expanduser().resolve()
     output = Path(output_dir).expanduser().resolve() if output_dir else root / "analysis"
@@ -236,10 +270,12 @@ def analyze_three_region(result_dir: str | Path, output_dir: str | Path | None =
     latency, stages = _protocol_summary(runs), _stage_summary(runs)
     network = _network_summary(root, [int(value) for value in campaign["node_counts"]])
     critical = _critical_region_summary(runs)
+    resources = _resource_summary(root, [int(value) for value in campaign["node_counts"]])
     latency.to_csv(output / "three-region-latency-summary.csv", index=False)
     stages.to_csv(output / "four-stage-summary.csv", index=False)
     network.to_csv(output / "pairwise-network-summary.csv", index=False)
     critical.to_csv(output / "critical-node-region-summary.csv", index=False)
+    resources.to_csv(output / "host-resource-summary.csv", index=False)
     _set_style()
     _plot_latency(latency, experiment_id, output)
     _plot_stages(runs, experiment_id, output)

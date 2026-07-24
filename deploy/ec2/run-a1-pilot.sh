@@ -288,6 +288,34 @@ collect_resource_sample() {
   done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
 }
 
+run_resource_phase() {
+  # This separate pass is deliberately after all primary latency measurements:
+  # the 250 ms sampler is never present during latency/p99 collection.
+  local batch node node_id public_ip region scenario remote_csv stop_file remote_dir part_dir next_resource_slot=100000
+  local parts=() summary_args=(resource-summary --input "$artifact_root/resource_timeseries.csv" --output "$artifact_root/resource-summary.csv")
+  mkdir -p "$artifact_root/resource-parts"
+  for node_id in $(jq -r '.nodes|sort_by(.id)[]|.id' "$inventory_path"); do summary_args+=(--expected-node "$node_id"); done
+  for batch in "${batch_sizes[@]}"; do
+    scenario="n${node_count}-b${batch}"; part_dir="$artifact_root/resource-parts/$scenario"; mkdir -p "$part_dir"
+    summary_args+=(--expected-configuration "$scenario:resource-measured")
+    while IFS= read -r node; do
+      node_id="$(jq -r .id <<<"$node")"; public_ip="$(jq -r .public_ip <<<"$node")"; region="$(jq -r .region <<<"$node")"
+      remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
+      ssh_ec2 "$public_ip" "mkdir -p /opt/bloc/ec2/resources; rm -f '$stop_file'; nohup /opt/bloc/ec2/sample-container-resources.sh run --container ec2-bloc-node-1 --output '$remote_csv' --stop-file '$stop_file' --node '$node_id' --region '$region' --scenario '$scenario' --phase resource-measured >/opt/bloc/ec2/resources/$scenario.log 2>&1 &"
+    done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory_path")
+    remote_dir="/opt/bloc/ec2/results/$experiment_id/resource-$scenario"
+    ssh_ec2 "$controller_public_ip" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$experiment_id-resource-$scenario' --first-slot '$next_resource_slot' --batch-size '$batch' --warmups 0 --repetitions '$repetitions' --out-dir 'results/$experiment_id/resource-$scenario' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
+    while IFS= read -r node; do
+      node_id="$(jq -r .id <<<"$node")"; public_ip="$(jq -r .public_ip <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
+      ssh_ec2 "$public_ip" "touch '$stop_file'; for i in 1 2 3 4 5; do sleep 1; done; test -s '$remote_csv'"
+      scp_ec2 "ubuntu@$public_ip:$remote_csv" "$part_dir/node-$node_id.csv"; parts+=("$part_dir/node-$node_id.csv")
+    done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory_path")
+    next_resource_slot=$((next_resource_slot + repetitions))
+  done
+  bloc_python "$repo_root" merge-csv --output "$artifact_root/resource_timeseries.csv" "${parts[@]}"
+  bloc_python "$repo_root" "${summary_args[@]}"
+}
+
 merge_csv_outputs() {
   local root="$1"
   local args=(merge-scenarios --root "$root")
@@ -652,6 +680,8 @@ jq -c '.nodes | sort_by(.id)[]' "$inventory_path" | while read -r node; do
   scp_ec2 "$script_dir/secrets.ec2/operator-${node_id}.json" "ubuntu@$public_ip:/etc/bloc/operator.json"
   ssh_ec2 "$public_ip" "sudo chown 10001:10001 /etc/bloc/operator.json && sudo chmod 600 /etc/bloc/operator.json"
   scp_ec2 "$script_dir/operator-compose.yaml" "ubuntu@$public_ip:/opt/bloc/ec2/operator-compose.yaml"
+  scp_ec2 "$script_dir/sample-container-resources.sh" "ubuntu@$public_ip:/opt/bloc/ec2/sample-container-resources.sh"
+  ssh_ec2 "$public_ip" "chmod 700 /opt/bloc/ec2/sample-container-resources.sh"
   if [[ "$image_distribution" == "ecr" ]]; then
     ssh_ec2 "$public_ip" "set -e; aws ecr get-login-password --region '$aws_region' | docker login --username AWS --password-stdin '$registry'; cd /opt/bloc/ec2; NODE_ID='$node_id' BLOC_IMAGE='$image_uri' docker compose -f operator-compose.yaml up -d"
   else
@@ -677,7 +707,6 @@ scp_ec2 "ubuntu@$controller_public_ip:/opt/bloc/ec2/prometheus-targets-before.js
 
 log "pre-campaign network characterization"
 collect_network_matrix "pre" "$artifact_root/network-pre.csv" "$controller_public_ip" "$inventory_path"
-collect_resource_sample "pre-campaign" "" "$inventory_path" "$artifact_root/resource-samples.csv"
 
 log "run A1 pilot scenarios"
 block_repetitions=$((repetitions / repetition_blocks))
@@ -693,7 +722,6 @@ for batch_order in "${batch_order_blocks[@]}"; do
   if [[ "$repetition_blocks" -eq 1 ]]; then relative_path="batch-$batch"; else relative_path="block-$block_number/batch-$batch"; fi
   scenario_dir="/opt/bloc/ec2/results/$experiment_id/$relative_path"
   remote_experiment_id="$experiment_id-block$block_number-b$batch"
-  collect_resource_sample "before-block-$block_number-batch" "$batch" "$inventory_path" "$artifact_root/resource-samples.csv"
   if [[ "$image_distribution" == "ecr" ]]; then
     ssh_ec2 "$controller_public_ip" \
       "set -e; aws ecr get-login-password --region '$aws_region' | docker login --username AWS --password-stdin '$registry'; sudo mkdir -p '$scenario_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$remote_experiment_id' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --out-dir 'results/$experiment_id/$relative_path' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
@@ -704,11 +732,12 @@ for batch_order in "${batch_order_blocks[@]}"; do
   mkdir -p "$artifact_root/scenarios/$relative_path"
   scp_ec2 -r "ubuntu@$controller_public_ip:$scenario_dir" "$artifact_root/scenarios/$relative_path/results"
   scenario_specs+=("$block_number:$artifact_root/scenarios/$relative_path/results")
-  collect_resource_sample "during-block-$block_number-batch" "$batch" "$inventory_path" "$artifact_root/resource-samples.csv"
-  collect_resource_sample "after-block-$block_number-batch" "$batch" "$inventory_path" "$artifact_root/resource-samples.csv"
   next_slot=$((next_slot + scenario_warmups + block_repetitions))
   done
 done
+
+log "run dedicated resource evidence phase"
+run_resource_phase
 
 log "post-campaign artifact collection"
 collect_network_matrix "post" "$artifact_root/network-post.csv" "$controller_public_ip" "$inventory_path"

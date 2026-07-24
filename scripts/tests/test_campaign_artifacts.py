@@ -156,9 +156,17 @@ class CampaignArtifactsTest(unittest.TestCase):
                 })
         self.write_csv(phase / "network-pre.csv", network)
         self.write_csv(phase / "network-post.csv", network)
-        self.write_csv(phase / "resource-samples.csv", [{
-            "container_status": "running", "restart_count": "0", "oom_killed": "false",
-        }])
+        resource_rows = []
+        for node in range(4):
+            for index in range(2):
+                resource_rows.append({
+                    "timestamp": f"2026-07-24T00:00:0{index}Z", "sample_index": str(index), "node": str(node),
+                    "region": regions[node % 3], "scenario": "n4-b8", "phase": "resource-measured",
+                    "cpu_usage_us": str(100 + index), "memory_current_bytes": "10", "memory_peak_bytes": "12",
+                    "network_receive_bytes": str(1000 + index), "network_transmit_bytes": str(2000 + index),
+                    "restart_count": "0", "oom_killed": "false",
+                })
+        self.write_csv(phase / "resource_timeseries.csv", resource_rows)
         return phase
 
     def test_three_region_phase_contract_accepts_complete_evidence(self):
@@ -172,6 +180,92 @@ class CampaignArtifactsTest(unittest.TestCase):
         self.write_csv(phase / "network-post.csv", rows)
         with self.assertRaisesRegex(ValueError, "five health attempts"):
             artifacts.assert_three_region_phase(phase)
+
+    def resource_rows(self):
+        fields = (
+            "timestamp", "sample_index", "node", "region", "scenario", "phase", "cpu_usage_us",
+            "memory_current_bytes", "memory_peak_bytes", "network_receive_bytes", "network_transmit_bytes",
+            "restart_count", "oom_killed",
+        )
+        rows = []
+        for node, region in (("0", "us-east-1"), ("1", "eu-west-1")):
+            for index, cpu, current, peak, receive, transmit in (
+                (0, 100, 10, 12, 1000, 2000), (1, 160, 20, 25, 1300, 2600),
+            ):
+                rows.append(dict(zip(fields, (
+                    f"2026-07-24T00:00:0{index}Z", str(index), node, region, "n2-b8", "resource-measured",
+                    str(cpu + int(node) * 10), str(current), str(peak), str(receive + int(node) * 100),
+                    str(transmit + int(node) * 100), "0", "false",
+                ))))
+        return rows
+
+    def test_resource_evidence_summarizes_node_and_cluster_counter_deltas(self):
+        path = self.root / "resource_timeseries.csv"
+        self.write_csv(path, self.resource_rows())
+        summary = artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+        self.assertEqual(len(summary), 3)
+        node_zero = next(row for row in summary if row["scope"] == "node" and row["node"] == "0")
+        self.assertEqual(node_zero["cpu_usage_delta_us"], 60)
+        self.assertEqual(node_zero["memory_peak_bytes"], 25)
+        self.assertEqual(node_zero["network_receive_delta_bytes"], 300)
+        cluster = next(row for row in summary if row["scope"] == "cluster")
+        self.assertEqual(cluster["cpu_usage_delta_us"], 120)
+        self.assertEqual(cluster["network_transmit_delta_bytes"], 1200)
+
+    def test_resource_evidence_rejects_missing_sample_indexes(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows(); rows = [row for row in rows if not (row["node"] == "0" and row["sample_index"] == "1")]
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "missing samples"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_resource_evidence_rejects_incomplete_node_configuration_coverage(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = [row for row in self.resource_rows() if row["node"] == "0"]
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "incomplete node/configuration coverage"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_resource_evidence_rejects_counter_resets(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows(); rows[1]["network_receive_bytes"] = "900"
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "counter reset"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_resource_evidence_rejects_restart_or_oom(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows(); rows[0]["restart_count"] = "1"; rows[1]["oom_killed"] = "true"
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "restart or OOM"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_resource_evidence_rejects_invalid_phase(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows(); rows[0]["phase"] = "measured"
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "invalid resource phase"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_host_resource_sampler_declares_250ms_cgroup_and_docker_fallback_contract(self):
+        sampler = ROOT / "deploy/ec2/sample-container-resources.sh"
+        text = sampler.read_text(encoding="utf-8")
+        self.assertIn("interval_ms=250", text)
+        self.assertIn("/sys/fs/cgroup", text)
+        self.assertIn("docker stats --no-stream", text)
+        self.assertIn("--stop-file", text)
+        self.assertIn("RESOURCE_TIMESERIES", text)
+        self.assertNotIn("printenv", text.lower())
+        self.assertNotIn("/proc/$pid/environ", text.lower())
+        self.assertNotIn(".config.env", text.lower())
+
+    def test_active_runners_collect_dedicated_resource_phase_before_teardown(self):
+        for name in ("run-a1-pilot.sh", "run-m3-three-region.sh"):
+            text = (ROOT / "deploy/ec2" / name).read_text(encoding="utf-8")
+            self.assertIn("sample-container-resources.sh", text)
+            self.assertIn("resource-measured", text)
+            self.assertIn("resource_timeseries.csv", text)
+            self.assertIn("resource-summary", text)
 
 
 if __name__ == "__main__":

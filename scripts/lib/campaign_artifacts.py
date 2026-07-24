@@ -37,6 +37,18 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+RESOURCE_TIMESERIES_FIELDS = [
+    "timestamp", "sample_index", "node", "region", "scenario", "phase", "cpu_usage_us",
+    "memory_current_bytes", "memory_peak_bytes", "network_receive_bytes", "network_transmit_bytes",
+    "restart_count", "oom_killed",
+]
+RESOURCE_SUMMARY_FIELDS = [
+    "scope", "node", "region", "scenario", "phase", "samples", "first_timestamp", "last_timestamp",
+    "cpu_usage_delta_us", "memory_current_max_bytes", "memory_peak_bytes",
+    "network_receive_delta_bytes", "network_transmit_delta_bytes",
+]
+
+
 def write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: list[str] | None = None) -> None:
     rows = list(rows)
     if fields is None:
@@ -52,6 +64,91 @@ def write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: list[str] | No
     except BaseException:
         os.unlink(temporary)
         raise
+
+
+def resource_evidence_summary(
+    path: Path,
+    expected_nodes: set[str] | None = None,
+    expected_configurations: set[tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate dedicated resource samples and summarize host counters.
+
+    Host receive/transmit counters deliberately remain separate from the BLOC
+    protocol-message metrics, which are neither read nor written here.
+    """
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames or []
+        rows = list(reader)
+    if fields != RESOURCE_TIMESERIES_FIELDS:
+        raise ValueError(f"{path}: invalid resource_timeseries.csv columns")
+    if not rows:
+        raise ValueError(f"{path}: resource timeseries is empty")
+
+    expected_nodes = expected_nodes or set()
+    expected_configurations = expected_configurations or set()
+    groups: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        scenario, phase, node = row["scenario"], row["phase"], row["node"]
+        if not scenario or phase != "resource-measured":
+            raise ValueError(f"{path}: invalid resource phase {phase!r}")
+        try:
+            for field in (
+                "sample_index", "cpu_usage_us", "memory_current_bytes", "memory_peak_bytes",
+                "network_receive_bytes", "network_transmit_bytes", "restart_count",
+            ):
+                if int(row[field]) < 0:
+                    raise ValueError(field)
+        except ValueError as exc:
+            raise ValueError(f"{path}: invalid numeric resource value") from exc
+        if int(row["restart_count"]) != 0 or _true(row["oom_killed"]):
+            raise ValueError(f"{path}: restart or OOM detected")
+        groups[(scenario, phase, node)].append(row)
+
+    configurations = {(scenario, phase) for scenario, phase, _ in groups}
+    if expected_configurations and configurations != expected_configurations:
+        raise ValueError(f"{path}: incomplete node/configuration coverage")
+    for configuration in configurations:
+        actual_nodes = {node for scenario, phase, node in groups if (scenario, phase) == configuration}
+        if expected_nodes and actual_nodes != expected_nodes:
+            raise ValueError(f"{path}: incomplete node/configuration coverage")
+
+    node_summaries: list[dict[str, Any]] = []
+    for (scenario, phase, node), samples in sorted(groups.items()):
+        samples.sort(key=lambda row: int(row["sample_index"]))
+        indexes = [int(row["sample_index"]) for row in samples]
+        if len(indexes) < 2 or indexes != list(range(len(indexes))):
+            raise ValueError(f"{path}: missing samples for {scenario}/{phase}/node-{node}")
+        for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
+            values = [int(row[counter]) for row in samples]
+            if any(current < previous for previous, current in zip(values, values[1:])):
+                raise ValueError(f"{path}: counter reset for {counter} on {scenario}/{phase}/node-{node}")
+        first, last = samples[0], samples[-1]
+        node_summaries.append({
+            "scope": "node", "node": node, "region": first["region"], "scenario": scenario, "phase": phase,
+            "samples": len(samples), "first_timestamp": first["timestamp"], "last_timestamp": last["timestamp"],
+            "cpu_usage_delta_us": int(last["cpu_usage_us"]) - int(first["cpu_usage_us"]),
+            "memory_current_max_bytes": max(int(row["memory_current_bytes"]) for row in samples),
+            "memory_peak_bytes": max(int(row["memory_peak_bytes"]) for row in samples),
+            "network_receive_delta_bytes": int(last["network_receive_bytes"]) - int(first["network_receive_bytes"]),
+            "network_transmit_delta_bytes": int(last["network_transmit_bytes"]) - int(first["network_transmit_bytes"]),
+        })
+
+    cluster_summaries: list[dict[str, Any]] = []
+    for scenario, phase in sorted(configurations):
+        values = [row for row in node_summaries if row["scenario"] == scenario and row["phase"] == phase]
+        cluster_summaries.append({
+            "scope": "cluster", "node": "all", "region": "cluster", "scenario": scenario, "phase": phase,
+            "samples": sum(int(row["samples"]) for row in values),
+            "first_timestamp": min(str(row["first_timestamp"]) for row in values),
+            "last_timestamp": max(str(row["last_timestamp"]) for row in values),
+            "cpu_usage_delta_us": sum(int(row["cpu_usage_delta_us"]) for row in values),
+            "memory_current_max_bytes": max(int(row["memory_current_max_bytes"]) for row in values),
+            "memory_peak_bytes": max(int(row["memory_peak_bytes"]) for row in values),
+            "network_receive_delta_bytes": sum(int(row["network_receive_delta_bytes"]) for row in values),
+            "network_transmit_delta_bytes": sum(int(row["network_transmit_delta_bytes"]) for row in values),
+        })
+    return node_summaries + cluster_summaries
 
 
 def parse_expected(values: list[str]) -> dict[tuple[str, str], int]:
@@ -218,9 +315,11 @@ def assert_three_region_phase(phase_root: Path, tolerance_us: int = 20) -> None:
     _assert_targets(phase_root / "prometheus-targets.json", nodes)
     _assert_network(phase_root / "network-pre.csv", nodes, placement)
     _assert_network(phase_root / "network-post.csv", nodes, placement)
-    for row in read_csv(phase_root / "resource-samples.csv"):
-        if row["container_status"] != "running" or int(row["restart_count"]) != 0 or _true(row["oom_killed"]):
-            raise ValueError("resource samples contain a stopped, restarted, or OOM-killed operator")
+    resource_evidence_summary(
+        phase_root / "resource_timeseries.csv",
+        expected_nodes={str(node) for node in range(nodes)},
+        expected_configurations={(f"n{nodes}-b{batch}", "resource-measured") for batch in expected_batches},
+    )
 
 
 def evaluator_rows(path: Path) -> list[dict[str, Any]]:
@@ -426,6 +525,11 @@ def command_main() -> int:
     placement.add_argument("--inventory", required=True, type=Path)
     three_region = sub.add_parser("assert-three-region-phase")
     three_region.add_argument("--phase-root", required=True, type=Path)
+    resources = sub.add_parser("resource-summary")
+    resources.add_argument("--input", required=True, type=Path)
+    resources.add_argument("--output", required=True, type=Path)
+    resources.add_argument("--expected-node", action="append", default=[])
+    resources.add_argument("--expected-configuration", action="append", default=[])
     args = parser.parse_args()
 
     if args.command == "write-json":
@@ -453,6 +557,18 @@ def command_main() -> int:
         annotate_placement(args.phase_root, args.inventory)
     elif args.command == "assert-three-region-phase":
         assert_three_region_phase(args.phase_root)
+    elif args.command == "resource-summary":
+        configurations = set()
+        for value in args.expected_configuration:
+            scenario, separator, phase = value.partition(":")
+            if not separator or not scenario or not phase:
+                raise ValueError("expected resource configuration must be SCENARIO:PHASE")
+            configurations.add((scenario, phase))
+        write_csv(
+            args.output,
+            resource_evidence_summary(args.input, set(args.expected_node), configurations),
+            RESOURCE_SUMMARY_FIELDS,
+        )
     return 0
 
 

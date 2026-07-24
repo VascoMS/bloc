@@ -53,7 +53,7 @@ bloc_m3_matrix_main() {
     if [[ "$auto_phases" -ne 1 && "$node_count" != "${nodes[${#nodes[@]}-1]}" ]]; then read -r -p "Phase n=$node_count passed. Type NEXT to continue: " answer; [[ "$answer" == NEXT ]] || bloc_die "operator stopped campaign"; fi
   done
   local name inputs
-  for name in run_measurements.csv node_measurements.csv scenario_summary.csv resource-samples.csv; do inputs=(); for dest_root in "${phase_roots[@]}"; do inputs+=("$dest_root/$name"); done; bloc_python "$M3_REPO_ROOT" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
+  for name in run_measurements.csv node_measurements.csv scenario_summary.csv resource_timeseries.csv resource-summary.csv; do inputs=(); for dest_root in "${phase_roots[@]}"; do inputs+=("$dest_root/$name"); done; bloc_python "$M3_REPO_ROOT" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
   inputs=(); for dest_root in "${phase_roots[@]}"; do inputs+=("$dest_root/scenario_summary.json"); done; bloc_python "$M3_REPO_ROOT" merge-json --output "$campaign_root/scenario_summary.json" "${inputs[@]}"
   M3_CAMPAIGN_ROOT="$campaign_root" M3_PHASES="$phases" M3_STARTED_AT="$started_at" M3_CAMPAIGN_ID="$campaign_id" M3_NODE_COUNTS="$node_counts_csv" M3_BATCH_SIZES="$batch_sizes_csv" M3_WARMUPS="$warmups" M3_REPETITIONS="$repetitions" M3_UNATTENDED="$unattended" M3_BASELINE="$baseline_root" bloc_m3_write_manifest complete ""
   if [[ "$skip_charts" -ne 1 && -x "$M3_REPO_ROOT/latency-charts/.venv/bin/python" ]]; then (cd "$M3_REPO_ROOT/latency-charts" && .venv/bin/python -m bloc_latency_charts "$campaign_root"); fi

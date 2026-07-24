@@ -1,5 +1,9 @@
 # Changelog
 
+| Date | Milestone | Area | Change | Rationale | Files | Validation | Next action |
+|---|---|---|---|---|---|---|---|
+| 2026-07-24 | `M4` | EC2 resource evidence | added a non-contaminating 250 ms host-local cgroup-v2/Docker-fallback sampler, dedicated same-region/three-region resource phases, raw counter validation, and per-node/cluster summaries | collect operator resource evidence without perturbing primary latency/p99 phases or conflating host network with protocol-message bytes | `deploy/ec2/sample-container-resources.sh`, active EC2 runners, artifact and three-region analysis/tests, runbook, validation | runner portability suite and chart tests | run an explicitly authorized release-candidate resource campaign; accepted M3 latency evidence remains historical |
+
 Use this file for implementation-level changes that do not need a full decision
 record. Entries are historical records: their follow-up field describes the next
 action at the time of the entry and is not a source of current project state.

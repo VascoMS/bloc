@@ -70,9 +70,17 @@ def write_fixture(root: Path, *, bad_total: bool = False) -> None:
     for row in network:
         row["phase"] = "post"
     pd.DataFrame(network).to_csv(phase / "network-post.csv", index=False)
-    pd.DataFrame([{"container_status": "running", "restart_count": 0, "oom_killed": False}]).to_csv(
-        phase / "resource-samples.csv", index=False
-    )
+    resources = []
+    for node in range(4):
+        for index in range(2):
+            resources.append({
+                "timestamp": f"2026-07-24T00:00:0{index}Z", "sample_index": index, "node": node,
+                "region": regions[node % 3], "scenario": "n4-b8", "phase": "resource-measured",
+                "cpu_usage_us": 100 + index, "memory_current_bytes": 10, "memory_peak_bytes": 12,
+                "network_receive_bytes": 1000 + index, "network_transmit_bytes": 2000 + index,
+                "restart_count": 0, "oom_killed": False,
+            })
+    pd.DataFrame(resources).to_csv(phase / "resource_timeseries.csv", index=False)
     (phase / "cleanup-verification.json").write_text("{}", encoding="utf-8")
 
 
@@ -82,12 +90,14 @@ def test_three_region_analysis_outputs_required_summaries(tmp_path: Path) -> Non
     expected = {
         "three-region-latency-summary.csv", "four-stage-summary.csv", "pairwise-network-summary.csv",
         "critical-node-region-summary.csv", "REPORT.md", "three-region-latency.png",
-        "three-region-four-stage.png", "three-region-pairwise-network.png",
+        "three-region-four-stage.png", "three-region-pairwise-network.png", "host-resource-summary.csv",
     }
     assert expected.issubset({path.name for path in output.iterdir()})
     pairs = set(pd.read_csv(output / "pairwise-network-summary.csv")["region_pair"])
     assert pairs == {"intra-region", "US–Ireland", "US–Frankfurt", "Ireland–Frankfurt"}
     assert "Critical-node region attribution" in (output / "REPORT.md").read_text(encoding="utf-8")
+    resources = pd.read_csv(output / "host-resource-summary.csv")
+    assert set(resources["scope"]) == {"node", "cluster"}
 
 
 def test_three_region_analysis_rejects_non_additive_stages(tmp_path: Path) -> None:

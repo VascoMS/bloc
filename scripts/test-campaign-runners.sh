@@ -9,7 +9,7 @@ scripts=(
   bloc-node/scripts/run-merge-plan-campaign.sh deploy/ec2/run-a1-pilot.sh
   deploy/ec2/rerun-a1-pilot-existing.sh deploy/ec2/run-m3-same-az.sh
   deploy/ec2/run-m3-cross-az.sh deploy/ec2/run-m3-three-region.sh
-  deploy/ec2/run-merge-plan-attribution.sh
+  deploy/ec2/run-merge-plan-attribution.sh deploy/ec2/sample-container-resources.sh
 )
 for script in "${scripts[@]}"; do bash -n "$script"; done
 

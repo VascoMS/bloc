@@ -17,6 +17,13 @@ or a causal topology comparison.
 Charts are a reporting step after valid evidence exists. They are not a reason
 to run an experiment or a substitute for raw accepted artifacts.
 
+Resource evidence is collected only in dedicated `resource-measured` phases,
+never while primary latency/p99 observations run. Acceptance requires 250 ms
+host-local raw samples for every node/configuration, contiguous sample indexes,
+monotonic CPU/network counters, no restart/OOM signal, and separate per-node and
+cluster summaries. Container network bytes must not be presented as protocol
+message bytes.
+
 ## Validation Matrix
 
 | Change area | Minimum validation | When to go further |

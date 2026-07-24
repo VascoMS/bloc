@@ -196,6 +196,18 @@ resource evidence, destroys on success or failure, retries Terraform teardown,
 removes regional keys, and authenticates empty cleanup. It has no
 preserve-on-failure mode.
 
+## Resource Evidence
+
+Same-region and three-region runners execute a separate `resource-measured`
+evaluation pass after the primary latency phase. Each operator samples its own
+container every 250 ms with cgroup-v2 CPU/memory counters and Docker fallback;
+the sampler records neither credentials nor process configuration. The raw
+`resource_timeseries.csv` retains timestamp, sample index, node/region,
+scenario/phase, CPU microseconds, memory current/peak, network receive/transmit
+bytes, restart count, and OOM state. `resource-summary.csv` reports per-node
+configuration and cluster totals. Host/container network counters are separate
+from `bloc_protocol_message_bytes_total` protocol-message metrics.
+
 ## EC2 Merge + Plan Attribution
 
 Use the attribution runner only after relevant protocol, chart, deployment, and

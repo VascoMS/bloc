@@ -112,11 +112,11 @@
 
 **Interface:** produce `resource_timeseries.csv` with timestamp, sample index, node, region, scenario, phase, CPU usage microseconds, memory current/peak bytes, network receive/transmit bytes, restart count, and OOM state. Run it only in separate resource phases so p99 latency campaigns remain minimally perturbed.
 
-- [ ] Add failing fixtures for missing samples, counter resets, incomplete nodes, restarts/OOM, CPU deltas, memory peaks, and network deltas.
-- [ ] Implement a 250 ms host-local cgroup-v2 sampler with Docker fallback, a bounded stop-file lifecycle, and no credential/environment capture.
-- [ ] Integrate sampler start/stop/collection before mandatory teardown in same-region and three-region runners.
-- [ ] Generate per-node/configuration and cluster-total summaries while keeping protocol-message bytes separate from host network counters.
-- [ ] Run `bash scripts/test-campaign-runners.sh` and `cd latency-charts && python -m pytest`; commit `feat: collect sidecar resource evidence`.
+- [x] Add failing fixtures for missing samples, counter resets, incomplete nodes, restarts/OOM, CPU deltas, memory peaks, and network deltas.
+- [x] Implement a 250 ms host-local cgroup-v2 sampler with Docker fallback, a bounded stop-file lifecycle, and no credential/environment capture.
+- [x] Integrate sampler start/stop/collection before mandatory teardown in same-region and three-region runners.
+- [x] Generate per-node/configuration and cluster-total summaries while keeping protocol-message bytes separate from host network counters.
+- [x] Run `bash scripts/test-campaign-runners.sh` and `cd latency-charts && python -m pytest`; commit `feat: collect sidecar resource evidence`.
 
 ### Task 6: Add p99 statistics and balanced long-campaign scheduling
 

@@ -1,9 +1,5 @@
 # Changelog
 
-| Date | Milestone | Area | Change | Rationale | Files | Validation | Next action |
-|---|---|---|---|---|---|---|---|
-| 2026-07-24 | `M4` | EC2 resource evidence | added a non-contaminating 250 ms host-local cgroup-v2/Docker-fallback sampler, dedicated same-region/three-region resource phases, raw counter validation, and per-node/cluster summaries | collect operator resource evidence without perturbing primary latency/p99 phases or conflating host network with protocol-message bytes | `deploy/ec2/sample-container-resources.sh`, active EC2 runners, artifact and three-region analysis/tests, runbook, validation | runner portability suite and chart tests | run an explicitly authorized release-candidate resource campaign; accepted M3 latency evidence remains historical |
-
 Use this file for implementation-level changes that do not need a full decision
 record. Entries are historical records: their follow-up field describes the next
 action at the time of the entry and is not a source of current project state.
@@ -16,6 +12,8 @@ Use [STATUS.md](STATUS.md) for current blockers, evidence, and next actions.
 ```
 
 ## Entries
+
+- 2026-07-24 | `M4` | EC2 resource evidence | added a non-contaminating 250 ms host-local cgroup-v2/Docker-fallback sampler, dedicated same-region/three-region resource phases, strict cadence/coverage/counter/health validation, and per-node/configuration/cluster summaries | collect operator resource evidence without perturbing primary latency/p99 phases or conflating host network counters with protocol-message bytes | `deploy/ec2/sample-container-resources.sh`, active EC2 runners, artifact and three-region analysis/tests, runbook, validation/status/planning docs | 20 artifact fixtures, campaign-runner portability checks, and 26 chart tests passed for source `73aa2be2852623531e2858109d9a757df705497d`; no AWS operation was performed | complete M4 issues `#12` and `#13`, freeze issue `#14`, then run an explicitly authorized release-candidate resource campaign |
 
 - 2026-07-24 | `M4` | bloc-node mempool HTTP provider | added `provider.mempool_timeout_ms`, normalized omitted/zero values to 2,000 ms, rejected negative and duration-overflowing values, emitted the setting from local and EC2 config generators, and replaced the global default client with one bounded client per node and a cancellable single-attempt request | prevent a stalled `mempool-il` service from blocking proposal preparation indefinitely while preserving successful and ordinary HTTP-error behavior | bloc-node provider/config/node/CLI code and tests, module README/deep dive, validation/status/decision/planning docs | the unbounded implementation failed the new contract tests; focused success/error/cancellation/blocking/config/defaulting tests and the full bloc-node normal and race suites passed for source `1ecead9b7b1653f8b047bec28b7c45e59620e643` | complete M4 evidence tooling issues `#11`, `#12`, and `#13`, then validate and freeze issue `#14` |
 

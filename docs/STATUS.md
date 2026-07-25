@@ -3,7 +3,7 @@
 - Last reviewed: `2026-07-24`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `1ecead9b7b1653f8b047bec28b7c45e59620e643`
+- Last known good source: `73aa2be2852623531e2858109d9a757df705497d`
 
 ## Current Prototype State
 
@@ -18,9 +18,9 @@ decoding, deterministic BEAT-MEV `Opt-2` sub-batching, bounded proposal and
 envelope sizes, root-bound RBC reconstruction with post-decode commitment
 verification, bounded share retention/recovery, split public configuration and
 operator-local secrets, durable bounded terminal slot failures, node-owned
-bounded mempool HTTP requests, Prometheus metrics, local evaluators, and VM/EC2
-remote evaluation. The source-led protocol review and current module boundaries
-are documented in
+bounded mempool HTTP requests, non-contaminating host resource sampling and
+validation, Prometheus metrics, local evaluators, and VM/EC2 remote evaluation.
+The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
 
@@ -72,8 +72,8 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the M4 p99/statistics, non-contaminating resource, and transaction
-   corpus/client-overhead tooling tracked by issues `#11`, `#12`, and `#13`.
+1. Complete the M4 p99/statistics and transaction corpus/client-overhead tooling
+   tracked by issues `#12` and `#13`.
 2. Freeze and validate one release-candidate source SHA and image digest in
    issue `#14` before running the final local and VM campaigns.
 3. Track granular work in the [BLOC Thesis Prototype GitHub
@@ -84,11 +84,14 @@ same-region-versus-cross-region evidence.
 ## Last Known Good Baseline
 
 - Date: `2026-07-24`
-- Source: `1ecead9b7b1653f8b047bec28b7c45e59620e643`
+- Source: `73aa2be2852623531e2858109d9a757df705497d`
 - M4 hardening validation: full bloc-node normal and race suites, including
   terminal-failure lifecycle/evaluator coverage and mempool-provider success,
   HTTP-error, cancellation, timeout, invalid-config, and compatibility-default
   cases.
+- Resource-tooling validation: 20 artifact fixtures, campaign-runner
+  portability checks, and 26 chart tests. No live resource campaign has been
+  accepted yet.
 - Local safety evidence:
   `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
 - Linux RBC/ACS/BBA race evidence:

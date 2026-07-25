@@ -11,6 +11,7 @@ import re
 import statistics
 import sys
 import tempfile
+from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -47,6 +48,9 @@ RESOURCE_SUMMARY_FIELDS = [
     "cpu_usage_delta_us", "memory_current_max_bytes", "memory_peak_bytes",
     "network_receive_delta_bytes", "network_transmit_delta_bytes",
 ]
+RESOURCE_SAMPLE_INTERVAL_SECONDS = 0.25
+RESOURCE_SAMPLE_INTERVAL_TOLERANCE_SECONDS = 0.10
+RESOURCE_MINIMUM_SAMPLES = 4
 
 
 def write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: list[str] | None = None) -> None:
@@ -117,8 +121,22 @@ def resource_evidence_summary(
     for (scenario, phase, node), samples in sorted(groups.items()):
         samples.sort(key=lambda row: int(row["sample_index"]))
         indexes = [int(row["sample_index"]) for row in samples]
-        if len(indexes) < 2 or indexes != list(range(len(indexes))):
+        if len(indexes) < RESOURCE_MINIMUM_SAMPLES:
+            raise ValueError(f"{path}: insufficient resource samples for {scenario}/{phase}/node-{node}")
+        if indexes != list(range(len(indexes))):
             raise ValueError(f"{path}: missing samples for {scenario}/{phase}/node-{node}")
+        try:
+            timestamps = [datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")) for row in samples]
+        except ValueError as exc:
+            raise ValueError(f"{path}: invalid resource timestamp") from exc
+        for previous, current in zip(timestamps, timestamps[1:]):
+            spacing = (current - previous).total_seconds()
+            if abs(spacing - RESOURCE_SAMPLE_INTERVAL_SECONDS) > RESOURCE_SAMPLE_INTERVAL_TOLERANCE_SECONDS:
+                raise ValueError(f"{path}: off-cadence resource samples for {scenario}/{phase}/node-{node}")
+        currents = [int(row["memory_current_bytes"]) for row in samples]
+        peaks = [int(row["memory_peak_bytes"]) for row in samples]
+        if any(peak < current for current, peak in zip(currents, peaks)) or any(current < previous for previous, current in zip(peaks, peaks[1:])):
+            raise ValueError(f"{path}: memory peak is below current usage or decreases on {scenario}/{phase}/node-{node}")
         for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
             values = [int(row[counter]) for row in samples]
             if any(current < previous for previous, current in zip(values, values[1:])):

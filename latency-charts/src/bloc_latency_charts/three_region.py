@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -133,8 +134,15 @@ def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFr
         raise ValueError(f"{root}: restarted or OOM-killed operator detected")
     for (_, _, node), samples in resources.groupby(["scenario", "phase", "node"]):
         indexes = sorted(samples["sample_index"].astype(int))
-        if len(indexes) < 2 or indexes != list(range(len(indexes))):
+        if len(indexes) < 4 or indexes != list(range(len(indexes))):
             raise ValueError(f"{root}: resource samples are incomplete for node {node}")
+        timestamps = [datetime.fromisoformat(value.replace("Z", "+00:00")) for value in samples.sort_values("sample_index")["timestamp"]]
+        if any(abs((current - previous).total_seconds() - .25) > .10 for previous, current in zip(timestamps, timestamps[1:])):
+            raise ValueError(f"{root}: resource samples are off-cadence for node {node}")
+        current = samples["memory_current_bytes"].astype(int).tolist()
+        peak = samples["memory_peak_bytes"].astype(int).tolist()
+        if any(item_peak < item_current for item_current, item_peak in zip(current, peak)) or any(item < previous for previous, item in zip(peak, peak[1:])):
+            raise ValueError(f"{root}: resource memory peak is invalid for node {node}")
         for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
             values = samples.sort_values("sample_index")[counter].astype(int).tolist()
             if any(current < previous for previous, current in zip(values, values[1:])):

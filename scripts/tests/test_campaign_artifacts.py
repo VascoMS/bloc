@@ -158,9 +158,9 @@ class CampaignArtifactsTest(unittest.TestCase):
         self.write_csv(phase / "network-post.csv", network)
         resource_rows = []
         for node in range(4):
-            for index in range(2):
+            for index in range(4):
                 resource_rows.append({
-                    "timestamp": f"2026-07-24T00:00:0{index}Z", "sample_index": str(index), "node": str(node),
+                    "timestamp": f"2026-07-24T00:00:00.{index * 250:03d}Z", "sample_index": str(index), "node": str(node),
                     "region": regions[node % 3], "scenario": "n4-b8", "phase": "resource-measured",
                     "cpu_usage_us": str(100 + index), "memory_current_bytes": "10", "memory_peak_bytes": "12",
                     "network_receive_bytes": str(1000 + index), "network_transmit_bytes": str(2000 + index),
@@ -191,9 +191,11 @@ class CampaignArtifactsTest(unittest.TestCase):
         for node, region in (("0", "us-east-1"), ("1", "eu-west-1")):
             for index, cpu, current, peak, receive, transmit in (
                 (0, 100, 10, 12, 1000, 2000), (1, 160, 20, 25, 1300, 2600),
+                (2, 220, 15, 25, 1600, 3200), (3, 280, 12, 25, 1900, 3800),
+                (4, 340, 11, 25, 2200, 4400),
             ):
                 rows.append(dict(zip(fields, (
-                    f"2026-07-24T00:00:0{index}Z", str(index), node, region, "n2-b8", "resource-measured",
+                    f"2026-07-24T00:00:{index // 4:02d}.{(index % 4) * 250:03d}Z", str(index), node, region, "n2-b8", "resource-measured",
                     str(cpu + int(node) * 10), str(current), str(peak), str(receive + int(node) * 100),
                     str(transmit + int(node) * 100), "0", "false",
                 ))))
@@ -205,12 +207,12 @@ class CampaignArtifactsTest(unittest.TestCase):
         summary = artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
         self.assertEqual(len(summary), 3)
         node_zero = next(row for row in summary if row["scope"] == "node" and row["node"] == "0")
-        self.assertEqual(node_zero["cpu_usage_delta_us"], 60)
+        self.assertEqual(node_zero["cpu_usage_delta_us"], 240)
         self.assertEqual(node_zero["memory_peak_bytes"], 25)
-        self.assertEqual(node_zero["network_receive_delta_bytes"], 300)
+        self.assertEqual(node_zero["network_receive_delta_bytes"], 1200)
         cluster = next(row for row in summary if row["scope"] == "cluster")
-        self.assertEqual(cluster["cpu_usage_delta_us"], 120)
-        self.assertEqual(cluster["network_transmit_delta_bytes"], 1200)
+        self.assertEqual(cluster["cpu_usage_delta_us"], 480)
+        self.assertEqual(cluster["network_transmit_delta_bytes"], 4800)
 
     def test_resource_evidence_rejects_missing_sample_indexes(self):
         path = self.root / "resource_timeseries.csv"
@@ -247,12 +249,30 @@ class CampaignArtifactsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid resource phase"):
             artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
 
+    def test_resource_evidence_rejects_memory_peak_below_current_or_decreasing(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows(); rows[1]["memory_peak_bytes"] = "19"
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "memory peak"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
+    def test_resource_evidence_rejects_truncated_or_off_cadence_samples(self):
+        path = self.root / "resource_timeseries.csv"
+        rows = self.resource_rows()[:3]
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "insufficient resource samples"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0"}, expected_configurations={("n2-b8", "resource-measured")})
+        rows = self.resource_rows(); rows[2]["timestamp"] = "2026-07-24T00:00:03.000Z"
+        self.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "off-cadence"):
+            artifacts.resource_evidence_summary(path, expected_nodes={"0", "1"}, expected_configurations={("n2-b8", "resource-measured")})
+
     def test_host_resource_sampler_declares_250ms_cgroup_and_docker_fallback_contract(self):
         sampler = ROOT / "deploy/ec2/sample-container-resources.sh"
         text = sampler.read_text(encoding="utf-8")
         self.assertIn("interval_ms=250", text)
         self.assertIn("/sys/fs/cgroup", text)
-        self.assertIn("docker stats --no-stream", text)
+        self.assertIn("docker_call stats --no-stream", text)
         self.assertIn("--stop-file", text)
         self.assertIn("RESOURCE_TIMESERIES", text)
         self.assertNotIn("printenv", text.lower())
@@ -266,6 +286,17 @@ class CampaignArtifactsTest(unittest.TestCase):
             self.assertIn("resource-measured", text)
             self.assertIn("resource_timeseries.csv", text)
             self.assertIn("resource-summary", text)
+
+    def test_sampler_and_runners_bound_cadence_and_stop_lifecycle(self):
+        sampler = (ROOT / "deploy/ec2/sample-container-resources.sh").read_text(encoding="utf-8")
+        self.assertIn('sleep "$remaining_seconds"', sampler)
+        self.assertIn("next_deadline_ns", sampler)
+        self.assertIn('timeout "$docker_timeout_seconds" docker', sampler)
+        self.assertIn("fallback_peak_bytes", sampler)
+        for name in ("run-a1-pilot.sh", "run-m3-three-region.sh"):
+            text = (ROOT / "deploy/ec2" / name).read_text(encoding="utf-8")
+            self.assertIn(".sampler.pid", text)
+            self.assertIn("kill -0", text)
 
 
 if __name__ == "__main__":

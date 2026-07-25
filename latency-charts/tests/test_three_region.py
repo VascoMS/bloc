@@ -72,9 +72,9 @@ def write_fixture(root: Path, *, bad_total: bool = False) -> None:
     pd.DataFrame(network).to_csv(phase / "network-post.csv", index=False)
     resources = []
     for node in range(4):
-        for index in range(2):
+        for index in range(4):
             resources.append({
-                "timestamp": f"2026-07-24T00:00:0{index}Z", "sample_index": index, "node": node,
+                "timestamp": f"2026-07-24T00:00:00.{index * 250:03d}Z", "sample_index": index, "node": node,
                 "region": regions[node % 3], "scenario": "n4-b8", "phase": "resource-measured",
                 "cpu_usage_us": 100 + index, "memory_current_bytes": 10, "memory_peak_bytes": 12,
                 "network_receive_bytes": 1000 + index, "network_transmit_bytes": 2000 + index,

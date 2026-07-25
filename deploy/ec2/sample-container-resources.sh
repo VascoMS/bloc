@@ -7,6 +7,8 @@ set -Eeuo pipefail
 RESOURCE_TIMESERIES_HEADER='timestamp,sample_index,node,region,scenario,phase,cpu_usage_us,memory_current_bytes,memory_peak_bytes,network_receive_bytes,network_transmit_bytes,restart_count,oom_killed'
 interval_ms=250
 max_samples=14400
+docker_timeout_seconds=2
+fallback_peak_bytes=0
 container=''
 output=''
 stop_file=''
@@ -41,8 +43,9 @@ bytes_from_human() {
     }'
 }
 
-container_pid() { docker inspect --format '{{.State.Pid}}' "$container"; }
-container_state() { docker inspect --format '{{.State.Status}},{{.RestartCount}},{{.State.OOMKilled}}' "$container"; }
+docker_call() { timeout "$docker_timeout_seconds" docker "$@"; }
+container_pid() { docker_call inspect --format '{{.State.Pid}}' "$container"; }
+container_state() { docker_call inspect --format '{{.State.Status}},{{.RestartCount}},{{.State.OOMKilled}}' "$container"; }
 
 read_cgroup_sample() {
   local pid rel path cpu current peak usage
@@ -63,18 +66,19 @@ read_docker_fallback_sample() {
   [[ "$pid" =~ ^[1-9][0-9]*$ && -r "/proc/$pid/stat" ]] || return 1
   ticks="$(getconf CLK_TCK)"
   cpu="$(awk -v ticks="$ticks" '{printf "%.0f", (($14 + $15) * 1000000) / ticks}' "/proc/$pid/stat")"
-  stats="$(docker stats --no-stream --format '{{.MemUsage}}|{{.NetIO}}' "$container")" || return 1
+  stats="$(docker_call stats --no-stream --format '{{.MemUsage}}|{{.NetIO}}' "$container")" || return 1
   memory="${stats%%|*}"; net="${stats#*|}"
   current="$(printf '%s' "${memory%%/*}" | trim | bytes_from_human)" || return 1
   receive="$(printf '%s' "${net%%/*}" | trim | bytes_from_human)" || return 1
   transmit="$(printf '%s' "${net#*/}" | trim | bytes_from_human)" || return 1
   [[ "$cpu" =~ ^[0-9]+$ && "$current" =~ ^[0-9]+$ && "$receive" =~ ^[0-9]+$ && "$transmit" =~ ^[0-9]+$ ]] || return 1
-  printf '%s,%s,%s,%s,%s\n' "$cpu" "$current" "$current" "$receive" "$transmit"
+  [[ "$current" -le "$fallback_peak_bytes" ]] || fallback_peak_bytes="$current"
+  printf '%s,%s,%s,%s,%s\n' "$cpu" "$current" "$fallback_peak_bytes" "$receive" "$transmit"
 }
 
 read_network_counters() {
   local net receive transmit
-  net="$(docker stats --no-stream --format '{{.NetIO}}' "$container")" || return 1
+  net="$(docker_call stats --no-stream --format '{{.NetIO}}' "$container")" || return 1
   receive="$(printf '%s' "${net%%/*}" | trim | bytes_from_human)" || return 1
   transmit="$(printf '%s' "${net#*/}" | trim | bytes_from_human)" || return 1
   printf '%s,%s\n' "$receive" "$transmit"
@@ -93,7 +97,7 @@ sample_once() {
     values="$(read_docker_fallback_sample)" || return 1
     IFS=, read -r cpu current peak receive transmit <<<"$values"
   fi
-  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$timestamp" "$index" "$node" "$region" "$scenario" "$phase" "$cpu" "$current" "$peak" \
     "$receive" "$transmit" "$restart" "$oom" >>"$output"
@@ -121,15 +125,24 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$container" && -n "$output" && -n "$stop_file" && -n "$node" && -n "$region" && -n "$scenario" ]] || die 'container, output, stop-file, node, region, and scenario are required'
 [[ "$phase" == resource-measured ]] || die 'phase must be resource-measured'
-[[ "$max_samples" =~ ^[0-9]+$ && "$max_samples" -ge 2 ]] || die 'max-samples must be at least 2'
+[[ "$max_samples" =~ ^[0-9]+$ && "$max_samples" -ge 4 ]] || die 'max-samples must be at least 4'
 case "$node$region$scenario$phase" in *$'\n'*|*,*) die 'metadata must not contain commas or newlines' ;; esac
 mkdir -p "$(dirname "$output")" "$(dirname "$stop_file")"
 rm -f "$stop_file" "$output"
 umask 077
 printf '%s\n' "$RESOURCE_TIMESERIES_HEADER" >"$output"
+interval_nanoseconds=$((interval_ms * 1000000))
+next_deadline_ns="$(date +%s%N)"
 
 for ((index = 0; index < max_samples; index++)); do
   [[ -e "$stop_file" ]] && exit 0
   sample_once "$index"
-  [[ $((index + 1)) -lt "$max_samples" ]] && sleep 0.25
+  next_deadline_ns=$((next_deadline_ns + interval_nanoseconds))
+  if [[ $((index + 1)) -lt "$max_samples" ]]; then
+    now_ns="$(date +%s%N)"
+    if [[ "$now_ns" -lt "$next_deadline_ns" ]]; then
+      remaining_seconds="$(awk -v nanoseconds="$((next_deadline_ns - now_ns))" 'BEGIN { printf "%.9f", nanoseconds / 1000000000 }')"
+      sleep "$remaining_seconds"
+    fi
+  fi
 done

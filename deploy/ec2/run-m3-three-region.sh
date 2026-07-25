@@ -219,7 +219,7 @@ run_phase() (
 
   run_resource_phase() {
     # Keep sampler overhead out of the primary latency/p99 phase.
-    local batch node id public region scenario remote_csv stop_file resource_dir next_resource_slot=100000
+    local batch node id public region scenario remote_csv stop_file pid_file resource_dir next_resource_slot=100000
     local parts=() summary_args=(resource-summary --input "$phase_root/resource_timeseries.csv" --output "$phase_root/resource-summary.csv")
     mkdir -p "$phase_root/resource-parts"
     for id in $(jq -r '.nodes|sort_by(.id)[]|.id' "$inventory"); do summary_args+=(--expected-node "$id"); done
@@ -227,14 +227,14 @@ run_phase() (
       scenario="n${node_count}-b${batch}"; resource_dir="$phase_root/resource-parts/$scenario"; mkdir -p "$resource_dir"
       summary_args+=(--expected-configuration "$scenario:resource-measured")
       while IFS= read -r node; do
-        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; region="$(jq -r .region <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
-        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "mkdir -p /opt/bloc/ec2/resources; rm -f '$stop_file'; nohup /opt/bloc/ec2/sample-container-resources.sh run --container ec2-bloc-node-1 --output '$remote_csv' --stop-file '$stop_file' --node '$id' --region '$region' --scenario '$scenario' --phase resource-measured >/opt/bloc/ec2/resources/$scenario.log 2>&1 &"
+        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; region="$(jq -r .region <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"; pid_file="/opt/bloc/ec2/resources/$scenario.sampler.pid"
+        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "mkdir -p /opt/bloc/ec2/resources; rm -f '$stop_file' '$pid_file'; nohup /opt/bloc/ec2/sample-container-resources.sh run --container ec2-bloc-node-1 --output '$remote_csv' --stop-file '$stop_file' --node '$id' --region '$region' --scenario '$scenario' --phase resource-measured >/opt/bloc/ec2/resources/$scenario.log 2>&1 & echo \$! >'$pid_file'"
       done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
       remote_dir="/opt/bloc/ec2/results/$phase_id/resource-$scenario"
       ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-resource-$scenario' --first-slot '$next_resource_slot' --batch-size '$batch' --warmups 0 --repetitions '$repetitions' --out-dir 'results/$phase_id/resource-$scenario' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
       while IFS= read -r node; do
-        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"
-        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "touch '$stop_file'; sleep 2; test -s '$remote_csv'"
+        id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"; pid_file="/opt/bloc/ec2/resources/$scenario.sampler.pid"
+        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "test -s '$pid_file'; kill -0 \$(cat '$pid_file'); touch '$stop_file'; for i in 1 2 3 4 5 6 7 8; do if ! kill -0 \$(cat '$pid_file') 2>/dev/null; then test -s '$remote_csv'; exit 0; fi; sleep 0.25; done; exit 1"
         scp -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public:$remote_csv" "$resource_dir/node-$id.csv"; parts+=("$resource_dir/node-$id.csv")
       done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
       next_resource_slot=$((next_resource_slot + repetitions))

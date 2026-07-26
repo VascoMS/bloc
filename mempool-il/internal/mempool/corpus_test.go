@@ -176,6 +176,14 @@ func TestReadEvidenceCorpusRejectsInvalidContracts(t *testing.T) {
 			},
 			want: "intrinsic gas",
 		},
+		{
+			name: "underfunded calldata floor",
+			mutate: func(entries []targetCorpusEntry) {
+				data := bytes.Repeat([]byte{0x01}, 128)
+				entries[28].RawTx = signedEvidenceRawTx(t, evidenceCorpusChainID, 1003, data, 21_000+40*128-1)
+			},
+			want: "intrinsic gas",
+		},
 	}
 
 	for _, test := range tests {

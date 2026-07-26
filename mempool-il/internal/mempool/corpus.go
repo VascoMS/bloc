@@ -61,8 +61,9 @@ func readEvidenceCorpus(path string) ([]parsedTargetTx, error) {
 		if target.Tx.ChainId() == nil || target.Tx.ChainId().Cmp(evidenceCorpusChainID) != 0 {
 			return nil, fmt.Errorf("evidence corpus row %d chain id = %v, want %s", index+1, target.Tx.ChainId(), evidenceCorpusChainID)
 		}
-		if target.Tx.Gas() < 21_000 {
-			return nil, fmt.Errorf("evidence corpus row %d intrinsic gas limit = %d, want at least 21000", index+1, target.Tx.Gas())
+		minimumGas := estimateCarrierGas(target.Tx.Data())
+		if target.Tx.Gas() < minimumGas {
+			return nil, fmt.Errorf("evidence corpus row %d intrinsic gas limit = %d, want at least %d", index+1, target.Tx.Gas(), minimumGas)
 		}
 		spec, ok := specByLength[len(target.Tx.Data())]
 		if !ok {

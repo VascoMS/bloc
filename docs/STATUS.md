@@ -1,9 +1,9 @@
 # Status
 
 - Last reviewed: `2026-07-26`
-- Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `699f2ad264fc394668c59dfa69f882711ffbac16`
+- Active milestone: `none selected`
+- Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
+- Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
 
 ## Current Prototype State
 
@@ -35,37 +35,29 @@ slashing protection, or PBS prefix enforcement.
 
 ## Latest Completed Milestone
 
-M3 is complete for the accepted honest-path three-region latency scope. Source
-`8de4af179465f9cd77920eacdcca163ca5cef01d` ran the canonical `n=4/n=7`, batch
-`8/32/128` matrix on `t3.small` instances across `us-east-1`, `eu-west-1`, and
-`eu-central-1`.
+M4 is complete. The final evaluation release candidate is source
+`2bc8efc9269798a7f7ab58021f8b9bda1012ae5d` and local immutable image
+`bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`.
+The image contract is `linux/amd64`, user `10001:10001`, entrypoint
+`["bloc-node"]`, and default command
+`["run","--config","/config/cluster.json"]`.
 
-The campaign retained:
+Validation logs are retained under the ignored root
+`results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/`.
+All four Go module suites, chart tests, normal and targeted race suites, both
+BTE decoder fuzz targets, Terraform validation, runner portability, local
+evaluation, full-path BTE benchmarks, and standard/mock-placeholder Compose
+rehearsals passed. The exact-source ACS campaign
+`results/local/acs-common-subset-safety/rc-2bc8efc/` passed 1,000 delivery
+schedules, the 100-slot sustained gate, the 180-slot compatibility matrix,
+identity checks, and Merge/Plan attribution.
 
-- `180/180` successful and cross-node-consistent measured slots;
-- `990/990` finalized measured node rows;
-- one image digest across both phases;
-- complete placement, stage-additivity, Prometheus, pairwise-health, and
-  restart/OOM checks; and
-- authenticated empty cleanup after Terraform destroyed 40 then 43 resources.
-
-Accepted evidence is stored under the ignored artifact root
-`results/ec2/m3-three-region-synthetic-accepted-20260718-1/`. It supports scoped
-p50/p95 honest-path latency, stage, pairwise-network, and critical-node-region
-reporting. It is not Byzantine-safety, production-confidentiality, or causal
-same-region-versus-cross-region evidence.
-
-Issue #13 produced the local client-overhead artifact
-`results/issue-13-client-overhead/client_overhead.csv` from source
-`62433f5b62586d2a1dd66a04ff825db20fda5e63`. It contains 500 raw
-measurements from 500 distinct signed targets, exactly 100 per
-transfer/128/256/1,024/4,096-byte class, and has SHA-256
-`d5a174e6f65fe05d9be368f918ec63a77a48c107a4433180f11c881e8da6aebc`.
-It supports scoped client preparation-latency, byte-expansion, and
-gas-equivalent carrier estimates; it is not network latency, paid gas, or a
-weighted or longitudinal Ethereum workload claim. The separate
-`28/50/12/8/2` transaction-size mix belongs to full-protocol workload
-construction.
+The accepted M3 three-region evidence remains at
+`results/ec2/m3-three-region-synthetic-accepted-20260718-1/`. Issue #13's
+balanced 500-target client-overhead artifact remains separate from the
+`28/50/12/8/2` 100-target full-protocol workload. Their scoped claims and the
+release-candidate configuration contract are defined in
+[VALIDATION.md](VALIDATION.md).
 
 ## Open Blockers And Risks
 
@@ -88,30 +80,28 @@ construction.
 
 ## Immediate Next Actions
 
-1. Freeze and validate one release-candidate source SHA and image digest in
-   issue `#14` before running the final local and VM campaigns.
-2. Run the final M5 local and VM campaigns only from that frozen source and
-   image.
-3. Track granular work in the [BLOC Thesis Prototype GitHub
+1. Select `M5. Performance, Scaling, And Resource Evidence` explicitly before
+   starting its final campaigns.
+2. Run issue `#8` and the later same-region/three-region campaigns only from
+   the frozen source, image, corpus, configuration, seed, and schema contract.
+3. Treat any source or image change as an invalidation decision; do not combine
+   measurements from different revisions into one final campaign.
+4. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
 
 ## Last Known Good Baseline
 
-- Date: `2026-07-24`
-- Source: `73aa2be2852623531e2858109d9a757df705497d`
-- M4 hardening validation: full bloc-node normal and race suites, including
-  terminal-failure lifecycle/evaluator coverage and mempool-provider success,
-  HTTP-error, cancellation, timeout, invalid-config, and compatibility-default
-  cases.
-- Resource-tooling validation: 20 artifact fixtures, campaign-runner
-  portability checks, and 26 chart tests. No live resource campaign has been
-  accepted yet.
+- Date: `2026-07-26`
+- Source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
+- Image: `bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`
+- Release-candidate validation:
+  `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/`
 - Local safety evidence:
-  `results/local/acs-common-subset-safety/acs-safety-issue9-ebb69c5/`
+  `results/local/acs-common-subset-safety/rc-2bc8efc/`
 - Linux RBC/ACS/BBA race evidence:
-  `results/local/rbc-mixed-root/ebb69c5/`
+  `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/logs/hbbft-linux-amd64-race.log`
 - Accepted distributed evidence:
   `results/ec2/m3-three-region-synthetic-accepted-20260718-1/`
 - Canonical validation commands and evidence semantics:

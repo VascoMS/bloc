@@ -6,9 +6,9 @@ correct operators produce the same deterministic plaintext transaction set.
 Builder API and DVT integration are future integration strategies rather than
 requirements of the current evaluation.
 
-Milestone state is maintained in [`STATUS.md`](STATUS.md). M3 is the latest
-completed milestone and M4 is the active milestone. Granular execution is
-tracked in the [BLOC Thesis Prototype GitHub
+Milestone state is maintained only in [`STATUS.md`](STATUS.md); this roadmap
+defines objectives and done criteria without selecting the active milestone.
+Granular execution is tracked in the [BLOC Thesis Prototype GitHub
 Project](https://github.com/users/VascoMS/projects/1).
 
 Builder API compatibility, production mev-boost behavior, proposer signing, and
@@ -81,7 +81,7 @@ current roadmap, validation path, or thesis metric collection plan.
 
 ## M4. Evaluation Readiness And Prototype Hardening
 
-- Status: active.
+- Status: complete.
 - RQs advanced: prerequisite for `RQ1`–`RQ4`.
 - Objective: freeze an admissible release candidate whose known defects cannot
   invalidate correctness or experimental interpretation.
@@ -108,6 +108,7 @@ current roadmap, validation path, or thesis metric collection plan.
 
 ## M5. Performance, Scaling, And Resource Evidence
 
+- Status: not selected.
 - RQs advanced: `RQ1`, `RQ2`, `RQ4`.
 - Objective: collect the final honest-path timing, coordination, cryptographic,
   resource, and scaling evidence from the frozen release candidate.

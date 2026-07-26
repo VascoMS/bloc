@@ -27,6 +27,40 @@ as protocol message bytes. Accepted historical M3 `resource-samples.csv`
 artifacts retain their original running/restart/OOM stability gate but are coarse
 evidence and must not yield a host-resource summary.
 
+## Frozen Evaluation Release Candidate
+
+Final M5/M6 evidence is bound to this release-candidate contract:
+
+- source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`;
+- image: `bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`;
+- image platform/user/entrypoint: `linux/amd64`, `10001:10001`,
+  `["bloc-node"]`;
+- validation root:
+  `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/`;
+- ACS safety root: `results/local/acs-common-subset-safety/rc-2bc8efc/`;
+- evaluator artifact schema: `bloc-eval-suite/v3`.
+
+The primary honest-path configuration is `n=4,t=3` and `n=7,t=5`, batches
+`8/32/128`, persistent execution, 10 warmups, 1,000 measured attempts per
+scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
+completed-within-deadline boundary. Failed, inconsistent, and timed-out
+attempts remain in the artifact but never enter latency quantiles. The guarded
+`n=10,t=7` and batch-512 extension uses its separate 30-observation
+pilot/continuation rule and requires `BMax` to cover the selected batch.
+
+Corpus-backed protocol campaigns use `tx_source=mock-placeholder` and the
+committed 100-target `28/50/12/8/2` workload. The balanced 500-target issue #13
+corpus is only for per-class client-overhead evidence and must not be substituted
+for the protocol workload. Manifests and CSV/JSON rows must retain the source
+SHA, image tag/digest, seed, block/order metadata, planned scenario count,
+transaction source, configuration, attempt outcome, and schema version.
+
+No final campaign may mix source revisions or image digests. A code,
+configuration, corpus, or schema change requires an explicit invalidation
+decision, a newly frozen release candidate, and rerunning every affected phase.
+Measurements from the old and new candidate must not be merged into one
+campaign, even when their CSV columns remain compatible.
+
 ## Validation Matrix
 
 | Change area | Minimum validation | When to go further |

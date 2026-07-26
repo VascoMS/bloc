@@ -52,8 +52,11 @@ CSV/JSON output. Compose latency is diagnostic only.
 Stop the rehearsal with:
 
 ```sh
-docker compose down
+docker compose down -v
 ```
+
+The `-v` cleanup removes the generated cluster-config and operator-secret
+volumes as well as the containers and network.
 
 ## Mock-Placeholder Rehearsal
 
@@ -73,7 +76,7 @@ go run ./cmd/bloc-node eval-remote \
   --experiment-id compose-mock-placeholder \
   --tx-source mock-placeholder \
   --mempool-url http://127.0.0.1:18080 \
-  --batch-size 4 \
+  --batch-size 8 \
   --warmups 0 \
   --repetitions 1 \
   --out-dir results/distributed/compose-mock-placeholder
@@ -86,7 +89,7 @@ manifest to record `tx_source=mock-placeholder`.
 Stop both files explicitly:
 
 ```sh
-docker compose -f compose.yaml -f compose.mock-placeholder.yaml down
+docker compose -f compose.yaml -f compose.mock-placeholder.yaml down -v
 ```
 
 ## Metrics And Charts

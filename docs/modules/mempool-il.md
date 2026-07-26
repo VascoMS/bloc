@@ -180,13 +180,15 @@ and slot.
 
 ### 6. Client-overhead evidence
 
-The committed issue #13 corpus has a stricter boundary than ordinary replay
-input. `readEvidenceCorpus` requires exactly 100 EIP-1559 transactions on
-development chain 1337, recoverable signatures, unique hashes, sufficient
-EIP-7623 data-floor gas limits, exact calldata sizes, matching class labels,
-and the `28/50/12/8/2` transfer/128/256/1,024/4,096-byte distribution.
-Permissive replay loading remains separate so small local fixtures and raw hex
-lines continue to work.
+Issue #13 separates two strict corpus contracts from ordinary replay input.
+`readClientOverheadCorpus` requires exactly 500 EIP-1559 transactions on
+development chain 1337, with 100 unique targets in each
+transfer/128/256/1,024/4,096-byte class. `readProtocolWorkloadCorpus` validates
+the separate 100-row `28/50/12/8/2` mock-placeholder workload. Both require
+recoverable signatures, unique hashes, sufficient EIP-7623 data-floor gas
+limits, exact calldata sizes, and matching class labels. Permissive replay
+loading remains separate so small local fixtures and raw hex lines continue to
+work.
 
 `corpus-report` reuses replay construction without timing the whole function.
 The shared encryption boundary returns the encoded BTE ciphertext; placeholder
@@ -194,16 +196,18 @@ calldata construction and signing happen after the encryption timer stops.
 Plaintext submission preparation times hex encoding and JSON serialization of
 the same signed target bytes. It does not submit either path to a network.
 
-The report cycles through each class until it has at least 100 raw measurements,
-then writes stable class/sample ordering. Corpus membership, schema, sizes, and
-ordering are deterministic. Ciphertext contents and timings are not because
-BTE encryption is randomized.
+The report consumes every balanced client target exactly once and writes
+exactly 100 rows per class in stable class/sample order. It rejects an
+incomplete class instead of cycling transactions. Corpus membership, schema,
+sizes, and ordering are deterministic. Ciphertext contents and timings are not
+because BTE encryption is randomized. Results remain per class; no weighted or
+pooled client summary is produced.
 
 The carrier figure applies the post-Pectra EIP-7623 data-only floor to
 placeholder calldata: `21,000 + 10 * (zero bytes + 4 * nonzero bytes)`. It is a
-gas-equivalent estimate, not paid gas. The class-weighting provenance and exact
-one-day mainnet sample are owned by the
-[mempool README](../../mempool-il/README.md#corpus-share-methodology); the
+gas-equivalent estimate, not paid gas. The protocol-workload weighting
+provenance and exact one-day mainnet sample are owned by the
+[mempool README](../../mempool-il/README.md#full-protocol-workload-share-methodology); the
 acceptance rules and generation commands are in
 [VALIDATION.md](../VALIDATION.md#rq4-client-overhead-corpus).
 

@@ -167,8 +167,8 @@ submission_serialization_us
 - `ciphertext_bytes` is the encoded BTE ciphertext length.
 - `placeholder_bytes` is the signed placeholder transaction length.
 - `calldata_bytes` is the placeholder transaction's calldata length.
-- `encryption_us` measures only BTE encryption, excluding placeholder signing
-  and encoding.
+- `encryption_us` measures BTE encryption and canonical ciphertext binary
+  encoding, excluding placeholder construction and signing.
 - `submission_serialization_us` measures hex encoding and JSON serialization of
   the plaintext raw-transaction submission request. It excludes network I/O.
 

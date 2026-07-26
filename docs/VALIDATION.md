@@ -531,21 +531,23 @@ remain explicit prototype limitations.
 Question: what incremental submission and operational costs does BLOC impose on
 users and sidecar operators?
 
-Use at least 100 deterministic valid signed transactions spanning simple
-transfers and multiple calldata sizes. Measure client encryption latency, raw
-transaction bytes, BTE ciphertext bytes, placeholder/carrier bytes, submission
-expansion, and a gas-equivalent carrier estimate. The carrier estimate is not
-reported as paid gas unless a future on-chain path actually includes it; target
-execution gas remains outside this off-chain sidecar measurement.
+Use 100 deterministic valid signed transactions in each of the transfer,
+128-byte, 256-byte, 1,024-byte, and 4,096-byte payload classes. Measure client
+encryption latency, raw transaction bytes, BTE ciphertext bytes,
+placeholder/carrier bytes, submission expansion, and a gas-equivalent carrier
+estimate. Keep results per class without a weighted or pooled client summary.
+The carrier estimate is not reported as paid gas unless a future on-chain path
+actually includes it; target execution gas remains outside this off-chain
+sidecar measurement.
 
 #### RQ4 Client-Overhead Corpus
 
 The issue #13 corpus is accepted only when its test contract proves:
 
-- exactly 100 valid signed EIP-1559 transactions on development chain 1337;
+- exactly 500 valid signed EIP-1559 transactions on development chain 1337;
 - unique transaction hashes and recoverable senders;
-- exact `28/50/12/8/2` rows for transfer, 128, 256, 1,024, and 4,096-byte
-  target calldata;
+- exactly 100 rows for each transfer, 128, 256, 1,024, and 4,096-byte target
+  calldata class;
 - matching JSONL class labels and decoded target sizes; and
 - target gas limits at or above the EIP-7623 data-only floor.
 
@@ -563,25 +565,27 @@ go run ./cmd/bloc-node gen-config \
 
 cd ../mempool-il
 go run ./cmd/corpus-report \
-  -corpus ../deploy/docker-compose/corpus/mock-targets.jsonl \
+  -corpus ../deploy/docker-compose/corpus/client-overhead-targets.jsonl \
   -cluster-config ../results/issue-13-client-overhead/cluster.json \
   -out ../results/issue-13-client-overhead/client_overhead.csv \
   -slot 1 \
   -samples-per-class 100
 ```
 
-The accepted CSV has one header plus 500 data rows, exactly 100 per class, and
-this schema:
+The accepted CSV has one header plus 500 data rows, exactly 100 per class and
+500 distinct target hashes. Every client target is measured once; cycling and
+weighted or pooled summaries are rejected. The schema is:
 
 ```text
 class,sample_index,target_hash,raw_bytes,ciphertext_bytes,placeholder_bytes,calldata_bytes,carrier_gas_estimate,encryption_us,submission_serialization_us
 ```
 
-`encryption_us` times only BTE encryption. Placeholder construction and signing
-occur after that timer. `submission_serialization_us` times raw transaction hex
-encoding and JSON serialization without network I/O. The two paths use the
-same signed target bytes. Ciphertext contents and timings are raw randomized
-measurements; they are not expected to repeat exactly.
+`encryption_us` times BTE encryption plus canonical ciphertext binary encoding.
+Placeholder construction and signing occur after that timer.
+`submission_serialization_us` times raw transaction hex encoding and JSON
+serialization without network I/O. The two paths use the same signed target
+bytes. Ciphertext contents and timings are raw randomized measurements; they
+are not expected to repeat exactly.
 
 `carrier_gas_estimate` uses the post-Pectra EIP-7623 data-only floor:
 
@@ -594,7 +598,14 @@ This is not paid gas, a receipt, or an estimate of target execution gas. The
 CSV, generated CRS/configuration, and development operator secrets remain under
 the ignored `results/issue-13-client-overhead/` root.
 
-The corpus weighting comes from a mainnet observation at
+#### Full-Protocol Transaction-Size Workload
+
+The separate `deploy/docker-compose/corpus/mock-targets.jsonl` file contains
+100 valid signed targets distributed `28/50/12/8/2` across the same five
+classes. It is the mock-placeholder input for full-path ACS and BTE evaluation;
+it is not the client-overhead sampling frame.
+
+The protocol-workload weighting comes from a mainnet observation at
 `2026-07-26T15:01:55Z`. Using full transaction objects returned by
 `eth_getBlockByNumber` from `ethereum-rpc.publicnode.com`, the analysis skipped
 64 blocks behind the reported head and sampled every twentieth block from
@@ -615,11 +626,12 @@ its summed input bytes divided by all sampled input bytes:
 | 1,024–4,095 | 7.924% | 29.444% |
 | 4,096+ | 2.246% | 49.951% |
 
-The fixed corpus maps zero to transfer, 1–255 to 128, 256–1,023 to 256,
+The protocol workload maps zero to transfer, 1–255 to 128, 256–1,023 to 256,
 1,024–4,095 to 1,024, and 4,096+ to 4,096 bytes. Rounding transaction shares
 gives `28/50/12/8/2`. Byte share motivates retaining the rare large classes but
-does not set row counts. Treat this as a dated one-day workload approximation,
-not a universal Ethereum transaction distribution.
+does not set client measurement counts. Treat this as a dated one-day
+full-protocol workload approximation, not a universal Ethereum transaction
+distribution.
 
 Translate accepted RQ2 measurements into CPU seconds, peak memory, inbound and
 outbound bytes, dedicated-cluster hourly cost, and amortized cost per slot and

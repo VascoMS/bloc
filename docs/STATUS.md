@@ -57,9 +57,9 @@ same-region-versus-cross-region evidence.
 
 Issue #13 produced the local client-overhead artifact
 `results/issue-13-client-overhead/client_overhead.csv` from source
-`ced03fcf5a6b25d5eff435c5fbf351f164985561`. It contains 500 raw measurements,
+`71c3584328bffd55bd2886bc7098839110d5fe1a`. It contains 500 raw measurements,
 100 per transfer/128/256/1,024/4,096-byte class, and has SHA-256
-`919d3537f0df6bcccd3dc616678b2a3c2115d2a6f918242691f27c88dd7182ba`.
+`e9b6e77c28328f640e0e8fc98c53036207c26911f58c21b5a65a7493b9bc9d2e`.
 It supports scoped client preparation-latency, byte-expansion, and
 gas-equivalent carrier estimates; it is not network latency, paid gas, or a
 longitudinal Ethereum workload claim.

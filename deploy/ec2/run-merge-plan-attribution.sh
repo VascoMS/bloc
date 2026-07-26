@@ -47,7 +47,7 @@ for index in 0 1 2; do id="${phase_ids[$index]}"; nodes="${phase_nodes[$index]}"
     bloc_append_command "$commands" bash "$script_dir/run-a1-pilot.sh" "${args[@]}"; bash "$script_dir/run-a1-pilot.sh" "${args[@]}"; mv "$source_path" "$phase_path"; digest="$(jq -r '.terraform.docker_image_digest' "$phase_path/manifest.json")"
   fi
   [[ -n "$digest" && "$digest" != null ]] || bloc_die "$id has no image digest"; [[ -z "$expected_digest" || "$digest" == "$expected_digest" ]] || bloc_die "$id image digest differs"; expected_digest="$digest"
-  bloc_python "$repo_root" assert-evaluator --csv "$phase_path/run_measurements.csv" --expected "$nodes/8=30" --expected "$nodes/32=30" --expected "$nodes/128=30"
+  bloc_python "$repo_root" assert-evaluator --require-success --csv "$phase_path/run_measurements.csv" --expected "$nodes/8=30" --expected "$nodes/32=30" --expected "$nodes/128=30"
   jq -n --arg id "$id" --arg path "$id" --argjson nodes "$nodes" --arg operator_instance_type "$operator" --arg controller_instance_type "$controller_type" --arg image_digest "$digest" '{id:$id,path:$path,nodes:$nodes,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,image_digest:$image_digest}' >>"$phases_jsonl"; write_manifest in-progress
 done
 write_manifest analysis-pending; python_bin="$repo_root/latency-charts/.venv/bin/python"; [[ -x "$python_bin" ]] || python_bin=python3; (cd "$repo_root/latency-charts" && "$python_bin" -m bloc_latency_charts.merge_plan_campaign "$campaign_root"); write_manifest complete; trap - EXIT

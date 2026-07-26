@@ -28,6 +28,7 @@ Options:
   --repetitions N                Measured repetitions per batch. Default: 3
   --repetition-blocks N          Split measurements into N balanced blocks. Default: 1
   --batch-order-block LIST       Repeat once per block; each list is a permutation of batches.
+  --seed N                       Stable measurement-block ordering seed. Default: 20260621
   --prebuilt-image-tag TAG       Reuse an existing local image.
   --ecr-image-tag TAG            ECR tag; defaults to the Git commit.
   --max-runtime-minutes N        Fail the phase after this many minutes; 0 disables.
@@ -60,6 +61,7 @@ warmups="1"
 repetitions="3"
 repetition_blocks="1"
 batch_order_blocks=()
+seed="20260621"
 prebuilt_image_tag=""
 ecr_image_tag=""
 max_runtime_minutes="0"
@@ -91,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --repetitions) repetitions="$2"; shift 2 ;;
     --repetition-blocks) repetition_blocks="$2"; shift 2 ;;
     --batch-order-block) batch_order_blocks+=("$2"); shift 2 ;;
+    --seed) seed="$2"; shift 2 ;;
     --prebuilt-image-tag) prebuilt_image_tag="$2"; shift 2 ;;
     --ecr-image-tag) ecr_image_tag="$2"; shift 2 ;;
     --max-runtime-minutes) max_runtime_minutes="$2"; shift 2 ;;
@@ -117,18 +120,31 @@ if [[ "$image_distribution" != "ecr" && "$image_distribution" != "ssh-load" ]]; 
   exit 2
 fi
 
-bloc_is_positive_int "$node_count" || bloc_usage_error "--node-count must be positive"
-[[ "$node_count" -le 10 ]] || bloc_usage_error "--node-count must be at most 10"
-bloc_validate_csv_positive "$batch_sizes_csv" BatchSizes
+bloc_csv_contains_only "$node_count" 4,7,10 NodeCount
+bloc_csv_contains_only "$batch_sizes_csv" 8,32,128,512 BatchSizes
 bloc_is_uint "$warmups" || bloc_usage_error "--warmups must be non-negative"
 bloc_is_positive_int "$repetitions" || bloc_usage_error "--repetitions must be positive"
 bloc_is_positive_int "$repetition_blocks" || bloc_usage_error "--repetition-blocks must be positive"
 [[ $((repetitions % repetition_blocks)) -eq 0 ]] || bloc_usage_error "--repetitions must be divisible by --repetition-blocks"
+bloc_is_uint "$seed" || bloc_usage_error "--seed must be non-negative"
 bloc_is_uint "$max_runtime_minutes" || bloc_usage_error "--max-runtime-minutes must be non-negative"
 [[ -z "$availability_zones_csv" ]] || bloc_csv_each "$availability_zones_csv" ':' AvailabilityZones
 [[ -z "$subnet_cidrs_csv" ]] || bloc_csv_each "$subnet_cidrs_csv" ':' SubnetCidrs
 if [[ "${#batch_order_blocks[@]}" -eq 0 ]]; then
-  i=0; while [[ "$i" -lt "$repetition_blocks" ]]; do batch_order_blocks+=("$batch_sizes_csv"); i=$((i+1)); done
+  while IFS= read -r order; do batch_order_blocks+=("$order"); done < <(
+    python3 - "$batch_sizes_csv" "$seed" "$repetition_blocks" <<'PY'
+import hashlib
+import sys
+batches = sys.argv[1].split(",")
+seed, blocks = sys.argv[2], int(sys.argv[3])
+for block in range(1, blocks + 1):
+    ordered = sorted(
+        batches,
+        key=lambda batch: hashlib.sha256(f"{seed}:{block}:{batch}".encode()).digest(),
+    )
+    print(",".join(ordered))
+PY
+  )
 fi
 [[ -n "$availability_zones_csv" ]] || availability_zones_csv="$availability_zone"
 [[ "${#batch_order_blocks[@]}" -eq "$repetition_blocks" ]] || bloc_usage_error "provide exactly one --batch-order-block per repetition block"
@@ -152,6 +168,10 @@ for command in aws terraform docker git jq ssh scp gzip rsync python3 go; do com
 if [[ "$validate_only" == 1 ]]; then bloc_validate_only_message "run-a1-pilot.sh"; exit 0; fi
 
 IFS=',' read -r -a batch_sizes <<< "$batch_sizes_csv"
+bmax=0
+for batch in "${batch_sizes[@]}"; do
+  [[ "$batch" -le "$bmax" ]] || bmax="$batch"
+done
 terraform_dir="$script_dir/terraform"
 ecr_repository_name="$(printf 'bloc-node-%s' "$experiment_id" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._/-]#-#g')"
 
@@ -356,6 +376,7 @@ write_manifest() {
     --arg warmups "$warmups" \
     --arg repetitions "$repetitions" \
     --arg repetition_blocks "$repetition_blocks" \
+    --arg seed "$seed" \
     --arg topology "$topology" \
     --argjson batch_order_blocks "$(printf '%s\n' "${batch_order_blocks[@]}" | jq -R 'split(",")' | jq -s '.')" \
     --argjson batch_sizes "$(printf '%s\n' "${batch_sizes[@]}" | jq -R 'tonumber' | jq -s '.')" \
@@ -385,6 +406,7 @@ write_manifest() {
       warmups: ($warmups | tonumber),
       repetitions: ($repetitions | tonumber),
       repetition_blocks: ($repetition_blocks | tonumber),
+      seed: ($seed | tonumber),
       batch_order_blocks: $batch_order_blocks,
       terraform: $terraform,
       inventory: $inventory,
@@ -648,7 +670,7 @@ write_prometheus_config "$inventory_path" "$script_dir/prometheus.ec2.yml"
     --remote-eval-out ../deploy/ec2/remote-eval.ec2.json \
     --cluster-id "$experiment_id" \
     --nodes "$node_count" \
-    --bmax 128 \
+    --bmax "$bmax" \
     --prometheus-url "http://${controller_private_ip}:9090" \
     --grafana-url "http://${controller_private_ip}:3000" \
     --controller-url "$controller_private_ip"
@@ -725,10 +747,10 @@ for batch_order in "${batch_order_blocks[@]}"; do
   remote_experiment_id="$experiment_id-block$block_number-b$batch"
   if [[ "$image_distribution" == "ecr" ]]; then
     ssh_ec2 "$controller_public_ip" \
-      "set -e; aws ecr get-login-password --region '$aws_region' | docker login --username AWS --password-stdin '$registry'; sudo mkdir -p '$scenario_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$remote_experiment_id' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --out-dir 'results/$experiment_id/$relative_path' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
+      "set -e; aws ecr get-login-password --region '$aws_region' | docker login --username AWS --password-stdin '$registry'; sudo mkdir -p '$scenario_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$remote_experiment_id' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --measurement-block '$block_number' --planned-scenario-runs '$repetitions' --seed '$seed' --out-dir 'results/$experiment_id/$relative_path' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
   else
     ssh_ec2 "$controller_public_ip" \
-      "set -e; sudo mkdir -p '$scenario_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$remote_experiment_id' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --out-dir 'results/$experiment_id/$relative_path' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
+      "set -e; sudo mkdir -p '$scenario_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$remote_experiment_id' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --measurement-block '$block_number' --planned-scenario-runs '$repetitions' --seed '$seed' --out-dir 'results/$experiment_id/$relative_path' --image-tag '$image_uri' --git-commit '$git_commit' --timeout 30s"
   fi
   mkdir -p "$artifact_root/scenarios/$relative_path"
   scp_ec2 -r "ubuntu@$controller_public_ip:$scenario_dir" "$artifact_root/scenarios/$relative_path/results"

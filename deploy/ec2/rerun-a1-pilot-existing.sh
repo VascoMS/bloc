@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --validate-only) validate_only=1; shift;; -h|--help) usage; exit 0;; *) usage; bloc_usage_error "unknown argument: $1";; esac; done
 [[ -n "$artifact_root" ]] || bloc_usage_error "--artifact-root is required"
 bloc_require_dir "$artifact_root"; bloc_require_file "$artifact_root/manifest.json"; bloc_require_file "$artifact_root/inventory.json"
-bloc_csv_contains_only "$batch_sizes_csv" 8,32,128 BatchSizes
+bloc_csv_contains_only "$batch_sizes_csv" 8,32,128,512 BatchSizes
 bloc_is_uint "$warmups" || bloc_usage_error "--warmups must be non-negative"; bloc_is_positive_int "$repetitions" || bloc_usage_error "--repetitions must be positive"
 bloc_is_uint "$first_slot" || bloc_usage_error "--first-slot must be non-negative"; bloc_validate_go_duration "$eval_timeout" EvalTimeout
 for command in aws docker jq ssh scp go git python3; do bloc_require_cmd "$command"; done
@@ -61,6 +61,11 @@ else
   image_uri="$(jq -er .docker_image "$manifest")"
 fi
 
+IFS=',' read -r -a batches <<<"$batch_sizes_csv"
+bmax=0
+for batch in "${batches[@]}"; do
+  if (( batch > bmax )); then bmax="$batch"; fi
+done
 cluster="$rerun_root/generated/cluster.ec2.json"; remote="$rerun_root/generated/remote-eval.ec2.json"
 if [[ "$regenerate_config" -eq 1 ]]; then
   (cd "$repo_root/bloc-node" && go run ./cmd/bloc-node gen-ec2-config \
@@ -68,7 +73,7 @@ if [[ "$regenerate_config" -eq 1 ]]; then
     --crs-out "$rerun_root/generated/cluster.ec2.crs" \
     --secrets-dir "$rerun_root/generated/secrets.ec2" \
     --remote-eval-out "$remote" --cluster-id "$experiment_id" \
-    --nodes "$(jq '.nodes|length' "$inventory")" --bmax 128)
+    --nodes "$(jq '.nodes|length' "$inventory")" --bmax "$bmax")
 else
   cp "$artifact_root/generated/cluster.ec2.json" "$cluster"; cp "$artifact_root/generated/remote-eval.ec2.json" "$remote"
 fi
@@ -83,7 +88,7 @@ rm -rf "$rerun_root/generated/secrets.ec2"
 controller="$(jq -r .controller.public_ip "$inventory")"; scp_run "$remote" "ubuntu@$controller:/opt/bloc/ec2/remote-eval.ec2.json"
 while IFS= read -r private; do ssh_run "$controller" "for attempt in \$(seq 1 24); do curl --max-time 3 -fsS http://$private:8000/healthz && exit 0; sleep 5; done; exit 1"; done < <(jq -r '.nodes|sort_by(.id)[]|.private_ip' "$inventory")
 
-IFS=',' read -r -a batches <<<"$batch_sizes_csv"; next_slot="$first_slot"; scenario_specs=()
+next_slot="$first_slot"; scenario_specs=()
 for batch in "${batches[@]}"; do
   remote_dir="/opt/bloc/ec2/results/$rerun_id/batch-$batch"
   ssh_run "$controller" "set -e; sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$image_uri' eval-remote --config remote-eval.ec2.json --experiment-id '$rerun_id-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions' --out-dir 'results/$rerun_id/batch-$batch' --image-tag '$image_uri' --git-commit '$git_commit' --timeout '$eval_timeout'"

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,24 @@ func TestM1BaselineProfileResolvesCompleteMatrix(t *testing.T) {
 	}
 	if planned := len(scenarios) * (options.Warmups + options.Repetitions); planned != 315 {
 		t.Fatalf("planned runs = %d, want 315", planned)
+	}
+}
+
+func TestSuiteScenariosRejectValuesOutsideEvidenceMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		nodes   []int
+		batches []int
+	}{
+		{name: "node count", nodes: []int{5}, batches: []int{8}},
+		{name: "batch size", nodes: []int{4}, batches: []int{16}},
+		{name: "BMax", nodes: []int{4}, batches: []int{512}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := buildScenarios(test.nodes, test.batches, 128); err == nil {
+				t.Fatal("buildScenarios accepted a value outside the evidence matrix")
+			}
+		})
 	}
 }
 
@@ -116,7 +135,14 @@ func TestM1BaselineProfileAllowsExplicitOverrides(t *testing.T) {
 }
 
 func TestSuiteManifestRecordsResolvedCampaignConfiguration(t *testing.T) {
-	manifest := suiteManifest{Profile: "m1-baseline", PlannedRuns: 315, BMax: 128, TxSize: 256, TxGas: 21000, FeeStartWei: 1000, FeeStepWei: 1, Timeout: "30s"}
+	manifest := suiteManifest{
+		SchemaVersion: suiteSchemaVersion, Profile: "m1-baseline", Seed: 77,
+		RepetitionBlocks: 10, PlannedRuns: 9090,
+		PlannedScenarioRuns: map[string]int{"n4-b8-libp2p": 1000},
+		RunOrder:            []string{"measured/block-1/block-iteration-1/n4-b8-libp2p/slot-1/generation-1"},
+		BMax:                512, TxSize: 256, TxGas: 21000, FeeStartWei: 1000, FeeStepWei: 1,
+		Timeout: "30s", Deadline: "12s",
+	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +151,12 @@ func TestSuiteManifestRecordsResolvedCampaignConfiguration(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]any{"profile": "m1-baseline", "planned_runs": float64(315), "bmax": float64(128), "tx_size": float64(256), "tx_gas": float64(21000), "timeout": "30s"} {
+	for name, want := range map[string]any{
+		"schema_version": suiteSchemaVersion, "profile": "m1-baseline",
+		"seed": float64(77), "repetition_blocks": float64(10),
+		"planned_runs": float64(9090), "bmax": float64(512), "tx_size": float64(256),
+		"tx_gas": float64(21000), "timeout": "30s", "deadline": "12s",
+	} {
 		if got := decoded[name]; got != want {
 			t.Fatalf("manifest %s = %v, want %v", name, got, want)
 		}
@@ -148,7 +179,9 @@ func TestRunMeasurementsRecordFixedConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.csv")
 	runs := []EvalRun{{
 		RunID: "run", Nodes: 7, Threshold: 5, BatchSize: 32, Network: "libp2p",
-		BMax: 128, TxSize: 256, TxGas: 21000, CriticalNodeID: 2,
+		BMax: 128, TxSize: 256, TxGas: 21000, CriticalNodeID: 2, MeasurementBlock: 4,
+		BlockIteration: 9, ScheduleSeed: 77, PlannedScenarioRuns: 1000,
+		Outcome: "completed", DeadlineMet: true,
 		Results: []Result{{NodeID: 2, Metrics: Metrics{CombineAttempts: 1}}},
 	}}
 	if err := writeRunMeasurements(path, runs); err != nil {
@@ -167,7 +200,12 @@ func TestRunMeasurementsRecordFixedConfiguration(t *testing.T) {
 	for i, name := range records[0] {
 		index[name] = i
 	}
-	for name, want := range map[string]string{"bmax": "128", "tx_size": "256", "tx_gas": "21000", "combine_attempts": "1"} {
+	for name, want := range map[string]string{
+		"bmax": "128", "tx_size": "256", "tx_gas": "21000", "combine_attempts": "1",
+		"measurement_block": "4", "block_iteration": "9", "schedule_seed": "77",
+		"planned_scenario_runs": "1000", "outcome": "completed", "deadline_met": "true",
+		"timed_out": "false",
+	} {
 		if got := records[1][index[name]]; got != want {
 			t.Fatalf("%s = %s, want %s", name, got, want)
 		}
@@ -254,6 +292,179 @@ func TestPercentileType7(t *testing.T) {
 	}
 	if got := percentileType7(values, 0.95); got != 4.8 {
 		t.Fatalf("p95 = %v, want 4.8", got)
+	}
+}
+
+func TestP99RequiresContractedSuccessfulSampleCount(t *testing.T) {
+	values := make([]float64, 1000)
+	for i := range values {
+		values[i] = float64(i + 1)
+	}
+
+	insufficient := summarizeMetric(values[:999])
+	if insufficient.P99Eligible || insufficient.P99 != nil {
+		t.Fatalf("999 samples published p99: %+v", insufficient)
+	}
+	eligible := summarizeMetric(values)
+	if !eligible.P99Eligible || eligible.P99 == nil {
+		t.Fatalf("1000 samples did not publish p99: %+v", eligible)
+	}
+	if math.Abs(*eligible.P99-990.01) > 1e-9 {
+		t.Fatalf("p99 = %.12f, want 990.01", *eligible.P99)
+	}
+	if eligible.P50 != 500.5 || math.Abs(eligible.P95-950.05) > 1e-9 {
+		t.Fatalf("compatibility quantiles changed: %+v", eligible)
+	}
+}
+
+func TestScenarioSummarySeparatesOutcomesAndExcludesNonCompletions(t *testing.T) {
+	scenario := evalScenario{ID: "n4-b8-libp2p", Nodes: 4, BatchSize: 8, Network: "libp2p"}
+	result := func(total int64) []Result {
+		return []Result{{NodeID: 0, Metrics: Metrics{TotalSlotUS: total}}}
+	}
+	runs := []EvalRun{
+		{ScenarioID: scenario.ID, Phase: "measured", Success: true, Consistent: true, Outcome: "completed", DeadlineMet: true, Results: result(10_000_000)},
+		{ScenarioID: scenario.ID, Phase: "measured", Success: true, Consistent: true, Outcome: "completed", Results: result(13_000_000)},
+		{ScenarioID: scenario.ID, Phase: "measured", Outcome: "failed", Results: result(1)},
+		{ScenarioID: scenario.ID, Phase: "measured", Outcome: "timed_out", TimedOut: true, Results: result(2)},
+	}
+
+	summary := summarizeScenarios([]evalScenario{scenario}, runs)[0]
+	if summary.Attempted != 4 || summary.Completed != 2 || summary.Succeeded != 2 ||
+		summary.ConsistentWithinDeadline != 1 || summary.Failed != 1 || summary.TimedOut != 1 {
+		t.Fatalf("unexpected outcome counts: %+v", summary)
+	}
+	metric := summary.Metrics["total_slot_us"]
+	if metric.Count != 2 || metric.P50 != 11_500_000 || metric.Min != 10_000_000 || metric.Max != 13_000_000 {
+		t.Fatalf("non-completion entered latency quantiles: %+v", metric)
+	}
+}
+
+func TestRunOutcomeClassifiesDeadlineExceededAsTimeout(t *testing.T) {
+	run := EvalRun{Error: "poll results: context deadline exceeded"}
+	err := fmt.Errorf("%s", run.Error)
+
+	classifyRunOutcome(&run, err, 12*time.Second)
+
+	if run.Outcome != "timed_out" || !run.TimedOut || run.DeadlineMet {
+		t.Fatalf("deadline-exceeded outcome = %+v", run)
+	}
+}
+
+func TestSuiteCompletenessCountsFailedAttemptsButNotRecoveryRuns(t *testing.T) {
+	runs := []EvalRun{
+		{Phase: "measured", Outcome: "completed"},
+		{Phase: "measured", Outcome: "timed_out", TimedOut: true},
+		{Phase: "recovery", Outcome: "failed"},
+	}
+	if !suiteCollectionComplete(2, runs) {
+		t.Fatal("a retained timed-out attempt made a complete collection invalid")
+	}
+	if suiteCollectionComplete(3, runs) {
+		t.Fatal("an incomplete planned schedule was accepted")
+	}
+}
+
+func TestPersistentRecoveryDoesNotReplaceTerminalEvidenceAttempts(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  EvalRun
+		err  error
+		want bool
+	}{
+		{name: "completed", run: EvalRun{Success: true, Consistent: true}, want: false},
+		{name: "terminal failure", run: EvalRun{Outcome: "failed"}, err: fmt.Errorf("node 2 reported terminal failure for slot 9"), want: false},
+		{name: "timeout", run: EvalRun{Outcome: "timed_out", TimedOut: true}, err: fmt.Errorf("timed out waiting for results"), want: false},
+		{name: "inconsistent", run: EvalRun{Success: true, Consistent: false}, want: false},
+		{name: "infrastructure", run: EvalRun{Outcome: "failed"}, err: fmt.Errorf("prepare slot: connection refused"), want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldRecoverPersistentCluster(test.run, test.err); got != test.want {
+				t.Fatalf("shouldRecoverPersistentCluster() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPersistentScheduleUsesStableBalancedRepetitionBlocks(t *testing.T) {
+	scenarios, err := buildScenarios([]int{4}, []int{8, 32, 128}, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := suiteOptions{Warmups: 0, Repetitions: 6, RepetitionBlocks: 3, Seed: 42}
+	specs := persistentSpecs(scenarios, options, 4)
+	if len(specs) != 18 {
+		t.Fatalf("spec count = %d, want 18", len(specs))
+	}
+	counts := map[int]map[string]int{}
+	for _, spec := range specs {
+		if counts[spec.measurementBlock] == nil {
+			counts[spec.measurementBlock] = map[string]int{}
+		}
+		counts[spec.measurementBlock][spec.scenario.ID]++
+		if spec.blockIteration < 1 || spec.blockIteration > 2 {
+			t.Fatalf("invalid block iteration: %+v", spec)
+		}
+	}
+	for block := 1; block <= 3; block++ {
+		for _, scenario := range scenarios {
+			if counts[block][scenario.ID] != 2 {
+				t.Fatalf("block %d scenario %s count = %d, want 2", block, scenario.ID, counts[block][scenario.ID])
+			}
+		}
+	}
+	if !reflect.DeepEqual(specs, persistentSpecs(scenarios, options, 4)) {
+		t.Fatal("same seed produced different block schedule")
+	}
+	options.Seed++
+	if reflect.DeepEqual(specs, persistentSpecs(scenarios, options, 4)) {
+		t.Fatal("different seeds produced identical block schedule")
+	}
+}
+
+func TestExtendedEvidenceMatrixRequiresBMax512(t *testing.T) {
+	if _, err := buildScenarios([]int{4, 7, 10}, []int{8, 32, 128, 512}, 128); err == nil {
+		t.Fatal("batch 512 accepted with BMax 128")
+	}
+	scenarios, err := buildScenarios([]int{4, 7, 10}, []int{8, 32, 128, 512}, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scenarios) != 12 {
+		t.Fatalf("scenario count = %d, want 12", len(scenarios))
+	}
+}
+
+func TestRemoteEvidenceScenarioRequiresSupportedNodesAndBMax(t *testing.T) {
+	for _, nodes := range []int{4, 7, 10} {
+		cfg := remoteEvalConfig{NodeCount: nodes, BMax: 512}
+		if err := validateRemoteEvidenceScenario(cfg, 512); err != nil {
+			t.Fatalf("n=%d batch=512 rejected: %v", nodes, err)
+		}
+	}
+	if err := validateRemoteEvidenceScenario(remoteEvalConfig{NodeCount: 4, BMax: 128}, 512); err == nil {
+		t.Fatal("remote batch 512 accepted with BMax 128")
+	}
+	if err := validateRemoteEvidenceScenario(remoteEvalConfig{NodeCount: 5, BMax: 512}, 8); err == nil {
+		t.Fatal("unsupported evidence node count accepted")
+	}
+}
+
+func TestRemoteBlockMetadataRetainsFullScenarioPlan(t *testing.T) {
+	options, err := parseRemoteEvalOptions([]string{
+		"--repetitions", "100",
+		"--measurement-block", "3",
+		"--planned-scenario-runs", "1000",
+		"--seed", "77",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.MeasurementBlock != 3 || options.PlannedScenarioRuns != 1000 || options.Seed != 77 {
+		t.Fatalf("remote block metadata was not retained: %+v", options)
+	}
+	if _, err := parseRemoteEvalOptions([]string{"--repetitions", "100", "--planned-scenario-runs", "99"}); err == nil {
+		t.Fatal("planned scenario count below block repetitions was accepted")
 	}
 }
 

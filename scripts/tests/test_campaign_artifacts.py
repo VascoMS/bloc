@@ -36,9 +36,11 @@ class CampaignArtifactsTest(unittest.TestCase):
     def test_evaluator_acceptance_and_rejection(self):
         path = self.root / "measurements.csv"
         self.write_csv(path, [self.measured()])
-        artifacts.evaluator_assert(path, ["4/8=1"])
+        artifacts.evaluator_assert(path, ["4/8=1"], require_success=True)
         rows = artifacts.read_csv(path); rows[0]["consistent"] = "false"; self.write_csv(path, rows)
-        with self.assertRaises(ValueError): artifacts.evaluator_assert(path, ["4/8=1"])
+        artifacts.evaluator_assert(path, ["4/8=1"], require_success=False)
+        with self.assertRaises(ValueError):
+            artifacts.evaluator_assert(path, ["4/8=1"], require_success=True)
 
     def test_scenario_merge_prefixes_block_run_ids(self):
         specs = []
@@ -52,6 +54,28 @@ class CampaignArtifactsTest(unittest.TestCase):
         rows = artifacts.read_csv(self.root / "merged/run_measurements.csv")
         self.assertEqual([r["run_id"] for r in rows], ["block-1-same", "block-2-same"])
         self.assertEqual([r["measurement_block"] for r in rows], ["1", "2"])
+        self.assertEqual([r["campaign_order_index"] for r in rows], ["1", "2"])
+        node_rows = artifacts.read_csv(self.root / "merged/node_measurements.csv")
+        self.assertEqual([r["campaign_order_index"] for r in node_rows], ["1", "2"])
+
+    def test_placement_annotation_does_not_invent_failed_run_critical_node(self):
+        phase = self.root / "phase"
+        inventory = self.root / "inventory.json"
+        artifacts.write_json(inventory, {
+            "nodes": [{"id": 0, "region": "us-east-1", "zone": "us-east-1a", "instance_type": "t3.small"}]
+        })
+        self.write_csv(phase / "node_measurements.csv", [{
+            "run_id": "failed", "node_id": "0",
+        }])
+        self.write_csv(phase / "run_measurements.csv", [{
+            "run_id": "failed", "success": "false", "consistent": "false", "critical_node_id": "0",
+        }])
+
+        artifacts.annotate_placement(phase, inventory)
+
+        row = artifacts.read_csv(phase / "run_measurements.csv")[0]
+        self.assertEqual(row["critical_node_region"], "")
+        self.assertEqual(row["critical_node_availability_zone"], "")
 
     def test_json_is_utf8_without_bom(self):
         path = self.root / "artifact.json"
@@ -173,6 +197,35 @@ class CampaignArtifactsTest(unittest.TestCase):
     def test_three_region_phase_contract_accepts_complete_evidence(self):
         phase = self.make_three_region_phase()
         artifacts.assert_three_region_phase(phase)
+
+    def test_three_region_phase_contract_retains_timed_out_attempt(self):
+        phase = self.make_three_region_phase()
+        runs = artifacts.read_csv(phase / "run_measurements.csv")
+        runs[0].update({
+            "success": "false",
+            "consistent": "false",
+            "outcome": "timed_out",
+            "timed_out": "true",
+            "deadline_met": "false",
+            "error": "timed out waiting for results",
+        })
+        self.write_csv(phase / "run_measurements.csv", runs)
+
+        artifacts.assert_three_region_phase(phase)
+
+    def test_three_region_phase_contract_rejects_unclassified_new_failure(self):
+        phase = self.make_three_region_phase()
+        runs = artifacts.read_csv(phase / "run_measurements.csv")
+        runs[0].update({
+            "success": "false",
+            "consistent": "false",
+            "outcome": "",
+            "timed_out": "false",
+        })
+        self.write_csv(phase / "run_measurements.csv", runs)
+
+        with self.assertRaisesRegex(ValueError, "failure outcome"):
+            artifacts.assert_three_region_phase(phase)
 
     def test_three_region_phase_contract_rejects_incomplete_pairwise_health(self):
         phase = self.make_three_region_phase()

@@ -17,6 +17,7 @@ from .data import (
     MERGE_PLAN_STAGES,
     ExperimentData,
     STAGES,
+    evidence_summary,
     has_merge_plan_attribution,
     merge_plan_summary,
     scaling_summary,
@@ -36,7 +37,9 @@ def generate_all(experiment: ExperimentData, output_dir: str | Path) -> list[Pat
     output.mkdir(parents=True, exist_ok=True)
     _set_style()
 
-    generated: list[Path] = []
+    summary_path = output / "latency-evidence-summary.csv"
+    evidence_summary(experiment.attempts).to_csv(summary_path, index=False)
+    generated: list[Path] = [summary_path]
     generated.extend(_plot_scaling(experiment, output))
     generated.extend(_plot_stage_breakdown(experiment, output))
     if has_merge_plan_attribution(experiment.runs):

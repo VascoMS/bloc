@@ -16,22 +16,27 @@ import (
 )
 
 type remoteEvalOptions struct {
-	ConfigPath   string
-	OutDir       string
-	ExperimentID string
-	FirstSlot    uint64
-	BatchSize    int
-	TxSize       int
-	TxGas        uint64
-	TxSource     string
-	MempoolURL   string
-	FeeStart     uint64
-	FeeStep      uint64
-	Warmups      int
-	Repetitions  int
-	Timeout      time.Duration
-	ImageTag     string
-	GitCommit    string
+	ConfigPath          string
+	OutDir              string
+	ExperimentID        string
+	FirstSlot           uint64
+	BatchSize           int
+	TxSize              int
+	TxGas               uint64
+	TxSource            string
+	MempoolURL          string
+	FeeStart            uint64
+	FeeStep             uint64
+	Warmups             int
+	Repetitions         int
+	RepetitionBlocks    int
+	MeasurementBlock    int
+	PlannedScenarioRuns int
+	Seed                int64
+	Timeout             time.Duration
+	Deadline            time.Duration
+	ImageTag            string
+	GitCommit           string
 }
 
 type remoteEvalConfig struct {
@@ -78,6 +83,9 @@ func evalRemote(args []string) error {
 	if cfg.BMax == 0 {
 		cfg.BMax = options.BatchSize
 	}
+	if err := validateRemoteEvidenceScenario(cfg, options.BatchSize); err != nil {
+		return err
+	}
 	if cfg.Network == "" {
 		cfg.Network = "libp2p"
 	}
@@ -102,30 +110,34 @@ func evalRemote(args []string) error {
 	scenario := evalScenario{ID: fmt.Sprintf("remote-n%d-b%d-libp2p", cfg.NodeCount, options.BatchSize), Nodes: cfg.NodeCount, Threshold: cfg.Threshold, BatchSize: options.BatchSize, Network: cfg.Network}
 	plannedRuns := options.Warmups + options.Repetitions
 	manifest := suiteManifest{
-		SchemaVersion:   suiteSchemaVersion,
-		ExperimentID:    options.ExperimentID,
-		Profile:         "distributed-remote",
-		Status:          "running",
-		StartedAt:       time.Now().UTC(),
-		Command:         append([]string{"eval-remote"}, args...),
-		Warmups:         options.Warmups,
-		Repetitions:     options.Repetitions,
-		PlannedRuns:     plannedRuns,
-		BMax:            cfg.BMax,
-		TxSize:          options.TxSize,
-		TxGas:           options.TxGas,
-		TxSource:        options.TxSource,
-		TxSourceMeta:    txSourceManifestMeta(options.TxSource, options.MempoolURL),
-		FeeStartWei:     options.FeeStart,
-		FeeStepWei:      options.FeeStep,
-		Timeout:         options.Timeout.String(),
-		Scenarios:       []evalScenario{scenario},
-		ExecutionMode:   "remote",
-		Schedule:        "sequential-remote-slots",
-		Deployment:      cfg.Deployment,
-		RemoteEndpoints: cfg.Nodes,
-		ImageTag:        options.ImageTag,
-		GitCommit:       options.GitCommit,
+		SchemaVersion:       suiteSchemaVersion,
+		ExperimentID:        options.ExperimentID,
+		Profile:             "distributed-remote",
+		Status:              "running",
+		StartedAt:           time.Now().UTC(),
+		Command:             append([]string{"eval-remote"}, args...),
+		Warmups:             options.Warmups,
+		Repetitions:         options.Repetitions,
+		RepetitionBlocks:    options.RepetitionBlocks,
+		PlannedRuns:         plannedRuns,
+		PlannedScenarioRuns: map[string]int{scenario.ID: options.PlannedScenarioRuns},
+		Seed:                options.Seed,
+		BMax:                cfg.BMax,
+		TxSize:              options.TxSize,
+		TxGas:               options.TxGas,
+		TxSource:            options.TxSource,
+		TxSourceMeta:        txSourceManifestMeta(options.TxSource, options.MempoolURL),
+		FeeStartWei:         options.FeeStart,
+		FeeStepWei:          options.FeeStep,
+		Timeout:             options.Timeout.String(),
+		Deadline:            options.Deadline.String(),
+		Scenarios:           []evalScenario{scenario},
+		ExecutionMode:       "remote",
+		Schedule:            "sequential-remote-slots",
+		Deployment:          cfg.Deployment,
+		RemoteEndpoints:     cfg.Nodes,
+		ImageTag:            options.ImageTag,
+		GitCommit:           options.GitCommit,
 	}
 	if err := writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest); err != nil {
 		return err
@@ -137,7 +149,6 @@ func evalRemote(args []string) error {
 	defer runsFile.Close()
 	writer := bufio.NewWriter(runsFile)
 	var runs []EvalRun
-	allPassed := true
 	orderIndex := 0
 	slotID := options.FirstSlot
 	for _, phase := range []struct {
@@ -153,12 +164,26 @@ func evalRemote(args []string) error {
 			}
 			prepare := !(slotID == options.FirstSlot && options.FirstSlot == initialSlot)
 			run, runErr := runRemoteSlot(client, options.OutDir, runID, cfg, scenario, phase.name, iteration, orderIndex, slotID, corpus, options, prepare)
+			run.ScheduleSeed = options.Seed
+			run.PlannedScenarioRuns = options.PlannedScenarioRuns
+			run.BlockIteration = iteration
+			if phase.name == "measured" {
+				if options.MeasurementBlock > 0 {
+					run.MeasurementBlock = options.MeasurementBlock
+					run.BlockIteration = iteration
+				} else {
+					perBlock := options.Repetitions / options.RepetitionBlocks
+					run.MeasurementBlock = (iteration-1)/perBlock + 1
+					run.BlockIteration = (iteration-1)%perBlock + 1
+				}
+			}
 			if runErr != nil {
 				run.Error = runErr.Error()
 				run.Success = false
 			}
+			classifyRunOutcome(&run, runErr, options.Deadline)
 			runs = append(runs, run)
-			manifest.RunOrder = append(manifest.RunOrder, fmt.Sprintf("%s/%d/%s/slot-%d", run.Phase, run.Iteration, run.ScenarioID, run.Slot))
+			manifest.RunOrder = append(manifest.RunOrder, fmt.Sprintf("%s/block-%d/block-iteration-%d/%s/slot-%d", run.Phase, run.MeasurementBlock, run.BlockIteration, run.ScenarioID, run.Slot))
 			encoded, err := json.Marshal(run)
 			if err != nil {
 				return err
@@ -169,7 +194,9 @@ func evalRemote(args []string) error {
 			if err := writer.Flush(); err != nil {
 				return err
 			}
-			allPassed = allPassed && run.Success && run.Consistent
+			if err := writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest); err != nil {
+				return err
+			}
 			fmt.Printf("%s iteration=%d scenario=%s slot=%d success=%t critical_node=%d total_us=%d\n", phase.name, iteration, scenario.ID, slotID, run.Success, run.CriticalNodeID, criticalTotalUS(run))
 			slotID++
 		}
@@ -177,19 +204,37 @@ func evalRemote(args []string) error {
 	if err := writeSuiteOutputs(options.OutDir, []evalScenario{scenario}, runs); err != nil {
 		return err
 	}
-	manifest.Valid = allPassed
+	collectionComplete := suiteCollectionComplete(plannedRuns, runs)
+	manifest.Valid = collectionComplete
 	manifest.FinishedAt = time.Now().UTC()
-	if allPassed {
+	if collectionComplete {
 		manifest.Status = "complete"
 	} else {
 		manifest.Status = "invalid"
-		manifest.InvalidReason = "one or more remote runs failed or were inconsistent"
+		manifest.InvalidReason = "the planned remote schedule was not fully retained"
 	}
 	if err := writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest); err != nil {
 		return err
 	}
-	if !allPassed {
+	if !collectionComplete {
 		return fmt.Errorf("remote suite failed: %s", manifest.InvalidReason)
+	}
+	return nil
+}
+
+func validateRemoteEvidenceScenario(cfg remoteEvalConfig, batchSize int) error {
+	switch cfg.NodeCount {
+	case 4, 7, 10:
+	default:
+		return fmt.Errorf("node_count must be one of 4, 7, or 10")
+	}
+	switch batchSize {
+	case 8, 32, 128, 512:
+	default:
+		return fmt.Errorf("batch-size must be one of 8, 32, 128, or 512")
+	}
+	if batchSize > cfg.BMax {
+		return fmt.Errorf("batch-size %d exceeds configured BMax %d", batchSize, cfg.BMax)
 	}
 	return nil
 }
@@ -210,7 +255,12 @@ func parseRemoteEvalOptions(args []string) (remoteEvalOptions, error) {
 	fs.Uint64Var(&options.FeeStep, "fee-step-wei", 1, "generated fee increment")
 	fs.IntVar(&options.Warmups, "warmups", 0, "warmup remote slots")
 	fs.IntVar(&options.Repetitions, "repetitions", 1, "measured remote slots")
+	fs.IntVar(&options.RepetitionBlocks, "repetition-blocks", 1, "balanced measured repetition blocks")
+	fs.IntVar(&options.MeasurementBlock, "measurement-block", 0, "explicit enclosing campaign block ID")
+	fs.IntVar(&options.PlannedScenarioRuns, "planned-scenario-runs", 0, "full planned measured count for this scenario")
+	fs.Int64Var(&options.Seed, "seed", 20260621, "scenario-order seed recorded in artifacts")
 	fs.DurationVar(&options.Timeout, "timeout", 30*time.Second, "per-run timeout")
+	fs.DurationVar(&options.Deadline, "deadline", 12*time.Second, "successful consistent timing deadline")
 	fs.StringVar(&options.ImageTag, "image-tag", "", "deployment image tag to record in manifest")
 	fs.StringVar(&options.GitCommit, "git-commit", "", "git commit to record in manifest")
 	if err := fs.Parse(args); err != nil {
@@ -221,6 +271,21 @@ func parseRemoteEvalOptions(args []string) (remoteEvalOptions, error) {
 	}
 	if options.Warmups < 0 || options.Repetitions < 1 {
 		return remoteEvalOptions{}, fmt.Errorf("warmups must be >= 0 and repetitions must be >= 1")
+	}
+	if options.RepetitionBlocks < 1 || options.Repetitions%options.RepetitionBlocks != 0 {
+		return remoteEvalOptions{}, fmt.Errorf("repetitions must be divisible by repetition-blocks >= 1")
+	}
+	if options.MeasurementBlock < 0 {
+		return remoteEvalOptions{}, fmt.Errorf("measurement-block must be non-negative")
+	}
+	if options.PlannedScenarioRuns == 0 {
+		options.PlannedScenarioRuns = options.Repetitions
+	}
+	if options.PlannedScenarioRuns < options.Repetitions {
+		return remoteEvalOptions{}, fmt.Errorf("planned-scenario-runs must be at least repetitions")
+	}
+	if options.Deadline <= 0 {
+		return remoteEvalOptions{}, fmt.Errorf("deadline must be positive")
 	}
 	if options.BatchSize < 1 || options.TxSize < 1 {
 		return remoteEvalOptions{}, fmt.Errorf("batch-size and tx-size must be positive")

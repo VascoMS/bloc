@@ -126,11 +126,11 @@
 
 **Interface:** add Type-7 p50/p95/p99 plus non-parametric 95% order-statistic intervals without SciPy; report attempted/completed/consistent-within-12-seconds/failed/timed-out counts; add `--repetition-blocks`; accept nodes `4,7,10` and batches `8,32,128,512` only when `BMax >= max(batch)`.
 
-- [ ] Add deterministic tests using 1,000 values, duplicates, insufficient samples, and failures/timeouts; refuse a p99 claim below the contracted sample count.
-- [ ] Implement `QuantileEstimate` and `estimate_quantile(values, quantile, confidence=0.95)` using pandas Type-7 values and a `math.comb` binomial CDF for interval ranks.
-- [ ] Derive outcome rates from every measured attempt while latency quantiles use only successful consistent rows and list every excluded reason.
-- [ ] Interleave scenarios in stable seeded blocks and persist block IDs/counts in manifests/CSV.
-- [ ] Run all bloc-node tests, chart tests, and campaign-runner validation; commit `feat: support p99 evidence campaigns`.
+- [x] Add deterministic tests using 1,000 values, duplicates, insufficient samples, and failures/timeouts; refuse a p99 claim below the contracted sample count.
+- [x] Implement `QuantileEstimate` and `estimate_quantile(values, quantile, confidence=0.95)` using pandas Type-7 values and a `math.comb` binomial CDF for interval ranks.
+- [x] Derive outcome rates from every measured attempt while latency quantiles use only successful consistent rows and list every excluded reason.
+- [x] Interleave scenarios in stable seeded blocks and persist block IDs/counts in manifests/CSV.
+- [x] Run all bloc-node tests, chart tests, and campaign-runner validation; commit `feat: support p99 evidence campaigns`.
 
 ### Task 7: Build the user corpus and encrypted/plaintext benchmark
 

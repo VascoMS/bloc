@@ -153,12 +153,12 @@ if run_stage safety; then bloc_run_recorded "$records_file" "hbbft repeated safe
 if [[ -z "$failure_stage" ]] && run_stage race && [[ "$skip_race" -ne 1 ]]; then bloc_run_recorded "$records_file" "hbbft race tests" "$logs_root/hbbft-race.log" "$hbbft_root" go test -race ./... -run 'Test(RBC|ACS|BBA|SlotACS)' -count=1 -timeout=10m || failure_stage="hbbft race tests"; fi
 if [[ -z "$failure_stage" ]] && run_stage gate; then
   bloc_run_recorded "$records_file" "n4 batch-128 sustained gate" "$logs_root/gate-n4-b128.log" "$module_root" go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4 --batch-sizes 128 --warmups 5 --repetitions "$gate_repetitions" --max-restarts 1 --timeout 30s --seed 640 --experiment-id "$campaign_id-gate" --out-dir "$gate_root" || failure_stage="n4 batch-128 sustained gate"
-  [[ -n "$failure_stage" ]] || bloc_python "$repo_root" assert-evaluator --csv "$gate_root/run_measurements.csv" --expected "4/128=$gate_repetitions" || failure_stage="n4 batch-128 sustained gate"
+  [[ -n "$failure_stage" ]] || bloc_python "$repo_root" assert-evaluator --require-success --csv "$gate_root/run_measurements.csv" --expected "4/128=$gate_repetitions" || failure_stage="n4 batch-128 sustained gate"
 fi
 if [[ -z "$failure_stage" ]] && run_stage matrix; then
   bloc_run_recorded "$records_file" "n4 n7 compatibility matrix" "$logs_root/matrix-n4-n7.log" "$module_root" go run ./cmd/bloc-node eval-suite --execution-mode persistent --node-counts 4,7 --batch-sizes 8,32,128 --warmups 3 --repetitions "$matrix_repetitions" --max-restarts 1 --timeout 30s --seed 640 --experiment-id "$campaign_id-matrix" --out-dir "$matrix_root" || failure_stage="n4 n7 compatibility matrix"
   if [[ -z "$failure_stage" ]]; then
-    args=(assert-evaluator --csv "$matrix_root/run_measurements.csv")
+    args=(assert-evaluator --require-success --csv "$matrix_root/run_measurements.csv")
     for n in 4 7; do for b in 8 32 128; do args+=(--expected "$n/$b=$matrix_repetitions"); done; done
     bloc_python "$repo_root" "${args[@]}" || failure_stage="n4 n7 compatibility matrix"
   fi

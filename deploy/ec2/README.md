@@ -102,7 +102,10 @@ bash deploy/ec2/run-a1-pilot.sh \
 The default pilot runs batches `8,32,128`, one warmup, and three measured
 repetitions. It builds a `linux/amd64` image, prompts before apply, collects
 artifacts under `results/ec2/<experiment-id>/`, and destroys resources in its
-cleanup path.
+cleanup path. The runner accepts only `n=4/7/10` and batches
+`8/32/128/512`, derives `BMax` from the largest requested batch, and accepts
+`--repetition-blocks` plus `--seed` for stable balanced scheduling. Measured
+repetitions must divide evenly across blocks.
 
 While actively debugging a failed deployment, `--keep-resources-on-failure` may
 retain the environment. Reuse it with:
@@ -139,6 +142,9 @@ bash deploy/ec2/run-m3-same-az.sh \
 
 It defaults to `n=4,7,10`, batches `8,32,128`, five warmups, and thirty measured
 repetitions. The runner prompts before allocating resources and between phases.
+For a final p99 campaign, explicitly pass
+`--warmups 10 --repetitions 1000 --repetition-blocks 10 --seed 20260621`; the
+ordinary defaults remain a preflight-sized campaign.
 
 Run the same-region cross-AZ wrapper:
 
@@ -194,7 +200,12 @@ bash deploy/ec2/run-m3-three-region.sh \
 The runner requires verified 8/4/4 vCPU headroom, records pairwise health and
 resource evidence, destroys on success or failure, retries Terraform teardown,
 removes regional keys, and authenticates empty cleanup. It has no
-preserve-on-failure mode.
+preserve-on-failure mode. Final p99 collection must explicitly use 10 warmups,
+1,000 measurements, balanced repetition blocks, and the predeclared seed.
+Both same-region and three-region runners retain failed and timed-out attempts
+as complete collection records while excluding them from successful latency
+quantiles. The scale extension accepts `n=10` and batch `512` only after the
+runbook's pilot/continuation decision and with generated `BMax` large enough.
 
 ## Resource Evidence
 

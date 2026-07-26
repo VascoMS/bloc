@@ -436,11 +436,34 @@ latency quantiles never hide the attempted-run completion rate.
 
 Headline statistics are Type-7 p50, p95, and p99, maximum, attempted/successful
 counts, and the fraction completing consistently within 12 seconds. Quantile
-tables include non-parametric order-statistic confidence intervals. A scenario
-supports a positive timing conclusion only when at least 99% of attempts finish
-consistently within 12 seconds, empirical p99 is below 12 seconds, and no
-successful attempt contains divergent outputs. Campaign acceptance is based on
-artifact integrity and completeness, not on obtaining a positive result.
+tables include two-sided 95% non-parametric order-statistic confidence
+intervals whose one-based ranks are selected from the exact
+`Binomial(n, quantile)` CDF. The chart implementation uses pandas linear
+interpolation (Type 7) for point estimates and Python `math.comb` for interval
+ranks, without SciPy. p99 values and intervals are blank unless the successful,
+consistent scenario sample contains at least 1,000 observations; lower-count
+artifacts retain p50/p95 compatibility but cannot support a p99 claim.
+
+Evaluator schema `bloc-eval-suite/v3` and its run/node CSVs retain
+`measurement_block`, `block_iteration`, schedule seed, planned scenario count,
+and the realized run order. Every measured attempt is retained and classified
+as completed, failed, or timed out. Attempted, completed, completed consistently
+within the deadline, failed, and timed-out counts are reported separately; only
+successful, consistent observations enter latency or stage distributions. A
+fully retained failed/timeout schedule is complete negative evidence, not an
+incomplete artifact.
+
+A scenario supports a positive timing conclusion only when at least 99% of
+attempts finish consistently within 12 seconds, empirical p99 is below 12
+seconds, and no successful attempt contains divergent outputs. Campaign
+acceptance is based on artifact integrity and completeness, not on obtaining a
+positive result.
+
+The final local and VM runners accept only `n=4/7/10` and batches
+`8/32/128/512`; the configured/generated `BMax` must be at least the largest
+requested batch. `--repetitions` must divide evenly by
+`--repetition-blocks`. Stable seeded blocks balance scenario order while making
+the order reproducible from the manifest.
 
 ### RQ1: Sidecar Timing Feasibility
 

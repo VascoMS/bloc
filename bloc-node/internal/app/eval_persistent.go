@@ -36,9 +36,11 @@ type persistentCluster struct {
 }
 
 type persistentRunSpec struct {
-	scenario  evalScenario
-	phase     string
-	iteration int
+	scenario         evalScenario
+	phase            string
+	iteration        int
+	measurementBlock int
+	blockIteration   int
 }
 
 type evalSubmission struct {
@@ -117,6 +119,9 @@ func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []e
 							run.Error = runErr.Error()
 							run.Success = false
 						}
+						run.ScheduleSeed = options.Seed
+						run.PlannedScenarioRuns = options.Repetitions
+						classifyRunOutcome(&run, runErr, options.Deadline)
 						allRuns = append(allRuns, run)
 						if err := record(run); err != nil {
 							cluster.close()
@@ -149,13 +154,18 @@ func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []e
 				run.Error = runErr.Error()
 				run.Success = false
 			}
+			run.MeasurementBlock = spec.measurementBlock
+			run.BlockIteration = spec.blockIteration
+			run.ScheduleSeed = options.Seed
+			run.PlannedScenarioRuns = options.Repetitions
+			classifyRunOutcome(&run, runErr, options.Deadline)
 			allRuns = append(allRuns, run)
 			if err := record(run); err != nil {
 				cluster.close()
 				return allRuns, measurements, err
 			}
 			fmt.Printf("%s iteration=%d scenario=%s slot=%d generation=%d success=%t critical_node=%d total_us=%d\n", spec.phase, spec.iteration, spec.scenario.ID, run.Slot, run.ClusterGeneration, run.Success, run.CriticalNodeID, criticalTotalUS(run))
-			if !run.Success || !run.Consistent {
+			if shouldRecoverPersistentCluster(run, runErr) {
 				cluster.close()
 				cluster = nil
 				needsRecovery = true
@@ -177,15 +187,27 @@ func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []e
 func persistentSpecs(group []evalScenario, options suiteOptions, nodes int) []persistentRunSpec {
 	rng := rand.New(rand.NewSource(options.Seed + int64(nodes)*1_000_003))
 	var specs []persistentRunSpec
-	for _, phase := range []struct {
-		name  string
-		count int
-	}{{"warmup", options.Warmups}, {"measured", options.Repetitions}} {
-		for iteration := 1; iteration <= phase.count; iteration++ {
+	for iteration := 1; iteration <= options.Warmups; iteration++ {
+		order := append([]evalScenario(nil), group...)
+		rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
+		for _, scenario := range order {
+			specs = append(specs, persistentRunSpec{
+				scenario: scenario, phase: "warmup", iteration: iteration,
+				blockIteration: iteration,
+			})
+		}
+	}
+	perBlock := options.Repetitions / options.RepetitionBlocks
+	for block := 1; block <= options.RepetitionBlocks; block++ {
+		for blockIteration := 1; blockIteration <= perBlock; blockIteration++ {
+			iteration := (block-1)*perBlock + blockIteration
 			order := append([]evalScenario(nil), group...)
 			rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 			for _, scenario := range order {
-				specs = append(specs, persistentRunSpec{scenario: scenario, phase: phase.name, iteration: iteration})
+				specs = append(specs, persistentRunSpec{
+					scenario: scenario, phase: "measured", iteration: iteration,
+					measurementBlock: block, blockIteration: blockIteration,
+				})
 			}
 		}
 	}

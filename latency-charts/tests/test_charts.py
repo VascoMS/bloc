@@ -4,11 +4,18 @@ import csv
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from bloc_latency_charts.charts import generate_all
 from bloc_latency_charts.cli import find_repository_root, output_directory
-from bloc_latency_charts.data import load_experiment, scaling_summary, validate_merge_plan_additivity, validate_stage_additivity
+from bloc_latency_charts.data import (
+    evidence_summary,
+    load_experiment,
+    scaling_summary,
+    validate_merge_plan_additivity,
+    validate_stage_additivity,
+)
 
 
 HEADER = [
@@ -51,6 +58,7 @@ def test_load_filters_warmups_and_failed_runs(tmp_path: Path) -> None:
     experiment = load_experiment(tmp_path)
     assert experiment.experiment_id == "fixture-experiment"
     assert len(experiment.runs) == 54
+    assert len(experiment.attempts) == 55
     assert experiment.skipped_runs == 1
 
 
@@ -65,8 +73,90 @@ def test_scaling_summary_calculates_percentiles(tmp_path: Path) -> None:
     write_fixture(tmp_path)
     summary = scaling_summary(load_experiment(tmp_path).runs)
     assert len(summary) == 18
-    assert set(summary.columns) == {"nodes", "batch_size", "network", "p50", "p95", "count"}
+    assert set(summary.columns) == {
+        "nodes",
+        "batch_size",
+        "network",
+        "p50",
+        "p95",
+        "p99",
+        "p99_eligible",
+        "count",
+    }
     assert (summary["count"] == 3).all()
+    assert not summary["p99_eligible"].any()
+    assert summary["p99"].isna().all()
+
+
+def test_evidence_summary_counts_every_attempt_and_excludes_failures_from_quantiles() -> None:
+    attempts = pd.DataFrame(
+        [
+            {
+                "nodes": 4,
+                "batch_size": 8,
+                "network": "libp2p",
+                "success": True,
+                "consistent": True,
+                "timed_out": False,
+                "deadline_met": True,
+                "total_slot_us": value,
+                "error": "",
+            }
+            for value in range(1, 1001)
+        ]
+        + [
+            {
+                "nodes": 4,
+                "batch_size": 8,
+                "network": "libp2p",
+                "success": False,
+                "consistent": False,
+                "timed_out": False,
+                "deadline_met": False,
+                "total_slot_us": 9_000_000,
+                "error": "terminal failure",
+            },
+            {
+                "nodes": 4,
+                "batch_size": 8,
+                "network": "libp2p",
+                "success": False,
+                "consistent": False,
+                "timed_out": True,
+                "deadline_met": False,
+                "total_slot_us": 10_000_000,
+                "error": "timed out",
+            },
+            {
+                "nodes": 4,
+                "batch_size": 8,
+                "network": "libp2p",
+                "success": True,
+                "consistent": False,
+                "timed_out": False,
+                "deadline_met": False,
+                "total_slot_us": 11_000_000,
+                "error": "",
+            },
+        ]
+    )
+
+    row = evidence_summary(attempts).iloc[0]
+
+    assert (
+        row.attempted,
+        row.completed,
+        row.consistent_within_deadline,
+        row.failed,
+        row.timed_out,
+    ) == (1003, 1000, 1000, 2, 1)
+    assert row.excluded_reasons == "failed=1;inconsistent=1;timed_out=1"
+    assert row.p50_us == 500.5
+    assert row.p95_us == 950.05
+    assert row.p99_us == pytest.approx(990.01)
+    assert row.p99_ci_lower_us == 984.0
+    assert row.p99_ci_upper_us == 997.0
+    assert bool(row.p99_eligible)
 
 
 def test_stage_additivity_rejects_misleading_stack(tmp_path: Path) -> None:
@@ -80,9 +170,21 @@ def test_generate_all_outputs_svg_and_png(tmp_path: Path) -> None:
     write_fixture(tmp_path)
     output = tmp_path / "charts"
     paths = generate_all(load_experiment(tmp_path), output)
-    assert len(paths) == 6
-    assert {path.suffix for path in paths} == {".svg", ".png"}
+    assert len(paths) == 7
+    assert {path.suffix for path in paths} == {".svg", ".png", ".csv"}
     assert all(path.stat().st_size > 100 for path in paths)
+    summary = pd.read_csv(output / "latency-evidence-summary.csv")
+    assert {
+        "attempted",
+        "completed",
+        "consistent_within_deadline",
+        "failed",
+        "timed_out",
+        "p50_us",
+        "p95_us",
+        "p99_us",
+        "p99_eligible",
+    }.issubset(summary.columns)
 
 
 def test_generate_all_supports_libp2p_only_campaign(tmp_path: Path) -> None:
@@ -98,7 +200,7 @@ def test_generate_all_supports_libp2p_only_campaign(tmp_path: Path) -> None:
 
     output = tmp_path / "libp2p-charts"
     paths = generate_all(load_experiment(tmp_path), output)
-    assert len(paths) == 6
+    assert len(paths) == 7
     assert all(path.stat().st_size > 100 for path in paths)
 
 
@@ -123,7 +225,7 @@ def test_generate_all_adds_merge_plan_attribution_when_available(tmp_path: Path)
     experiment = load_experiment(tmp_path)
     validate_merge_plan_additivity(experiment.runs)
     paths = generate_all(experiment, tmp_path / "attribution-charts")
-    assert len(paths) == 8
+    assert len(paths) == 9
     assert any(path.name == "merge-plan-breakdown.png" for path in paths)
 
 

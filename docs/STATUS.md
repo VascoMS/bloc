@@ -19,7 +19,9 @@ envelope sizes, root-bound RBC reconstruction with post-decode commitment
 verification, bounded share retention/recovery, split public configuration and
 operator-local secrets, durable bounded terminal slot failures, node-owned
 bounded mempool HTTP requests, non-contaminating host resource sampling and
-validation, Prometheus metrics, local evaluators, and VM/EC2 remote evaluation.
+validation, p99-capable Type-7/order-statistic reporting, balanced seeded
+long-campaign scheduling, explicit terminal-attempt accounting, Prometheus
+metrics, local evaluators, and VM/EC2 remote evaluation.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -72,8 +74,8 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the M4 p99/statistics and transaction corpus/client-overhead tooling
-   tracked by issues `#12` and `#13`.
+1. Complete the M4 transaction corpus/client-overhead tooling tracked by issue
+   `#13`.
 2. Freeze and validate one release-candidate source SHA and image digest in
    issue `#14` before running the final local and VM campaigns.
 3. Track granular work in the [BLOC Thesis Prototype GitHub

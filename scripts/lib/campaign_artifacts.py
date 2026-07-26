@@ -181,10 +181,10 @@ def parse_expected(values: list[str]) -> dict[tuple[str, str], int]:
     return result
 
 
-def evaluator_assert(path: Path, expected_values: list[str]) -> None:
+def evaluator_assert(path: Path, expected_values: list[str], require_success: bool = False) -> None:
     rows = [row for row in read_csv(path) if row.get("phase") == "measured"]
     bad = [row for row in rows if row.get("success", "").lower() != "true" or row.get("consistent", "").lower() != "true"]
-    if bad:
+    if require_success and bad:
         raise ValueError(f"{path} contains {len(bad)} failed or inconsistent measured runs")
     expected = parse_expected(expected_values)
     for key, count in expected.items():
@@ -216,6 +216,10 @@ def annotate_placement(phase_root: Path, inventory_path: Path) -> None:
     run_path = phase_root / "run_measurements.csv"
     run_rows = read_csv(run_path)
     for row in run_rows:
+        if not (_true(row.get("success", "")) and _true(row.get("consistent", ""))):
+            row["critical_node_region"] = ""
+            row["critical_node_availability_zone"] = ""
+            continue
         node = placement.get(int(row["critical_node_id"]))
         if node is None:
             raise ValueError(f"{run_path}: unknown critical_node_id {row['critical_node_id']}")
@@ -279,14 +283,27 @@ def assert_three_region_phase(phase_root: Path, tolerance_us: int = 20) -> None:
 
     runs = [row for row in read_csv(phase_root / "run_measurements.csv") if row.get("phase", "").lower() == "measured"]
     node_rows = [row for row in read_csv(phase_root / "node_measurements.csv") if row.get("phase", "").lower() == "measured"]
+    outcomes_present = bool(runs) and all("outcome" in row for row in runs)
+    timeouts_present = bool(runs) and all("timed_out" in row for row in runs)
     expected_batches = {int(value) for value in manifest["batch_sizes"]}
     for batch in expected_batches:
         batch_runs = [row for row in runs if int(row["batch_size"]) == batch]
         if len(batch_runs) != repetitions or len({row["run_id"] for row in batch_runs}) != repetitions:
             raise ValueError(f"batch {batch}: expected exactly {repetitions} unique measured runs")
+        completed_run_ids: set[str] = set()
         for row in batch_runs:
-            if not _true(row["success"]) or not _true(row["consistent"]) or int(row["selected_ciphertexts"]) != batch:
-                raise ValueError(f"batch {batch}: failed, inconsistent, or incorrectly selected run")
+            completed = _true(row["success"]) and _true(row["consistent"])
+            if not completed:
+                if outcomes_present and row["outcome"] not in {"failed", "timed_out"}:
+                    raise ValueError(f"batch {batch}: invalid retained failure outcome")
+                if timeouts_present and _true(row["timed_out"]) != (row.get("outcome") == "timed_out"):
+                    raise ValueError(f"batch {batch}: invalid retained timeout classification")
+                continue
+            if outcomes_present and row["outcome"] not in {"", "completed"}:
+                raise ValueError(f"batch {batch}: invalid completed outcome")
+            completed_run_ids.add(row["run_id"])
+            if int(row["selected_ciphertexts"]) != batch:
+                raise ValueError(f"batch {batch}: completed run selected the wrong ciphertext count")
             attributed = (
                 int(row["proposal_preparation_us"])
                 + int(row["acs_us"])
@@ -303,33 +320,39 @@ def assert_three_region_phase(phase_root: Path, tolerance_us: int = 20) -> None:
 
         run_ids = {row["run_id"] for row in batch_runs}
         batch_nodes = [row for row in node_rows if row["run_id"] in run_ids]
-        if len(batch_nodes) != repetitions * nodes:
-            raise ValueError(f"batch {batch}: expected {repetitions * nodes} measured node rows")
         by_run: dict[str, list[dict[str, str]]] = defaultdict(list)
         for row in batch_nodes:
             by_run[row["run_id"]].append(row)
             node_id = int(row["node_id"])
             if (
-                not _true(row["success"])
-                or not _true(row["consistent"])
-                or not _true(row["metrics_finalized"])
-                or int(row["selected_ciphertexts"]) != batch
+                node_id not in placement
                 or row.get("region") != placement[node_id]["region"]
                 or row.get("availability_zone") != placement[node_id]["zone"]
                 or row.get("instance_type") != "t3.small"
             ):
-                raise ValueError(f"batch {batch}: invalid or unfinalized node measurement")
+                raise ValueError(f"batch {batch}: invalid node placement")
+            if row["run_id"] not in completed_run_ids:
+                continue
+            if (
+                not _true(row["success"])
+                or not _true(row["consistent"])
+                or not _true(row["metrics_finalized"])
+                or int(row["selected_ciphertexts"]) != batch
+            ):
+                raise ValueError(f"batch {batch}: invalid or unfinalized completed node measurement")
             substages = sum(int(row[name]) for name in (
                 "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us"
             ))
             if abs(substages - int(row["merge_plan_us"])) > tolerance_us:
                 raise ValueError(f"{row['run_id']}/node-{node_id}: merge-plan additivity exceeds {tolerance_us} us")
-        if any({int(row["node_id"]) for row in values} != set(range(nodes)) for values in by_run.values()):
+        if any({int(row["node_id"]) for row in by_run[run_id]} != set(range(nodes)) for run_id in completed_run_ids):
             raise ValueError(f"batch {batch}: a run is missing node measurements")
-        if any(sum(_true(row["critical_node"]) for row in values) != 1 for values in by_run.values()):
+        if any(sum(_true(row["critical_node"]) for row in by_run[run_id]) != 1 for run_id in completed_run_ids):
             raise ValueError(f"batch {batch}: each run must identify exactly one critical node")
+        if any(len({int(row["node_id"]) for row in values}) != len(values) for values in by_run.values()):
+            raise ValueError(f"batch {batch}: duplicate node measurement")
 
-    if len(runs) != repetitions * len(expected_batches) or len(node_rows) != repetitions * len(expected_batches) * nodes:
+    if len(runs) != repetitions * len(expected_batches) or len(node_rows) > repetitions * len(expected_batches) * nodes:
         raise ValueError("phase contains unexpected measured rows or batch sizes")
     _assert_targets(phase_root / "prometheus-targets-before.json", nodes)
     _assert_targets(phase_root / "prometheus-targets.json", nodes)
@@ -466,6 +489,8 @@ def merge_scenarios(root: Path, specs: list[str], multiple_blocks: bool) -> None
         if not separator:
             raise ValueError(f"invalid scenario spec {spec!r}")
         parsed.append((int(block), Path(path)))
+    campaign_order: dict[tuple[int, str], int] = {}
+    next_campaign_order = 0
     for name in ("run_measurements.csv", "node_measurements.csv", "scenario_summary.csv"):
         merged: list[dict[str, Any]] = []
         fields: list[str] | None = None
@@ -476,8 +501,20 @@ def merge_scenarios(root: Path, specs: list[str], multiple_blocks: bool) -> None
                     fields = list(csv.DictReader(handle).fieldnames or [])
                 if "measurement_block" not in fields:
                     fields.append("measurement_block")
+                if name in {"run_measurements.csv", "node_measurements.csv"} and "campaign_order_index" not in fields:
+                    fields.append("campaign_order_index")
             for row in rows:
+                original_run_id = row.get("run_id", "")
                 row["measurement_block"] = str(block)
+                if name == "run_measurements.csv":
+                    next_campaign_order += 1
+                    campaign_order[(block, original_run_id)] = next_campaign_order
+                    row["campaign_order_index"] = str(next_campaign_order)
+                elif name == "node_measurements.csv":
+                    order = campaign_order.get((block, original_run_id))
+                    if order is None:
+                        raise ValueError(f"{path}: node row references unknown run_id {original_run_id!r}")
+                    row["campaign_order_index"] = str(order)
                 if multiple_blocks and "run_id" in row:
                     row["run_id"] = f"block-{block}-{row['run_id']}"
                 merged.append(row)
@@ -516,6 +553,7 @@ def command_main() -> int:
     check = sub.add_parser("assert-evaluator")
     check.add_argument("--csv", required=True, type=Path)
     check.add_argument("--expected", action="append", default=[])
+    check.add_argument("--require-success", action="store_true")
     rows = sub.add_parser("evaluator-rows")
     rows.add_argument("--csv", required=True, type=Path)
     rows.add_argument("--output", required=True, type=Path)
@@ -556,7 +594,7 @@ def command_main() -> int:
         value = json.loads(args.input.read_text(encoding="utf-8-sig") if args.input else sys.stdin.read())
         write_json(args.output, value)
     elif args.command == "assert-evaluator":
-        evaluator_assert(args.csv, args.expected)
+        evaluator_assert(args.csv, args.expected, args.require_success)
     elif args.command == "evaluator-rows":
         write_json(args.output, evaluator_rows(args.csv))
     elif args.command == "merge-csv":

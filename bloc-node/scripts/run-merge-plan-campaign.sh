@@ -79,7 +79,7 @@ for mode in disjoint overlap; do
 done
 eval_complete=0
 if [[ "$resume" -eq 1 && -s "$phase_root/eval-suite/run_measurements.csv" ]]; then
-  bloc_python "$repo_root" assert-evaluator --csv "$phase_root/eval-suite/run_measurements.csv" \
+  bloc_python "$repo_root" assert-evaluator --require-success --csv "$phase_root/eval-suite/run_measurements.csv" \
     --expected 4/8=10 --expected 4/32=10 --expected 4/128=10 \
     --expected 7/8=10 --expected 7/32=10 --expected 7/128=10 >/dev/null 2>&1 && eval_complete=1
 fi

@@ -25,9 +25,16 @@ sibling `charts/<experiment-id>` directory. The command reads
 `run_measurements.csv`, excludes warmups and failed or inconsistent measured
 runs, and prints every generated path without modifying the source dataset.
 
-The initial chart set contains:
+The chart output also includes `latency-evidence-summary.csv`. For every
+scenario it reports attempted, completed, completed consistently within the
+12-second deadline, failed, timed-out, and excluded-reason counts. Latency
+statistics use successful, consistent rows only. p50/p95 remain Type-7
+compatible with historical artifacts; p99 and its 95% non-parametric
+order-statistic interval are withheld until 1,000 eligible observations exist.
 
-- p50/p95 end-to-end latency versus batch size,
+The chart set contains:
+
+- p50/p95 end-to-end latency versus batch size and eligible p99 evidence,
 - mean sequential critical-path stage breakdown,
 - optional merge/plan substage attribution when all five columns are present,
 - raw end-to-end latency boxplots with individual observations.
@@ -44,14 +51,17 @@ python -m bloc_latency_charts.three_region <campaign-directory>
 ```
 
 This preserves the raw six-stage CSV and groups threshold wait, combine, and
-materialization into Decryption + Materialization. It writes protocol p50/p95,
+materialization into Decryption + Materialization. It writes protocol
+p50/p95/p99 eligibility and confidence intervals,
 four-stage attribution, pairwise network summaries for intra-region,
 US–Ireland, US–Frankfurt, and Ireland–Frankfurt traffic, critical-node-region
 attribution, PNG/SVG figures, and `REPORT.md`. It rejects incomplete samples,
-invalid placement, unhealthy Prometheus targets, failed five-attempt pairwise
-health checks, resource restarts/OOMs, image-digest drift, or non-empty cleanup
-evidence. The older `cross_region` module remains available only for historical
-two-region artifacts.
+invalid placement for completed rows, unhealthy Prometheus targets, failed
+five-attempt pairwise health checks, resource restarts/OOMs, image-digest drift,
+or non-empty cleanup evidence. Failed and timed-out attempts remain visible but
+do not contaminate completed-run latency or stage distributions. The older
+`cross_region` module remains available only for historical two-region
+artifacts.
 
 ## Test
 

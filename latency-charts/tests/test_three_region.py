@@ -101,6 +101,23 @@ def test_three_region_analysis_outputs_required_summaries(tmp_path: Path) -> Non
     pairs = set(pd.read_csv(output / "pairwise-network-summary.csv")["region_pair"])
     assert pairs == {"intra-region", "US–Ireland", "US–Frankfurt", "Ireland–Frankfurt"}
     assert "Critical-node region attribution" in (output / "REPORT.md").read_text(encoding="utf-8")
+    latency = pd.read_csv(output / "three-region-latency-summary.csv")
+    assert {
+        "attempted",
+        "completed",
+        "consistent_within_deadline",
+        "failed",
+        "timed_out",
+        "p50_us",
+        "p95_us",
+        "p99_us",
+        "p99_eligible",
+    }.issubset(latency.columns)
+    assert not bool(latency.iloc[0].p99_eligible)
+    assert pd.isna(latency.iloc[0].p99_us)
+    assert "p99 is withheld below 1,000 successful observations" in (
+        output / "REPORT.md"
+    ).read_text(encoding="utf-8")
     resources = pd.read_csv(output / "host-resource-summary.csv")
     assert set(resources["scope"]) == {"node", "cluster"}
     cluster = resources[resources["scope"] == "cluster"].iloc[0]
@@ -113,6 +130,38 @@ def test_three_region_analysis_preserves_legacy_coarse_resource_evidence(tmp_pat
     output = analyze_three_region(tmp_path)
     assert not (output / "host-resource-summary.csv").exists()
     assert "coarse historical resource-stability" in (output / "REPORT.md").read_text(encoding="utf-8")
+
+
+def test_three_region_analysis_retains_timeout_without_quantile_contamination(tmp_path: Path) -> None:
+    write_fixture(tmp_path)
+    for path in (tmp_path / "manifest.json", tmp_path / "n4" / "manifest.json"):
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["repetitions"] = 2
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+    runs = pd.read_csv(tmp_path / "run_measurements.csv")
+    timed_out = runs.iloc[0].copy()
+    timed_out.update({
+        "run_id": "run-2",
+        "iteration": 2,
+        "success": False,
+        "consistent": False,
+        "total_slot_us": 9_999_999,
+        "selected_ciphertexts": 0,
+    })
+    timed_out["outcome"] = "timed_out"
+    timed_out["timed_out"] = True
+    timed_out["deadline_met"] = False
+    timed_out["error"] = "timed out waiting for results"
+    combined = pd.concat([runs, timed_out.to_frame().T], ignore_index=True)
+    combined.to_csv(tmp_path / "run_measurements.csv", index=False)
+    combined.to_csv(tmp_path / "n4" / "run_measurements.csv", index=False)
+
+    output = analyze_three_region(tmp_path)
+
+    row = pd.read_csv(output / "three-region-latency-summary.csv").iloc[0]
+    assert (row.attempted, row.completed, row.failed, row.timed_out) == (2, 1, 0, 1)
+    assert row.p50_us == 2080
+    assert row.maximum_us == 2080
 
 
 def test_three_region_analysis_rejects_missing_resource_configuration_or_node(tmp_path: Path) -> None:

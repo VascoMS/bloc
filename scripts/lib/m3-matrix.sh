@@ -3,7 +3,7 @@
 # Generic same-region M3 matrix. The sourcing entrypoint sets M3_* defaults.
 bloc_m3_matrix_main() {
   local admin_cidrs=() aws_profile=bloc node_counts_csv="$M3_NODE_COUNTS" batch_sizes_csv=8,32,128
-  local warmups=5 repetitions=30 campaign_id="" baseline_root="" auto_plan=0 auto_phases=0 unattended=0 keep_failure=0 skip_charts=0 validate_only=0
+  local warmups=5 repetitions=30 repetition_blocks=1 seed=20260621 campaign_id="" baseline_root="" auto_plan=0 auto_phases=0 unattended=0 keep_failure=0 skip_charts=0 validate_only=0
   bloc_validate_flag_values "$@"
   while [[ $# -gt 0 ]]; do case "$1" in
     --admin-cidr) admin_cidrs+=("$2"); shift 2;; --aws-profile) aws_profile="$2"; shift 2;;
@@ -12,18 +12,22 @@ bloc_m3_matrix_main() {
     --operator-instance-type) M3_OPERATOR_TYPE="$2"; shift 2;; --controller-instance-type) M3_CONTROLLER_TYPE="$2"; shift 2;;
     --node-counts) node_counts_csv="$2"; shift 2;; --batch-sizes) batch_sizes_csv="$2"; shift 2;;
     --warmups) warmups="$2"; shift 2;; --repetitions) repetitions="$2"; shift 2;;
+    --repetition-blocks) repetition_blocks="$2"; shift 2;; --seed) seed="$2"; shift 2;;
     --campaign-id) campaign_id="$2"; shift 2;; --baseline-campaign-root) baseline_root="$2"; shift 2;;
     --auto-approve-plan) auto_plan=1; shift;; --auto-approve-phases) auto_phases=1; shift;;
     --unattended) unattended=1; auto_plan=1; auto_phases=1; shift;; --keep-resources-on-failure) keep_failure=1; shift;;
     --skip-chart-generation) skip_charts=1; shift;; --validate-only) validate_only=1; shift;;
     -h|--help) bloc_m3_matrix_usage; return 0;; *) bloc_m3_matrix_usage; bloc_usage_error "unknown argument: $1";; esac; done
   [[ "${#admin_cidrs[@]}" -gt 0 ]] || bloc_usage_error "at least one --admin-cidr is required"
-  bloc_csv_contains_only "$node_counts_csv" 4,7,10 NodeCounts; bloc_csv_contains_only "$batch_sizes_csv" 8,32,128 BatchSizes
+  bloc_csv_contains_only "$node_counts_csv" 4,7,10 NodeCounts; bloc_csv_contains_only "$batch_sizes_csv" 8,32,128,512 BatchSizes
   bloc_is_uint "$warmups" || bloc_usage_error "--warmups must be non-negative"; bloc_is_positive_int "$repetitions" || bloc_usage_error "--repetitions must be positive"
+  bloc_is_positive_int "$repetition_blocks" || bloc_usage_error "--repetition-blocks must be positive"
+  [[ $((repetitions % repetition_blocks)) -eq 0 ]] || bloc_usage_error "--repetitions must be divisible by --repetition-blocks"
+  bloc_is_uint "$seed" || bloc_usage_error "--seed must be non-negative"
   [[ -n "$campaign_id" ]] || campaign_id="$M3_CAMPAIGN_PREFIX-$(bloc_utc_stamp)"
   [[ "$campaign_id" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || bloc_usage_error "invalid campaign id: $campaign_id"
   if [[ "$validate_only" -eq 1 ]]; then
-    local validate_args=(--admin-cidr "${admin_cidrs[0]}" --validate-only)
+    local validate_args=(--admin-cidr "${admin_cidrs[0]}" --node-count 10 --batch-sizes 8,32,128,512 --repetitions "$repetitions" --repetition-blocks "$repetition_blocks" --seed "$seed" --validate-only)
     bash "$M3_REPO_ROOT/deploy/ec2/run-a1-pilot.sh" "${validate_args[@]}"
     bloc_validate_only_message "$M3_ENTRY_NAME"; return 0
   fi
@@ -37,7 +41,7 @@ bloc_m3_matrix_main() {
   for node_count in "${nodes[@]}"; do
     phase_id="bloc-ec2-$M3_PHASE_PREFIX-n$node_count-${campaign_id#${M3_CAMPAIGN_PREFIX}-}"
     source_root="$M3_REPO_ROOT/results/ec2/$phase_id"; dest_root="$campaign_root/n$node_count"
-    node_args=(--aws-profile "$aws_profile" --aws-region "$M3_AWS_REGION" --availability-zone "$M3_PRIMARY_AZ" --node-count "$node_count" --operator-instance-type "$M3_OPERATOR_TYPE" --controller-instance-type "$M3_CONTROLLER_TYPE" --batch-sizes "$batch_sizes_csv" --warmups "$warmups" --repetitions "$repetitions" --campaign-label "$M3_CAMPAIGN_LABEL" --topology "$M3_TOPOLOGY" --experiment-id "$phase_id")
+    node_args=(--aws-profile "$aws_profile" --aws-region "$M3_AWS_REGION" --availability-zone "$M3_PRIMARY_AZ" --node-count "$node_count" --operator-instance-type "$M3_OPERATOR_TYPE" --controller-instance-type "$M3_CONTROLLER_TYPE" --batch-sizes "$batch_sizes_csv" --warmups "$warmups" --repetitions "$repetitions" --repetition-blocks "$repetition_blocks" --seed "$seed" --campaign-label "$M3_CAMPAIGN_LABEL" --topology "$M3_TOPOLOGY" --experiment-id "$phase_id")
     [[ -n "$M3_AVAILABILITY_ZONES" ]] && node_args+=(--availability-zones "$M3_AVAILABILITY_ZONES")
     [[ -n "$M3_SUBNET_CIDRS" ]] && node_args+=(--subnet-cidrs "$M3_SUBNET_CIDRS")
     for b in "${admin_cidrs[@]}"; do node_args+=(--admin-cidr "$b"); done
@@ -55,7 +59,7 @@ bloc_m3_matrix_main() {
   local name inputs
   for name in run_measurements.csv node_measurements.csv scenario_summary.csv resource_timeseries.csv resource-summary.csv; do inputs=(); for dest_root in "${phase_roots[@]}"; do inputs+=("$dest_root/$name"); done; bloc_python "$M3_REPO_ROOT" merge-csv --output "$campaign_root/$name" "${inputs[@]}"; done
   inputs=(); for dest_root in "${phase_roots[@]}"; do inputs+=("$dest_root/scenario_summary.json"); done; bloc_python "$M3_REPO_ROOT" merge-json --output "$campaign_root/scenario_summary.json" "${inputs[@]}"
-  M3_CAMPAIGN_ROOT="$campaign_root" M3_PHASES="$phases" M3_STARTED_AT="$started_at" M3_CAMPAIGN_ID="$campaign_id" M3_NODE_COUNTS="$node_counts_csv" M3_BATCH_SIZES="$batch_sizes_csv" M3_WARMUPS="$warmups" M3_REPETITIONS="$repetitions" M3_UNATTENDED="$unattended" M3_BASELINE="$baseline_root" bloc_m3_write_manifest complete ""
+  M3_CAMPAIGN_ROOT="$campaign_root" M3_PHASES="$phases" M3_STARTED_AT="$started_at" M3_CAMPAIGN_ID="$campaign_id" M3_NODE_COUNTS="$node_counts_csv" M3_BATCH_SIZES="$batch_sizes_csv" M3_WARMUPS="$warmups" M3_REPETITIONS="$repetitions" M3_REPETITION_BLOCKS="$repetition_blocks" M3_SEED="$seed" M3_UNATTENDED="$unattended" M3_BASELINE="$baseline_root" bloc_m3_write_manifest complete ""
   if [[ "$skip_charts" -ne 1 && -x "$M3_REPO_ROOT/latency-charts/.venv/bin/python" ]]; then (cd "$M3_REPO_ROOT/latency-charts" && .venv/bin/python -m bloc_latency_charts "$campaign_root"); fi
   if [[ -n "$baseline_root" ]]; then (cd "$M3_REPO_ROOT/latency-charts" && "${M3_REPO_ROOT}/latency-charts/.venv/bin/python" -m bloc_latency_charts.campaign_comparison "$baseline_root" "$campaign_root" --output "$campaign_root/comparison"); fi
 }
@@ -63,5 +67,5 @@ bloc_m3_matrix_main() {
 bloc_m3_write_manifest() {
   local status="$1" reason="$2" root="${M3_CAMPAIGN_ROOT:-$campaign_root}" phase_file="${M3_PHASES:-$phases}"
   jq -s '.' "$phase_file" >"$root/phases.json"
-  jq -n --arg schema_version 'bloc-ec2-m3-campaign/v1' --arg experiment_id "${M3_CAMPAIGN_ID:-$campaign_id}" --arg campaign "$M3_CAMPAIGN_LABEL" --arg status "$status" --arg reason "$reason" --arg started_at "${M3_STARTED_AT:-$started_at}" --arg finished_at "$(bloc_utc_iso)" --arg aws_region "$M3_AWS_REGION" --arg availability_zone "$M3_PRIMARY_AZ" --arg topology "$M3_TOPOLOGY" --arg node_counts "${M3_NODE_COUNTS:-$node_counts_csv}" --arg batch_sizes "${M3_BATCH_SIZES:-$batch_sizes_csv}" --argjson warmups "${M3_WARMUPS:-$warmups}" --argjson repetitions "${M3_REPETITIONS:-$repetitions}" --arg baseline "${M3_BASELINE:-$baseline_root}" --argjson unattended "${M3_UNATTENDED:-$unattended}" --slurpfile phases "$root/phases.json" '{schema_version:$schema_version,experiment_id:$experiment_id,campaign:$campaign,status:$status,invalid_reason:(if $reason=="" then null else $reason end),started_at:$started_at,finished_at:$finished_at,aws_region:$aws_region,availability_zone:$availability_zone,topology:$topology,tx_source:"synthetic",node_counts:($node_counts|split(",")|map(tonumber)),batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,baseline_campaign_root:(if $baseline=="" then null else $baseline end),unattended:($unattended==1),resource_policy:"destroy-after-success; keep only on failure when requested",failure_rule:"any failed or inconsistent measured run invalidates the phase",phases:$phases[0]}' >"$root/manifest.json"
+  jq -n --arg schema_version 'bloc-ec2-m3-campaign/v1' --arg experiment_id "${M3_CAMPAIGN_ID:-$campaign_id}" --arg campaign "$M3_CAMPAIGN_LABEL" --arg status "$status" --arg reason "$reason" --arg started_at "${M3_STARTED_AT:-$started_at}" --arg finished_at "$(bloc_utc_iso)" --arg aws_region "$M3_AWS_REGION" --arg availability_zone "$M3_PRIMARY_AZ" --arg topology "$M3_TOPOLOGY" --arg node_counts "${M3_NODE_COUNTS:-$node_counts_csv}" --arg batch_sizes "${M3_BATCH_SIZES:-$batch_sizes_csv}" --argjson warmups "${M3_WARMUPS:-$warmups}" --argjson repetitions "${M3_REPETITIONS:-$repetitions}" --argjson repetition_blocks "${M3_REPETITION_BLOCKS:-$repetition_blocks}" --argjson seed "${M3_SEED:-$seed}" --arg baseline "${M3_BASELINE:-$baseline_root}" --argjson unattended "${M3_UNATTENDED:-$unattended}" --slurpfile phases "$root/phases.json" '{schema_version:$schema_version,experiment_id:$experiment_id,campaign:$campaign,status:$status,invalid_reason:(if $reason=="" then null else $reason end),started_at:$started_at,finished_at:$finished_at,aws_region:$aws_region,availability_zone:$availability_zone,topology:$topology,tx_source:"synthetic",node_counts:($node_counts|split(",")|map(tonumber)),batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,repetition_blocks:$repetition_blocks,seed:$seed,baseline_campaign_root:(if $baseline=="" then null else $baseline end),unattended:($unattended==1),resource_policy:"destroy-after-success; keep only on failure when requested",failure_rule:"failed and timed-out attempts remain in the complete artifact and are excluded from successful latency quantiles",phases:$phases[0]}' >"$root/manifest.json"
 }

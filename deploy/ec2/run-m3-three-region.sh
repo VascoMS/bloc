@@ -11,6 +11,7 @@ Usage: bash deploy/ec2/run-m3-three-region.sh --admin-cidr CIDR [options]
   --primary-availability-zone AZ --secondary-availability-zone AZ --tertiary-availability-zone AZ
   --operator-instance-type TYPE --controller-instance-type TYPE --cpu-credits standard|unlimited
   --node-counts LIST --batch-sizes LIST --warmups N --repetitions N
+  --repetition-blocks N --seed N
   --eval-timeout DURATION --campaign-id ID
   --auto-approve-plan --auto-approve-phases --unattended
   --skip-chart-generation --plan-only --validate-only
@@ -24,6 +25,7 @@ primary_region=us-east-1; secondary_region=eu-west-1; tertiary_region=eu-central
 primary_az=us-east-1a; secondary_az=eu-west-1a; tertiary_az=eu-central-1a
 operator_type=t3.small; controller_type=t3.small; cpu_credits=unlimited
 node_counts_csv=4,7; batch_sizes_csv=8,32,128; warmups=5; repetitions=30; eval_timeout=60s
+repetition_blocks=1; seed=20260621
 campaign_id=""; auto_plan=0; auto_phases=0; unattended=0
 skip_charts=0; plan_only=0; validate_only=0
 
@@ -45,6 +47,8 @@ while [[ $# -gt 0 ]]; do
     --batch-sizes) batch_sizes_csv="$2"; shift 2 ;;
     --warmups) warmups="$2"; shift 2 ;;
     --repetitions) repetitions="$2"; shift 2 ;;
+    --repetition-blocks) repetition_blocks="$2"; shift 2 ;;
+    --seed) seed="$2"; shift 2 ;;
     --eval-timeout) eval_timeout="$2"; shift 2 ;;
     --campaign-id) campaign_id="$2"; shift 2 ;;
     --auto-approve-plan) auto_plan=1; shift ;;
@@ -60,10 +64,13 @@ done
 
 [[ "${#admin_cidrs[@]}" -gt 0 ]] || bloc_usage_error "at least one --admin-cidr is required"
 [[ "$primary_region" != "$secondary_region" && "$primary_region" != "$tertiary_region" && "$secondary_region" != "$tertiary_region" ]] || bloc_usage_error "all three regions must differ"
-bloc_csv_contains_only "$node_counts_csv" 4,7 NodeCounts
-bloc_csv_contains_only "$batch_sizes_csv" 8,32,128 BatchSizes
+bloc_csv_contains_only "$node_counts_csv" 4,7,10 NodeCounts
+bloc_csv_contains_only "$batch_sizes_csv" 8,32,128,512 BatchSizes
 bloc_is_uint "$warmups" || bloc_usage_error "warmups must be non-negative"
 bloc_is_positive_int "$repetitions" || bloc_usage_error "repetitions must be positive"
+bloc_is_positive_int "$repetition_blocks" || bloc_usage_error "repetition-blocks must be positive"
+[[ $((repetitions % repetition_blocks)) -eq 0 ]] || bloc_usage_error "repetitions must be divisible by repetition-blocks"
+bloc_is_uint "$seed" || bloc_usage_error "seed must be non-negative"
 bloc_validate_go_duration "$eval_timeout" EvalTimeout
 [[ "$operator_type" == t3.small ]] || bloc_usage_error "the accepted three-region campaign requires t3.small operators"
 [[ "$controller_type" == t3.small ]] || bloc_usage_error "the accepted three-region campaign requires a t3.small controller"
@@ -82,6 +89,22 @@ fi
 
 old_ifs="$IFS"; IFS=','; set -- $node_counts_csv; IFS="$old_ifs"; nodes=("$@")
 IFS=','; set -- $batch_sizes_csv; IFS="$old_ifs"; batches=("$@")
+bmax=0
+for batch in "${batches[@]}"; do [[ "$batch" -le "$bmax" ]] || bmax="$batch"; done
+batch_order_blocks=()
+while IFS= read -r order; do batch_order_blocks+=("$order"); done < <(
+  python3 - "$batch_sizes_csv" "$seed" "$repetition_blocks" <<'PY'
+import hashlib
+import sys
+batches = sys.argv[1].split(",")
+seed, blocks = sys.argv[2], int(sys.argv[3])
+for block in range(1, blocks + 1):
+    print(",".join(sorted(
+        batches,
+        key=lambda batch: hashlib.sha256(f"{seed}:{block}:{batch}".encode()).digest(),
+    )))
+PY
+)
 maximum_nodes="$(python3 - "$node_counts_csv" <<'PY'
 import sys
 print(max(map(int, sys.argv[1].split(','))))
@@ -105,10 +128,12 @@ write_campaign_manifest() {
     --arg invalid_reason "$reason" --arg started_at "$started_at" --arg finished_at "$(bloc_utc_iso)" \
     --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" \
     --arg node_counts "$node_counts_csv" --arg batch_sizes "$batch_sizes_csv" --argjson warmups "$warmups" --argjson repetitions "$repetitions" \
+    --argjson repetition_blocks "$repetition_blocks" --argjson seed "$seed" \
+    --argjson batch_order_blocks "$(printf '%s\n' "${batch_order_blocks[@]}" | jq -R 'split(",")' | jq -s '.')" \
     --arg eval_timeout "$eval_timeout" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" \
     --arg cpu_credits "$cpu_credits" --arg source_sha "$source_sha" --arg docker_image_digest "$(sed -n '1p' "$campaign_root/image-digest.txt" 2>/dev/null || true)" \
     --slurpfile phases "$phases_json" \
-    '{schema_version:$schema_version,experiment_id:$experiment_id,campaign:"M3-three-region-synthetic",status:$status,invalid_reason:(if $invalid_reason=="" then null else $invalid_reason end),started_at:$started_at,finished_at:$finished_at,source_sha:$source_sha,topology:"T2-three-region",primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,node_counts:($node_counts|split(",")|map(tonumber)),batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,eval_timeout:$eval_timeout,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image_digest:$docker_image_digest,reporting_stages:["proposal","acs","merge_plan","decryption_materialization"],comparison_policy:"standalone-current-build; prior topology data is historical context only",phases:$phases[0]}' >"$campaign_root/manifest.json"
+    '{schema_version:$schema_version,experiment_id:$experiment_id,campaign:"M3-three-region-synthetic",status:$status,invalid_reason:(if $invalid_reason=="" then null else $invalid_reason end),started_at:$started_at,finished_at:$finished_at,source_sha:$source_sha,topology:"T2-three-region",primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,node_counts:($node_counts|split(",")|map(tonumber)),batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,repetition_blocks:$repetition_blocks,seed:$seed,batch_order_blocks:$batch_order_blocks,eval_timeout:$eval_timeout,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image_digest:$docker_image_digest,reporting_stages:["proposal","acs","merge_plan","decryption_materialization"],comparison_policy:"standalone-current-build; prior topology data is historical context only",phases:$phases[0]}' >"$campaign_root/manifest.json"
 }
 
 finalize_campaign() {
@@ -403,7 +428,7 @@ run_phase() (
   runtime_image="$ecr_url@$phase_digest"
 
   cluster="$phase_root/generated/cluster.ec2.json"; remote="$phase_root/generated/remote-eval.ec2.json"; prometheus="$phase_root/generated/prometheus.ec2.yml"
-  (cd "$repo_root/bloc-node" && go run ./cmd/bloc-node gen-ec2-config --inventory "$inventory" --cluster-out "$cluster" --crs-out "$phase_root/generated/cluster.ec2.crs" --secrets-dir "$phase_root/generated/secrets.ec2" --remote-eval-out "$remote" --cluster-id "$phase_id" --nodes "$node_count" --bmax 128)
+  (cd "$repo_root/bloc-node" && go run ./cmd/bloc-node gen-ec2-config --inventory "$inventory" --cluster-out "$cluster" --crs-out "$phase_root/generated/cluster.ec2.crs" --secrets-dir "$phase_root/generated/secrets.ec2" --remote-eval-out "$remote" --cluster-id "$phase_id" --nodes "$node_count" --bmax "$bmax")
   write_prometheus_config "$inventory" "$prometheus"
   while IFS= read -r host; do
     public="$(jq -r .public_ip <<<"$host")"; key="$(key_for "$host")"; ready=0
@@ -432,16 +457,26 @@ run_phase() (
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'curl -fsS http://127.0.0.1:9090/api/v1/targets' >"$phase_root/prometheus-targets-before.json"
   assert_prometheus_targets "$phase_root/prometheus-targets-before.json" "$node_count"
   collect_pairwise_network "$inventory" pre "$phase_root/network-pre.csv"; assert_network_matrix "$phase_root/network-pre.csv" $((node_count * node_count))
-  next_slot=1; specs=()
-  for batch in "${batches[@]}"; do
-    remote_dir="/opt/bloc/ec2/results/$phase_id/batch-$batch"
-    ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions' --out-dir 'results/$phase_id/batch-$batch' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
-    mkdir -p "$phase_root/scenarios/batch-$batch"; scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "ubuntu@$controller_public:$remote_dir" "$phase_root/scenarios/batch-$batch/results"
-    bloc_python "$repo_root" assert-evaluator --csv "$phase_root/scenarios/batch-$batch/results/run_measurements.csv" --expected "$node_count/$batch=$repetitions"
-    specs+=("1:$phase_root/scenarios/batch-$batch/results")
-    next_slot=$((next_slot + warmups + repetitions))
+  next_slot=1; specs=(); warmed_batches=","; block_repetitions=$((repetitions / repetition_blocks)); block_number=0
+  for batch_order in "${batch_order_blocks[@]}"; do
+    block_number=$((block_number + 1))
+    IFS=',' read -r -a ordered_batches <<< "$batch_order"
+    for batch in "${ordered_batches[@]}"; do
+      scenario_warmups=0
+      case "$warmed_batches" in *",$batch,"*) ;; *) scenario_warmups="$warmups"; warmed_batches="${warmed_batches}${batch}," ;; esac
+      if [[ "$repetition_blocks" -eq 1 ]]; then relative_path="batch-$batch"; else relative_path="block-$block_number/batch-$batch"; fi
+      remote_dir="/opt/bloc/ec2/results/$phase_id/$relative_path"
+      ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-block$block_number-b$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$scenario_warmups' --repetitions '$block_repetitions' --measurement-block '$block_number' --planned-scenario-runs '$repetitions' --seed '$seed' --out-dir 'results/$phase_id/$relative_path' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
+      mkdir -p "$phase_root/scenarios/$relative_path"; scp -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "ubuntu@$controller_public:$remote_dir" "$phase_root/scenarios/$relative_path/results"
+      bloc_python "$repo_root" assert-evaluator --csv "$phase_root/scenarios/$relative_path/results/run_measurements.csv" --expected "$node_count/$batch=$block_repetitions"
+      specs+=("$block_number:$phase_root/scenarios/$relative_path/results")
+      next_slot=$((next_slot + scenario_warmups + block_repetitions))
+    done
   done
-  bloc_python "$repo_root" merge-scenarios --root "$phase_root" "${specs[@]}"
+  merge_args=(merge-scenarios --root "$phase_root")
+  [[ "$repetition_blocks" -gt 1 ]] && merge_args+=(--multiple-blocks)
+  merge_args+=("${specs[@]}")
+  bloc_python "$repo_root" "${merge_args[@]}"
   bloc_python "$repo_root" annotate-placement --phase-root "$phase_root" --inventory "$inventory"
   run_resource_phase
   collect_pairwise_network "$inventory" post "$phase_root/network-post.csv"; assert_network_matrix "$phase_root/network-post.csv" $((node_count * node_count))
@@ -451,7 +486,7 @@ run_phase() (
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-prometheus-1 2>&1' >"$phase_root/logs/prometheus.log" || true
   ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" 'docker logs --timestamps ec2-grafana-1 2>&1' >"$phase_root/logs/grafana.log" || true
   peerings="$(cd "$work" && terraform output -json peering_connection_ids)"
-  jq -n --arg schema_version bloc-ec2-three-region-phase/v1 --arg experiment_id "$phase_id" --arg status complete --arg source_sha "$source_sha" --arg topology T2-three-region --argjson node_count "$node_count" --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" --arg cpu_credits "$cpu_credits" --arg docker_image "$runtime_image" --arg docker_image_digest "$phase_digest" --arg git_commit "$git_commit" --arg batch_sizes "$batch_sizes_csv" --argjson warmups "$warmups" --argjson repetitions "$repetitions" --arg eval_timeout "$eval_timeout" --argjson placement "$(jq '.nodes|sort_by(.id)|map({id,region,zone,instance_type})' "$inventory")" --argjson peering_connection_ids "$peerings" '{schema_version:$schema_version,experiment_id:$experiment_id,status:$status,source_sha:$source_sha,topology:$topology,node_count:$node_count,placement:$placement,primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,peering_connection_ids:$peering_connection_ids,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image:$docker_image,docker_image_digest:$docker_image_digest,git_commit:$git_commit,batch_sizes:($batch_sizes|split(",")|map(tonumber)),warmups:$warmups,repetitions:$repetitions,eval_timeout:$eval_timeout}' >"$phase_root/manifest.json"
+  jq -n --arg schema_version bloc-ec2-three-region-phase/v1 --arg experiment_id "$phase_id" --arg status complete --arg source_sha "$source_sha" --arg topology T2-three-region --argjson node_count "$node_count" --arg primary_region "$primary_region" --arg secondary_region "$secondary_region" --arg tertiary_region "$tertiary_region" --arg operator_instance_type "$operator_type" --arg controller_instance_type "$controller_type" --arg cpu_credits "$cpu_credits" --arg docker_image "$runtime_image" --arg docker_image_digest "$phase_digest" --arg git_commit "$git_commit" --arg batch_sizes "$batch_sizes_csv" --argjson bmax "$bmax" --argjson warmups "$warmups" --argjson repetitions "$repetitions" --argjson repetition_blocks "$repetition_blocks" --argjson seed "$seed" --argjson batch_order_blocks "$(printf '%s\n' "${batch_order_blocks[@]}" | jq -R 'split(",")' | jq -s '.')" --arg eval_timeout "$eval_timeout" --argjson placement "$(jq '.nodes|sort_by(.id)|map({id,region,zone,instance_type})' "$inventory")" --argjson peering_connection_ids "$peerings" '{schema_version:$schema_version,experiment_id:$experiment_id,status:$status,source_sha:$source_sha,topology:$topology,node_count:$node_count,placement:$placement,primary_region:$primary_region,secondary_region:$secondary_region,tertiary_region:$tertiary_region,peering_connection_ids:$peering_connection_ids,operator_instance_type:$operator_instance_type,controller_instance_type:$controller_instance_type,cpu_credits:$cpu_credits,docker_image:$docker_image,docker_image_digest:$docker_image_digest,git_commit:$git_commit,batch_sizes:($batch_sizes|split(",")|map(tonumber)),bmax:$bmax,warmups:$warmups,repetitions:$repetitions,repetition_blocks:$repetition_blocks,seed:$seed,batch_order_blocks:$batch_order_blocks,eval_timeout:$eval_timeout}' >"$phase_root/manifest.json"
   bloc_python "$repo_root" assert-three-region-phase --phase-root "$phase_root"
   phase_ok=1; phase_record_ready=1
 )

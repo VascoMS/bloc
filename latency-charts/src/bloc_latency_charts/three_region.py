@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .charts import _save, _set_style
-from .data import load_experiment
+from .data import evidence_summary, load_experiment
 
 
 FOUR_STAGES = (
@@ -50,6 +50,10 @@ def _nonempty(value: object) -> list[object]:
             found.extend(_nonempty(child))
         return found
     return [] if value in (None, "", False, "None") else [value]
+
+
+def _true_mask(values: pd.Series) -> pd.Series:
+    return values.astype(str).str.lower().eq("true")
 
 
 def _targets_up(path: Path, nodes: int) -> None:
@@ -133,41 +137,60 @@ def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFr
     node_rows = pd.read_csv(root / "node_measurements.csv")
     node_rows = node_rows[node_rows["phase"].astype(str).str.lower().eq("measured")].copy()
     expected_runs = repetitions * len(manifest["batch_sizes"])
-    if len(runs) != expected_runs or len(node_rows) != expected_runs * nodes:
+    if len(runs) != expected_runs or len(node_rows) > expected_runs * nodes:
         raise ValueError(f"{root}: measured run/node row totals are invalid")
     if runs["run_id"].nunique() != expected_runs:
         raise ValueError(f"{root}: measured run IDs are not unique")
     for batch in manifest["batch_sizes"]:
         if len(runs[pd.to_numeric(runs["batch_size"]).eq(int(batch))]) != repetitions:
             raise ValueError(f"{root}: batch {batch} does not contain exactly {repetitions} measured runs")
-    for column in ("success", "consistent"):
-        if not runs[column].astype(str).str.lower().eq("true").all():
-            raise ValueError(f"{root}: failed or inconsistent measured run")
+    completed = _true_mask(runs["success"]) & _true_mask(runs["consistent"])
+    completed_ids = set(runs.loc[completed, "run_id"])
+    if "outcome" in runs:
+        outcomes = runs["outcome"].fillna("").astype(str).str.lower()
+        invalid_terminal = ~completed & ~outcomes.isin(("failed", "timed_out"))
+        invalid_completed = completed & ~outcomes.isin(("", "completed"))
+        if invalid_terminal.any() or invalid_completed.any():
+            raise ValueError(f"{root}: measured run outcome classification is invalid")
+        if "timed_out" in runs:
+            timeout_flags = _true_mask(runs["timed_out"])
+            if not timeout_flags.eq(outcomes.eq("timed_out")).all():
+                raise ValueError(f"{root}: measured timeout classification is invalid")
+    if not set(node_rows["run_id"]).issubset(set(runs["run_id"])):
+        raise ValueError(f"{root}: node measurement references an unknown run")
+    if node_rows.duplicated(["run_id", "node_id"]).any():
+        raise ValueError(f"{root}: duplicate node measurement")
+    if not pd.to_numeric(node_rows["node_id"]).isin(range(nodes)).all():
+        raise ValueError(f"{root}: node measurement ID is invalid")
+    completed_nodes = node_rows[node_rows["run_id"].isin(completed_ids)].copy()
     for column in ("success", "consistent", "metrics_finalized"):
-        if not node_rows[column].astype(str).str.lower().eq("true").all():
-            raise ValueError(f"{root}: failed, inconsistent, or unfinalized node row")
-    if not pd.to_numeric(runs["selected_ciphertexts"]).eq(pd.to_numeric(runs["batch_size"])).all():
+        if not _true_mask(completed_nodes[column]).all():
+            raise ValueError(f"{root}: completed run has a failed, inconsistent, or unfinalized node row")
+    if not pd.to_numeric(runs.loc[completed, "selected_ciphertexts"]).eq(
+        pd.to_numeric(runs.loc[completed, "batch_size"])
+    ).all():
         raise ValueError(f"{root}: run selected-ciphertext count is invalid")
-    if not pd.to_numeric(node_rows["selected_ciphertexts"]).eq(
+    if not pd.to_numeric(completed_nodes["selected_ciphertexts"]).eq(
         node_rows["run_id"].map(runs.set_index("run_id")["batch_size"]).astype(int)
+        .loc[completed_nodes.index]
     ).all():
         raise ValueError(f"{root}: node selected-ciphertext count is invalid")
-    run_node_counts = node_rows.groupby("run_id")["node_id"].nunique()
-    if len(run_node_counts) != expected_runs or not run_node_counts.eq(nodes).all():
-        raise ValueError(f"{root}: a measured run does not contain all nodes")
-    critical_counts = node_rows.assign(
-        critical=node_rows["critical_node"].astype(str).str.lower().eq("true")
+    run_node_counts = completed_nodes.groupby("run_id")["node_id"].nunique().reindex(completed_ids, fill_value=0)
+    if not run_node_counts.eq(nodes).all():
+        raise ValueError(f"{root}: a completed measured run does not contain all nodes")
+    critical_counts = completed_nodes.assign(
+        critical=_true_mask(completed_nodes["critical_node"])
     ).groupby("run_id")["critical"].sum()
     if not critical_counts.eq(1).all():
-        raise ValueError(f"{root}: a measured run does not identify exactly one critical node")
+        raise ValueError(f"{root}: a completed measured run does not identify exactly one critical node")
     expected_regions = node_rows["node_id"].astype(int).map({node_id: node["region"] for node_id, node in placement.items()})
     expected_zones = node_rows["node_id"].astype(int).map({node_id: node["zone"] for node_id, node in placement.items()})
     if not node_rows["region"].eq(expected_regions).all() or not node_rows["availability_zone"].eq(expected_zones).all():
         raise ValueError(f"{root}: node measurement placement is invalid")
-    substages = node_rows[[
+    substages = completed_nodes[[
         "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us"
     ]].apply(pd.to_numeric, errors="raise").sum(axis=1)
-    if substages.sub(pd.to_numeric(node_rows["merge_plan_us"], errors="raise")).abs().gt(20).any():
+    if substages.sub(pd.to_numeric(completed_nodes["merge_plan_us"], errors="raise")).abs().gt(20).any():
         raise ValueError(f"{root}: Merge + Plan substage additivity exceeds 20 us")
 
     for path in (root / "prometheus-targets-before.json", root / "prometheus-targets.json"):
@@ -213,8 +236,11 @@ def validate_campaign_artifacts(root: Path) -> tuple[pd.DataFrame, pd.DataFrame,
     all_runs, all_nodes = pd.concat(runs, ignore_index=True), pd.concat(nodes, ignore_index=True)
     expected_runs = len(campaign["batch_sizes"]) * int(campaign["repetitions"]) * len(campaign["node_counts"])
     expected_nodes = len(campaign["batch_sizes"]) * int(campaign["repetitions"]) * sum(int(n) for n in campaign["node_counts"])
-    if len(all_runs) != expected_runs or len(all_nodes) != expected_nodes:
-        raise ValueError(f"campaign totals are {len(all_runs)} runs/{len(all_nodes)} node rows; expected {expected_runs}/{expected_nodes}")
+    if len(all_runs) != expected_runs or len(all_nodes) > expected_nodes:
+        raise ValueError(
+            f"campaign totals are {len(all_runs)} runs/{len(all_nodes)} node rows; "
+            f"expected {expected_runs}/at most {expected_nodes}"
+        )
     if len(digests) != 1 or campaign.get("docker_image_digest") not in digests:
         raise ValueError("campaign phases did not use one image digest")
     campaign = dict(campaign)
@@ -236,10 +262,17 @@ def prepare_three_region_runs(root: str | Path, tolerance_us: float = 20.0) -> t
     return experiment.experiment_id, runs, node_rows, campaign
 
 
-def _protocol_summary(runs: pd.DataFrame) -> pd.DataFrame:
+def _protocol_summary(attempts: pd.DataFrame) -> pd.DataFrame:
+    summary = evidence_summary(attempts)
+    summary["count"] = summary["completed"]
+    completed = attempts[attempts["success"].astype(bool) & attempts["consistent"].astype(bool)]
+    means = (
+        completed.groupby(["nodes", "batch_size", "network"], as_index=False)["total_slot_us"]
+        .mean()
+        .rename(columns={"total_slot_us": "mean_us"})
+    )
     return (
-        runs.groupby(["nodes", "batch_size"], as_index=False)["total_slot_us"]
-        .agg(count="count", p50_us=lambda x: x.quantile(.50), p95_us=lambda x: x.quantile(.95), mean_us="mean")
+        summary.merge(means, on=["nodes", "batch_size", "network"], how="left")
         .sort_values(["nodes", "batch_size"], ignore_index=True)
     )
 
@@ -317,7 +350,8 @@ def analyze_three_region(result_dir: str | Path, output_dir: str | Path | None =
     output = Path(output_dir).expanduser().resolve() if output_dir else root / "analysis"
     output.mkdir(parents=True, exist_ok=True)
     experiment_id, runs, _, campaign = prepare_three_region_runs(root)
-    latency, stages = _protocol_summary(runs), _stage_summary(runs)
+    attempts = load_experiment(root).attempts
+    latency, stages = _protocol_summary(attempts), _stage_summary(runs)
     network = _network_summary(root, [int(value) for value in campaign["node_counts"]])
     critical = _critical_region_summary(runs)
     latency.to_csv(output / "three-region-latency-summary.csv", index=False)
@@ -341,6 +375,9 @@ def _plot_latency(summary: pd.DataFrame, experiment_id: str, output: Path) -> No
         panel = summary[summary["nodes"] == nodes]
         axis.plot(panel["batch_size"], panel["p50_us"] / 1000, marker="o", label=f"n={nodes} p50")
         axis.plot(panel["batch_size"], panel["p95_us"] / 1000, marker="s", linestyle="--", label=f"n={nodes} p95")
+        eligible = panel[panel["p99_eligible"].astype(bool)]
+        if not eligible.empty:
+            axis.plot(eligible["batch_size"], eligible["p99_us"] / 1000, marker="^", linestyle=":", label=f"n={nodes} p99")
     axis.set_xscale("log", base=2); axis.set_xticks(sorted(summary["batch_size"].unique()))
     axis.get_xaxis().set_major_formatter(plt.ScalarFormatter())
     axis.set(xlabel="Batch size", ylabel="Total latency (ms)", title=f"Three-region latency — {experiment_id}")
@@ -375,10 +412,19 @@ def _write_report(experiment_id: str, runs: pd.DataFrame, latency: pd.DataFrame,
                   critical: pd.DataFrame, resource_schema: str, output: Path) -> None:
     lines = [f"# Three-Region Latency Report: {experiment_id}", "",
              "Standalone current-build evidence; all observations are retained.", "",
-             f"Measured slots: {len(runs)}.", "", "## Protocol latency", "",
-             "| Nodes | Batch | Samples | p50 (ms) | p95 (ms) |", "|---:|---:|---:|---:|---:|"]
+             f"Measured attempts: {int(latency['attempted'].sum())}.", "", "## Protocol latency", "",
+             "p99 is withheld below 1,000 successful observations. Intervals are non-parametric 95% order-statistic intervals.", "",
+             "| Nodes | Batch | Attempted | Completed | ≤12 s | Failed | Timed out | p50 (ms) | p95 (ms) | p99 (ms, 95% CI) |",
+             "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for row in latency.itertuples(index=False):
-        lines.append(f"| {int(row.nodes)} | {int(row.batch_size)} | {int(row.count)} | {row.p50_us/1000:.3f} | {row.p95_us/1000:.3f} |")
+        p99 = "not eligible"
+        if bool(row.p99_eligible):
+            p99 = f"{row.p99_us/1000:.3f} [{row.p99_ci_lower_us/1000:.3f}, {row.p99_ci_upper_us/1000:.3f}]"
+        lines.append(
+            f"| {int(row.nodes)} | {int(row.batch_size)} | {int(row.attempted)} | {int(row.completed)} | "
+            f"{int(row.consistent_within_deadline)} | {int(row.failed)} | {int(row.timed_out)} | "
+            f"{row.p50_us/1000:.3f} | {row.p95_us/1000:.3f} | {p99} |"
+        )
     lines += ["", "## Pairwise network latency", "",
               "Values summarize the per-node-pair average across five successful health attempts.", "",
               "| Nodes | Phase | Pair | Pairs | p50 total (ms) | p95 total (ms) |", "|---:|---|---|---:|---:|---:|"]

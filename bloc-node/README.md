@@ -182,7 +182,31 @@ The profile runs 4/7/10 operators and 8/32/128 transactions over libp2p with
 one persistent cluster per operator count, but constructs a fresh ACS and clean
 protocol state for every slot. Cluster startup, slot preparation, and transaction
 submission are recorded separately from protocol latency. The suite keeps raw
-per-node results, uses the slowest correct node as the run-level latency, and produces p50/p95 summaries. See
+per-node results, uses the slowest correct node as the run-level latency, and
+produces backward-compatible Type-7 p50/p95 summaries. It emits p99 only after
+a scenario has 1,000 successful, consistent measured observations.
+
+Final evidence runs must set their contract explicitly. For example:
+
+```sh
+go run ./cmd/bloc-node eval-suite \
+  --execution-mode persistent \
+  --node-counts 4,7 \
+  --batch-sizes 8,32,128 \
+  --warmups 10 \
+  --repetitions 1000 \
+  --repetition-blocks 10 \
+  --seed 20260621 \
+  --deadline 12s \
+  --experiment-id final-local-p99 \
+  --out-dir results/local/final-local-p99
+```
+
+Measured scenarios are interleaved in stable seeded blocks. The manifest and
+run/node CSVs retain the block ID, within-block iteration, seed, planned
+scenario count, and run order. Every attempt is classified as `completed`,
+`failed`, or `timed_out`; completed-within-deadline counts remain separate, and
+failed/inconsistent/timed-out attempts never enter latency quantiles. See
 [docs/VALIDATION.md](../docs/VALIDATION.md) for metric boundaries and the
 short smoke command.
 
@@ -230,7 +254,11 @@ go run ./cmd/bloc-node eval-remote \
 
 `eval-remote` does not spawn processes. It prepares slots, submits generated
 signed Ethereum transactions, starts all sidecars, polls `/result`, verifies
-cross-node consistency, and writes chart-compatible CSV/manifest outputs.
+cross-node consistency, and writes chart-compatible CSV/manifest outputs. It
+accepts the final matrix values `n=4/7/10` and batches `8/32/128/512` when the
+cluster `BMax` covers the selected batch. Campaign wrappers pass
+`--measurement-block`, `--planned-scenario-runs`, and `--seed` so separately
+executed blocks still form one auditable balanced schedule.
 
 For VM/EC2-per-sidecar runs, generate a cluster config whose advertised HTTP
 and libp2p addresses are reachable between the controller and operator hosts,

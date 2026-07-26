@@ -12,10 +12,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
-const suiteSchemaVersion = "bloc-eval-suite/v2"
+const suiteSchemaVersion = "bloc-eval-suite/v3"
+const p99ContractedSamples = 1000
 
 type evalScenario struct {
 	ID        string `json:"id"`
@@ -26,59 +28,64 @@ type evalScenario struct {
 }
 
 type suiteManifest struct {
-	SchemaVersion   string            `json:"schema_version"`
-	ExperimentID    string            `json:"experiment_id"`
-	Profile         string            `json:"profile,omitempty"`
-	Status          string            `json:"status"`
-	Valid           bool              `json:"valid"`
-	InvalidReason   string            `json:"invalid_reason,omitempty"`
-	StartedAt       time.Time         `json:"started_at"`
-	FinishedAt      time.Time         `json:"finished_at,omitempty"`
-	Command         []string          `json:"command"`
-	Seed            int64             `json:"seed"`
-	Warmups         int               `json:"warmups"`
-	Repetitions     int               `json:"repetitions"`
-	PlannedRuns     int               `json:"planned_runs"`
-	BMax            int               `json:"bmax"`
-	TxSize          int               `json:"tx_size"`
-	TxGas           uint64            `json:"tx_gas"`
-	TxSource        string            `json:"tx_source"`
-	TxSourceMeta    map[string]any    `json:"tx_source_metadata,omitempty"`
-	FeeStartWei     uint64            `json:"fee_start_wei"`
-	FeeStepWei      uint64            `json:"fee_step_wei"`
-	Timeout         string            `json:"timeout"`
-	Scenarios       []evalScenario    `json:"scenarios"`
-	RunOrder        []string          `json:"run_order"`
-	ExecutionMode   string            `json:"execution_mode"`
-	Schedule        string            `json:"schedule"`
-	ClusterStartups int               `json:"cluster_startups"`
-	RecoveryRuns    int               `json:"recovery_runs"`
-	Deployment      map[string]string `json:"deployment,omitempty"`
-	RemoteEndpoints []remoteEvalNode  `json:"remote_endpoints,omitempty"`
-	ImageTag        string            `json:"image_tag,omitempty"`
-	GitCommit       string            `json:"git_commit,omitempty"`
+	SchemaVersion       string            `json:"schema_version"`
+	ExperimentID        string            `json:"experiment_id"`
+	Profile             string            `json:"profile,omitempty"`
+	Status              string            `json:"status"`
+	Valid               bool              `json:"valid"`
+	InvalidReason       string            `json:"invalid_reason,omitempty"`
+	StartedAt           time.Time         `json:"started_at"`
+	FinishedAt          time.Time         `json:"finished_at,omitempty"`
+	Command             []string          `json:"command"`
+	Seed                int64             `json:"seed"`
+	Warmups             int               `json:"warmups"`
+	Repetitions         int               `json:"repetitions"`
+	RepetitionBlocks    int               `json:"repetition_blocks"`
+	PlannedRuns         int               `json:"planned_runs"`
+	PlannedScenarioRuns map[string]int    `json:"planned_scenario_runs"`
+	BMax                int               `json:"bmax"`
+	TxSize              int               `json:"tx_size"`
+	TxGas               uint64            `json:"tx_gas"`
+	TxSource            string            `json:"tx_source"`
+	TxSourceMeta        map[string]any    `json:"tx_source_metadata,omitempty"`
+	FeeStartWei         uint64            `json:"fee_start_wei"`
+	FeeStepWei          uint64            `json:"fee_step_wei"`
+	Timeout             string            `json:"timeout"`
+	Deadline            string            `json:"deadline"`
+	Scenarios           []evalScenario    `json:"scenarios"`
+	RunOrder            []string          `json:"run_order"`
+	ExecutionMode       string            `json:"execution_mode"`
+	Schedule            string            `json:"schedule"`
+	ClusterStartups     int               `json:"cluster_startups"`
+	RecoveryRuns        int               `json:"recovery_runs"`
+	Deployment          map[string]string `json:"deployment,omitempty"`
+	RemoteEndpoints     []remoteEvalNode  `json:"remote_endpoints,omitempty"`
+	ImageTag            string            `json:"image_tag,omitempty"`
+	GitCommit           string            `json:"git_commit,omitempty"`
 }
 
 type suiteOptions struct {
-	Profile       string
-	NodeCountsRaw string
-	BatchSizesRaw string
-	BMax          int
-	TxSize        int
-	TxGas         uint64
-	TxSource      string
-	MempoolURL    string
-	FeeStart      uint64
-	FeeStep       uint64
-	Warmups       int
-	Repetitions   int
-	Seed          int64
-	BasePort      int
-	Timeout       time.Duration
-	OutDir        string
-	ExperimentID  string
-	ExecutionMode string
-	MaxRestarts   int
+	Profile          string
+	NodeCountsRaw    string
+	BatchSizesRaw    string
+	BMax             int
+	TxSize           int
+	TxGas            uint64
+	TxSource         string
+	MempoolURL       string
+	FeeStart         uint64
+	FeeStep          uint64
+	Warmups          int
+	Repetitions      int
+	RepetitionBlocks int
+	Seed             int64
+	BasePort         int
+	Timeout          time.Duration
+	Deadline         time.Duration
+	OutDir           string
+	ExperimentID     string
+	ExecutionMode    string
+	MaxRestarts      int
 }
 
 type clusterMeasurement struct {
@@ -94,24 +101,29 @@ type clusterMeasurement struct {
 }
 
 type metricSummary struct {
-	Count  int     `json:"count"`
-	Min    float64 `json:"min"`
-	Mean   float64 `json:"mean"`
-	StdDev float64 `json:"sample_stddev"`
-	P50    float64 `json:"p50"`
-	P95    float64 `json:"p95"`
-	Max    float64 `json:"max"`
+	Count       int      `json:"count"`
+	Min         float64  `json:"min"`
+	Mean        float64  `json:"mean"`
+	StdDev      float64  `json:"sample_stddev"`
+	P50         float64  `json:"p50"`
+	P95         float64  `json:"p95"`
+	P99         *float64 `json:"p99,omitempty"`
+	P99Eligible bool     `json:"p99_eligible"`
+	Max         float64  `json:"max"`
 }
 
 type scenarioSummary struct {
-	ScenarioID string                   `json:"scenario_id"`
-	Nodes      int                      `json:"nodes"`
-	BatchSize  int                      `json:"batch_size"`
-	Network    string                   `json:"network"`
-	Attempted  int                      `json:"attempted"`
-	Succeeded  int                      `json:"succeeded"`
-	Failed     int                      `json:"failed"`
-	Metrics    map[string]metricSummary `json:"metrics"`
+	ScenarioID               string                   `json:"scenario_id"`
+	Nodes                    int                      `json:"nodes"`
+	BatchSize                int                      `json:"batch_size"`
+	Network                  string                   `json:"network"`
+	Attempted                int                      `json:"attempted"`
+	Completed                int                      `json:"completed"`
+	Succeeded                int                      `json:"succeeded"`
+	ConsistentWithinDeadline int                      `json:"consistent_within_deadline"`
+	Failed                   int                      `json:"failed"`
+	TimedOut                 int                      `json:"timed_out"`
+	Metrics                  map[string]metricSummary `json:"metrics"`
 }
 
 var latencyMetricNames = []string{
@@ -141,6 +153,12 @@ func evalSuite(args []string) error {
 	if options.Warmups < 0 || options.Repetitions < 1 {
 		return fmt.Errorf("warmups must be >= 0 and repetitions must be >= 1")
 	}
+	if options.RepetitionBlocks < 1 || options.Repetitions%options.RepetitionBlocks != 0 {
+		return fmt.Errorf("repetitions must be divisible by repetition-blocks >= 1")
+	}
+	if options.Deadline <= 0 {
+		return fmt.Errorf("deadline must be positive")
+	}
 	if options.BMax < 1 || options.TxSize < 1 {
 		return fmt.Errorf("bmax and tx-size must be positive")
 	}
@@ -160,6 +178,10 @@ func evalSuite(args []string) error {
 		return err
 	}
 	plannedRuns := len(scenarios) * (options.Warmups + options.Repetitions)
+	plannedScenarioRuns := make(map[string]int, len(scenarios))
+	for _, scenario := range scenarios {
+		plannedScenarioRuns[scenario.ID] = options.Repetitions
+	}
 	printSuitePlan(options, scenarios, plannedRuns)
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	if options.ExperimentID == "" {
@@ -176,27 +198,30 @@ func evalSuite(args []string) error {
 		return err
 	}
 	manifest := suiteManifest{
-		SchemaVersion: suiteSchemaVersion,
-		ExperimentID:  options.ExperimentID,
-		Profile:       options.Profile,
-		Status:        "running",
-		StartedAt:     time.Now().UTC(),
-		Command:       append([]string{"eval-suite"}, args...),
-		Seed:          options.Seed,
-		Warmups:       options.Warmups,
-		Repetitions:   options.Repetitions,
-		PlannedRuns:   plannedRuns,
-		BMax:          options.BMax,
-		TxSize:        options.TxSize,
-		TxGas:         options.TxGas,
-		TxSource:      options.TxSource,
-		TxSourceMeta:  txSourceManifestMeta(options.TxSource, options.MempoolURL),
-		FeeStartWei:   options.FeeStart,
-		FeeStepWei:    options.FeeStep,
-		Timeout:       options.Timeout.String(),
-		Scenarios:     scenarios,
-		ExecutionMode: options.ExecutionMode,
-		Schedule:      "seeded-global-interleave",
+		SchemaVersion:       suiteSchemaVersion,
+		ExperimentID:        options.ExperimentID,
+		Profile:             options.Profile,
+		Status:              "running",
+		StartedAt:           time.Now().UTC(),
+		Command:             append([]string{"eval-suite"}, args...),
+		Seed:                options.Seed,
+		Warmups:             options.Warmups,
+		Repetitions:         options.Repetitions,
+		RepetitionBlocks:    options.RepetitionBlocks,
+		PlannedRuns:         plannedRuns,
+		PlannedScenarioRuns: plannedScenarioRuns,
+		BMax:                options.BMax,
+		TxSize:              options.TxSize,
+		TxGas:               options.TxGas,
+		TxSource:            options.TxSource,
+		TxSourceMeta:        txSourceManifestMeta(options.TxSource, options.MempoolURL),
+		FeeStartWei:         options.FeeStart,
+		FeeStepWei:          options.FeeStep,
+		Timeout:             options.Timeout.String(),
+		Deadline:            options.Deadline.String(),
+		Scenarios:           scenarios,
+		ExecutionMode:       options.ExecutionMode,
+		Schedule:            "seeded-global-interleave",
 	}
 	if options.ExecutionMode == "persistent" {
 		manifest.Schedule = "sequential-by-node-count-seeded-batch-interleave"
@@ -211,9 +236,8 @@ func evalSuite(args []string) error {
 	}
 	writer := bufio.NewWriter(runsFile)
 	allRuns := make([]EvalRun, 0, plannedRuns)
-	allPassed := true
 	recordRun := func(run EvalRun) error {
-		manifest.RunOrder = append(manifest.RunOrder, fmt.Sprintf("%s/%d/%s/slot-%d/generation-%d", run.Phase, run.Iteration, run.ScenarioID, run.Slot, run.ClusterGeneration))
+		manifest.RunOrder = append(manifest.RunOrder, fmt.Sprintf("%s/block-%d/block-iteration-%d/%s/slot-%d/generation-%d", run.Phase, run.MeasurementBlock, run.BlockIteration, run.ScenarioID, run.Slot, run.ClusterGeneration))
 		encoded, err := json.Marshal(run)
 		if err != nil {
 			return err
@@ -221,7 +245,10 @@ func evalSuite(args []string) error {
 		if _, err := writer.Write(append(encoded, '\n')); err != nil {
 			return err
 		}
-		return writer.Flush()
+		if err := writer.Flush(); err != nil {
+			return err
+		}
+		return writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest)
 	}
 	var campaignErr error
 	if options.ExecutionMode == "persistent" {
@@ -232,7 +259,6 @@ func evalSuite(args []string) error {
 			if run.Phase == "recovery" {
 				manifest.RecoveryRuns++
 			}
-			allPassed = allPassed && run.Success && run.Consistent
 		}
 		if err := writeClusterMeasurements(filepath.Join(options.OutDir, "cluster_measurements.csv"), measurements); err != nil {
 			_ = runsFile.Close()
@@ -254,10 +280,18 @@ func evalSuite(args []string) error {
 					runDir := filepath.Join(options.OutDir, "runs", runID)
 					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "")
 					run.ScenarioID, run.Phase, run.Iteration, run.OrderIndex = scenario.ID, phase.name, iteration, orderIndex
+					run.ScheduleSeed = options.Seed
+					run.PlannedScenarioRuns = options.Repetitions
+					run.BlockIteration = iteration
+					if phase.name == "measured" {
+						perBlock := options.Repetitions / options.RepetitionBlocks
+						run.MeasurementBlock = (iteration-1)/perBlock + 1
+						run.BlockIteration = (iteration-1)%perBlock + 1
+					}
 					if runErr != nil {
 						run.Error, run.Success = runErr.Error(), false
 					}
-					allPassed = allPassed && run.Success && run.Consistent
+					classifyRunOutcome(&run, runErr, options.Deadline)
 					allRuns = append(allRuns, run)
 					if err := recordRun(run); err != nil {
 						_ = runsFile.Close()
@@ -268,22 +302,20 @@ func evalSuite(args []string) error {
 			}
 		}
 	}
-	if campaignErr != nil {
-		allPassed = false
-	}
 	if err := runsFile.Close(); err != nil {
 		return err
 	}
 	if err := writeSuiteOutputs(options.OutDir, scenarios, allRuns); err != nil {
 		return err
 	}
-	manifest.Valid = allPassed
+	collectionComplete := campaignErr == nil && suiteCollectionComplete(plannedRuns, allRuns)
+	manifest.Valid = collectionComplete
 	manifest.FinishedAt = time.Now().UTC()
-	if allPassed {
+	if collectionComplete {
 		manifest.Status = "complete"
 	} else {
 		manifest.Status = "invalid"
-		manifest.InvalidReason = "one or more warmup or measured runs failed or were inconsistent"
+		manifest.InvalidReason = "the planned warmup and measured schedule was not fully retained"
 		if campaignErr != nil {
 			manifest.InvalidReason = campaignErr.Error()
 		}
@@ -291,10 +323,20 @@ func evalSuite(args []string) error {
 	if err := writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest); err != nil {
 		return err
 	}
-	if !allPassed {
+	if !collectionComplete {
 		return fmt.Errorf("suite failed: %s", manifest.InvalidReason)
 	}
 	return nil
+}
+
+func suiteCollectionComplete(plannedRuns int, runs []EvalRun) bool {
+	retained := 0
+	for _, run := range runs {
+		if run.Phase == "warmup" || run.Phase == "measured" {
+			retained++
+		}
+	}
+	return retained == plannedRuns
 }
 
 func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
@@ -312,9 +354,11 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.Uint64Var(&options.FeeStep, "fee-step-wei", 1, "generated fee increment")
 	fs.IntVar(&options.Warmups, "warmups", 5, "warmup runs per scenario")
 	fs.IntVar(&options.Repetitions, "repetitions", 30, "measured runs per scenario")
+	fs.IntVar(&options.RepetitionBlocks, "repetition-blocks", 1, "balanced measured repetition blocks")
 	fs.Int64Var(&options.Seed, "seed", 20260621, "scenario-order shuffle seed")
 	fs.IntVar(&options.BasePort, "base-port", 24000, "base port reused by sequential runs")
 	fs.DurationVar(&options.Timeout, "timeout", 30*time.Second, "per-run timeout")
+	fs.DurationVar(&options.Deadline, "deadline", 12*time.Second, "successful consistent timing deadline")
 	fs.StringVar(&options.OutDir, "out-dir", "", "experiment directory; defaults below results/m1-local")
 	fs.StringVar(&options.ExperimentID, "experiment-id", "", "stable experiment label")
 	fs.StringVar(&options.ExecutionMode, "execution-mode", "isolated", "cluster lifecycle: isolated or persistent")
@@ -402,14 +446,17 @@ func prepareSuiteOutputDir(path string) error {
 func buildScenarios(nodes, batches []int, bmax int) ([]evalScenario, error) {
 	var scenarios []evalScenario
 	for _, n := range nodes {
-		if n < 4 {
-			return nil, fmt.Errorf("node count %d must be >= 4", n)
+		if n != 4 && n != 7 && n != 10 {
+			return nil, fmt.Errorf("node count %d must be one of 4, 7, or 10", n)
 		}
 		f := (n - 1) / 3
 		threshold := 2*f + 1
 		for _, batch := range batches {
-			if batch < 1 || batch > bmax {
-				return nil, fmt.Errorf("batch size %d must be in [1,%d]", batch, bmax)
+			if batch != 8 && batch != 32 && batch != 128 && batch != 512 {
+				return nil, fmt.Errorf("batch size %d must be one of 8, 32, 128, or 512", batch)
+			}
+			if batch > bmax {
+				return nil, fmt.Errorf("batch size %d exceeds BMax %d", batch, bmax)
 			}
 			scenarios = append(scenarios, evalScenario{
 				ID: fmt.Sprintf("n%d-b%d-libp2p", n, batch), Nodes: n,
@@ -469,31 +516,42 @@ func criticalTotalUS(run EvalRun) int64 {
 
 func summarizeScenarios(scenarios []evalScenario, runs []EvalRun) []scenarioSummary {
 	values := make(map[string]map[string][]float64)
-	counts := make(map[string][3]int)
+	counts := make(map[string]scenarioSummary)
 	for _, run := range runs {
 		if run.Phase != "measured" {
 			continue
 		}
 		count := counts[run.ScenarioID]
-		count[0]++
+		count.Attempted++
 		result, ok := criticalResult(run)
 		if run.Success && run.Consistent && ok {
-			count[1]++
+			count.Completed++
+			count.Succeeded++
+			if run.DeadlineMet {
+				count.ConsistentWithinDeadline++
+			}
 			if values[run.ScenarioID] == nil {
 				values[run.ScenarioID] = make(map[string][]float64)
 			}
 			for name, value := range metricValues(run, result) {
 				values[run.ScenarioID][name] = append(values[run.ScenarioID][name], value)
 			}
+		} else if run.TimedOut || run.Outcome == "timed_out" {
+			count.TimedOut++
 		} else {
-			count[2]++
+			count.Failed++
 		}
 		counts[run.ScenarioID] = count
 	}
 	output := make([]scenarioSummary, 0, len(scenarios))
 	for _, scenario := range scenarios {
 		count := counts[scenario.ID]
-		summary := scenarioSummary{ScenarioID: scenario.ID, Nodes: scenario.Nodes, BatchSize: scenario.BatchSize, Network: scenario.Network, Attempted: count[0], Succeeded: count[1], Failed: count[2], Metrics: make(map[string]metricSummary)}
+		summary := scenarioSummary{
+			ScenarioID: scenario.ID, Nodes: scenario.Nodes, BatchSize: scenario.BatchSize,
+			Network: scenario.Network, Attempted: count.Attempted, Completed: count.Completed,
+			Succeeded: count.Succeeded, ConsistentWithinDeadline: count.ConsistentWithinDeadline,
+			Failed: count.Failed, TimedOut: count.TimedOut, Metrics: make(map[string]metricSummary),
+		}
 		for _, name := range latencyMetricNames {
 			summary.Metrics[name] = summarizeMetric(values[scenario.ID][name])
 		}
@@ -521,7 +579,44 @@ func summarizeMetric(values []float64) metricSummary {
 		}
 		variance /= float64(len(sorted) - 1)
 	}
-	return metricSummary{Count: len(sorted), Min: sorted[0], Mean: mean, StdDev: math.Sqrt(variance), P50: percentileType7(sorted, 0.50), P95: percentileType7(sorted, 0.95), Max: sorted[len(sorted)-1]}
+	summary := metricSummary{Count: len(sorted), Min: sorted[0], Mean: mean, StdDev: math.Sqrt(variance), P50: percentileType7(sorted, 0.50), P95: percentileType7(sorted, 0.95), Max: sorted[len(sorted)-1]}
+	if len(sorted) >= p99ContractedSamples {
+		p99 := percentileType7(sorted, 0.99)
+		summary.P99 = &p99
+		summary.P99Eligible = true
+	}
+	return summary
+}
+
+func classifyRunOutcome(run *EvalRun, runErr error, deadline time.Duration) {
+	if run.Success && run.Consistent {
+		run.Outcome = "completed"
+		totalUS := criticalTotalUS(*run)
+		run.DeadlineMet = totalUS > 0 && totalUS <= deadline.Microseconds()
+		run.TimedOut = false
+		return
+	}
+	message := strings.ToLower(run.Error)
+	if runErr != nil && message == "" {
+		message = strings.ToLower(runErr.Error())
+	}
+	run.TimedOut = strings.Contains(message, "timed out") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "deadline exceeded")
+	if run.TimedOut {
+		run.Outcome = "timed_out"
+	} else {
+		run.Outcome = "failed"
+	}
+	run.DeadlineMet = false
+}
+
+func shouldRecoverPersistentCluster(run EvalRun, runErr error) bool {
+	if runErr == nil {
+		return false
+	}
+	message := strings.ToLower(runErr.Error())
+	return !run.TimedOut && !strings.Contains(message, "reported terminal failure")
 }
 
 func percentileType7(sorted []float64, p float64) float64 {
@@ -541,12 +636,12 @@ func percentileType7(sorted []float64, p float64) float64 {
 }
 
 func writeNodeMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "success", "consistent", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			for _, result := range run.Results {
 				m := result.Metrics
-				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
+				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
 				if err := w.Write(record); err != nil {
 					return err
 				}
@@ -557,12 +652,12 @@ func writeNodeMeasurements(path string, runs []EvalRun) error {
 }
 
 func writeRunMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "bmax", "tx_size", "tx_gas", "success", "consistent", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "bmax", "tx_size", "tx_gas", "success", "consistent", "outcome", "deadline_met", "timed_out", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			result, _ := criticalResult(run)
 			m := result.Metrics
-			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
+			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
 			if err := w.Write(record); err != nil {
 				return err
 			}
@@ -572,12 +667,16 @@ func writeRunMeasurements(path string, runs []EvalRun) error {
 }
 
 func writeScenarioSummaryCSV(path string, summaries []scenarioSummary) error {
-	header := []string{"scenario_id", "nodes", "batch_size", "network", "attempted", "succeeded", "failed", "metric", "count", "min", "mean", "sample_stddev", "p50", "p95", "max"}
+	header := []string{"scenario_id", "nodes", "batch_size", "network", "attempted", "completed", "succeeded", "consistent_within_deadline", "failed", "timed_out", "metric", "count", "min", "mean", "sample_stddev", "p50", "p95", "p99", "p99_eligible", "max"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, scenario := range summaries {
 			for _, name := range latencyMetricNames {
 				m := scenario.Metrics[name]
-				record := []string{scenario.ScenarioID, strconv.Itoa(scenario.Nodes), strconv.Itoa(scenario.BatchSize), scenario.Network, strconv.Itoa(scenario.Attempted), strconv.Itoa(scenario.Succeeded), strconv.Itoa(scenario.Failed), name, strconv.Itoa(m.Count), formatFloat(m.Min), formatFloat(m.Mean), formatFloat(m.StdDev), formatFloat(m.P50), formatFloat(m.P95), formatFloat(m.Max)}
+				p99 := ""
+				if m.P99 != nil {
+					p99 = formatFloat(*m.P99)
+				}
+				record := []string{scenario.ScenarioID, strconv.Itoa(scenario.Nodes), strconv.Itoa(scenario.BatchSize), scenario.Network, strconv.Itoa(scenario.Attempted), strconv.Itoa(scenario.Completed), strconv.Itoa(scenario.Succeeded), strconv.Itoa(scenario.ConsistentWithinDeadline), strconv.Itoa(scenario.Failed), strconv.Itoa(scenario.TimedOut), name, strconv.Itoa(m.Count), formatFloat(m.Min), formatFloat(m.Mean), formatFloat(m.StdDev), formatFloat(m.P50), formatFloat(m.P95), p99, strconv.FormatBool(m.P99Eligible), formatFloat(m.Max)}
 				if err := w.Write(record); err != nil {
 					return err
 				}

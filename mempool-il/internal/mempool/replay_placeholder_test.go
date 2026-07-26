@@ -96,6 +96,17 @@ func TestReplayPlaceholderSplitEncryptionBoundary(t *testing.T) {
 	}
 }
 
+func TestSignedMockPlaceholderUsesEIP7623CarrierGasLimit(t *testing.T) {
+	calldata := []byte{0x00, 0x01, 0x02}
+	_, summary, err := signMockPlaceholderTx(0, calldata, "100")
+	if err != nil {
+		t.Fatalf("sign mock placeholder: %v", err)
+	}
+	if got, want := summary.Gas, estimateCarrierGas(calldata); got != want {
+		t.Fatalf("placeholder gas = %d, want EIP-7623 estimate %d", got, want)
+	}
+}
+
 func writeReplayFixture(t *testing.T, dir string) (*be.ClusterBTE, string, string, []byte) {
 	t.Helper()
 	suite := curves.NewSuite(kilic.NewBLS12381Suite())

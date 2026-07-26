@@ -342,7 +342,7 @@ func signMockPlaceholderTx(index int, calldata []byte, feeWei string) ([]byte, t
 		Nonce:     uint64(index),
 		GasTipCap: tip,
 		GasFeeCap: fee,
-		Gas:       21000 + uint64(len(calldata))*16,
+		Gas:       estimateCarrierGas(calldata),
 		To:        &to,
 		Value:     big.NewInt(0),
 		Data:      calldata,

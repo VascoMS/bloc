@@ -21,7 +21,7 @@ expectations, read [docs/VALIDATION.md](../docs/VALIDATION.md).
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.24+
 - Ethereum RPC endpoint
 
 ## Run
@@ -53,7 +53,7 @@ go run ./cmd/service \
 
 ## CLI Flags
 
-- `-source`: `txpool | public-pending | alchemy-pending`
+- `-source`: `txpool | public-pending | alchemy-pending | replay-placeholder`
 - `-rpc-url`: JSON-RPC URL
 - `-listen`: HTTP listen address
 - `-poll-interval`: mempool polling interval
@@ -61,6 +61,9 @@ go run ./cmd/service \
 - `-max-gas`: maximum inclusion-list gas
 - `-max-block-gas`: block gas used when auto-computing the cap
 - `-alchemy-ttl`: retention for `alchemy-pending` cache
+- `-corpus`: signed transaction JSONL for `replay-placeholder`
+- `-cluster-config`: public BLOC cluster configuration for replay encryption
+- `-replay-slot`: slot bound into replay ciphertexts
 
 When `-max-gas=0`, the service uses `2 * max_block_gas`.
 
@@ -97,14 +100,102 @@ go run ./cmd/service \
   -replay-slot 1
 ```
 
-The corpus is JSONL with one object per target transaction:
+The corpus is JSONL with one labelled object per target transaction:
 
 ```json
-{"raw_tx":"0x..."}
+{"class":"calldata_128","raw_tx":"0x..."}
 ```
 
 The inclusion-list API exposes placeholder metadata and encrypted payloads. It
 does not expose raw target transaction bytes to sidecar proposals.
+
+## Client-Overhead Corpus And Report
+
+The committed evidence corpus contains 100 deterministic EIP-1559 transactions
+signed for development chain ID 1337:
+
+| Class | Exact target calldata | Rows |
+|---|---:|---:|
+| `transfer` | 0 bytes | 28 |
+| `calldata_128` | 128 bytes | 50 |
+| `calldata_256` | 256 bytes | 12 |
+| `calldata_1024` | 1,024 bytes | 8 |
+| `calldata_4096` | 4,096 bytes | 2 |
+
+The publicly derivable signer and payloads are test material. Never fund or
+reuse the signer on a live chain. The strict evidence validator checks all 100
+rows, exact class sizes and counts, chain ID, EIP-1559 type, recoverable
+signatures, EIP-7623 data-floor gas limits, and unique hashes. The ordinary
+replay loader remains permissive enough to read unlabelled development
+fixtures.
+
+Generate raw client-overhead samples from the module root:
+
+```sh
+go run ./cmd/corpus-report \
+  -corpus ../deploy/docker-compose/corpus/mock-targets.jsonl \
+  -cluster-config ../results/issue-13-client-overhead/cluster.json \
+  -out ../results/issue-13-client-overhead/client_overhead.csv \
+  -slot 1 \
+  -samples-per-class 100
+```
+
+The output contains 100 measurements per class in stable class/sample order.
+`raw_bytes`, `ciphertext_bytes`, `placeholder_bytes`, and `calldata_bytes`
+record the relevant encoded sizes. `encryption_us` times only BTE encryption.
+`submission_serialization_us` times hex encoding and JSON serialization of
+`{"raw_tx":"0x..."}` without network I/O. Encryption is randomized, so timing
+and ciphertext contents vary between runs.
+
+`carrier_gas_estimate` is the post-Pectra EIP-7623 data-only floor:
+
+```text
+tokens = zero calldata bytes + 4 * nonzero calldata bytes
+carrier_gas_estimate = 21,000 + 10 * tokens
+```
+
+It is an estimate, not paid gas or an execution receipt. Generated reports,
+public cluster material, and development operator secrets stay under ignored
+`results/` paths.
+
+### Corpus Share Methodology
+
+The class weights approximate transaction frequency in one recent mainnet
+sample. At `2026-07-26T15:01:55Z`, 360 blocks were read from
+`ethereum-rpc.publicnode.com` with JSON-RPC `eth_getBlockByNumber` and full
+transaction objects. Sampling started 64 blocks behind the reported head and
+selected every twentieth block from 25,617,666 down to 25,610,486, covering
+approximately 24 hours and 74,383 transactions.
+
+For each transaction, payload size was `(len(input) - 2) / 2`, where `input` is
+the `0x`-prefixed JSON-RPC field. Empty input was counted as zero bytes.
+Contract-creation input was included as payload even though it is initcode, not
+message-call calldata. There were 55 contract creations in the sample.
+
+```text
+transaction share = transactions in bin / all sampled transactions * 100
+calldata byte share = input bytes in bin / all sampled input bytes * 100
+```
+
+| Observed input bytes | Transaction share | Calldata byte share |
+|---|---:|---:|
+| 0 | 28.408% | 0.000% |
+| 1–127 | 43.388% | 5.621% |
+| 128–255 | 6.114% | 2.187% |
+| 256–1,023 | 11.919% | 12.798% |
+| 1,024–4,095 | 7.924% | 29.444% |
+| 4,096+ | 2.246% | 49.951% |
+
+The zero-byte bin maps to `transfer`; 1–255 maps to the 128-byte
+representative; 256–1,023 maps to 256; 1,024–4,095 maps to 1,024; and 4,096+
+maps to 4,096. Rounding transaction shares to 100 rows gives
+`28/50/12/8/2`. Byte share does not set row counts; it justifies retaining the
+rare large-payload classes, which accounted for most sampled bytes.
+
+This is a dated, one-day observational sample used to justify a benchmark
+workload mix, not a universal Ethereum distribution. No mainnet sampling
+command is part of the repository. See [VALIDATION.md](../docs/VALIDATION.md)
+for the evidence contract.
 
 ## Test
 

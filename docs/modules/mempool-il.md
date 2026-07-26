@@ -157,8 +157,8 @@ The CLI default list cap is 128. A zero CLI `max-gas` becomes twice
 
 ### 5. Replay-placeholder construction
 
-The replay source reads JSONL entries containing `raw_tx` or a raw hex line.
-For every entry it:
+The replay source reads JSONL entries containing `raw_tx`, optionally with a
+class label, or a raw hex line. For every entry it:
 
 1. decodes a signed Ethereum transaction;
 2. requires a nonzero chain ID and recovers the sender;
@@ -178,7 +178,36 @@ Encryption is randomized, so the cached value is stable within a process but a
 fresh service process produces different ciphertext bytes for the same corpus
 and slot.
 
-### 6. HTTP boundary
+### 6. Client-overhead evidence
+
+The committed issue #13 corpus has a stricter boundary than ordinary replay
+input. `readEvidenceCorpus` requires exactly 100 EIP-1559 transactions on
+development chain 1337, recoverable signatures, unique hashes, sufficient
+EIP-7623 data-floor gas limits, exact calldata sizes, matching class labels,
+and the `28/50/12/8/2` transfer/128/256/1,024/4,096-byte distribution.
+Permissive replay loading remains separate so small local fixtures and raw hex
+lines continue to work.
+
+`corpus-report` reuses replay construction without timing the whole function.
+The shared encryption boundary returns the encoded BTE ciphertext; placeholder
+calldata construction and signing happen after the encryption timer stops.
+Plaintext submission preparation times hex encoding and JSON serialization of
+the same signed target bytes. It does not submit either path to a network.
+
+The report cycles through each class until it has at least 100 raw measurements,
+then writes stable class/sample ordering. Corpus membership, schema, sizes, and
+ordering are deterministic. Ciphertext contents and timings are not because
+BTE encryption is randomized.
+
+The carrier figure applies the post-Pectra EIP-7623 data-only floor to
+placeholder calldata: `21,000 + 10 * (zero bytes + 4 * nonzero bytes)`. It is a
+gas-equivalent estimate, not paid gas. The class-weighting provenance and exact
+one-day mainnet sample are owned by the
+[mempool README](../../mempool-il/README.md#corpus-share-methodology); the
+acceptance rules and generation commands are in
+[VALIDATION.md](../VALIDATION.md#rq4-client-overhead-corpus).
+
+### 7. HTTP boundary
 
 - `GET /healthz` returns a static service-health response.
 - `GET /snapshot` returns the current ordinary-source snapshot.
@@ -256,7 +285,10 @@ The current module tests cover:
 - plaintext and placeholder classification in `classifier_test.go`;
 - public-pending RPC normalization and nil pending blocks;
 - Alchemy replacement, tie-breaking, filter recovery, and TTL behavior; and
-- replay encryption, signed placeholder parsing, and ciphertext scope.
+- replay encryption, signed placeholder parsing, and ciphertext scope;
+- strict committed-corpus validity, distribution, size, and uniqueness; and
+- client-overhead sampling, serialization, gas estimation, CSV schema, and
+  real encryption-boundary integration.
 
 Run the complete module suite with `go test ./...` from `mempool-il`.
 
@@ -267,6 +299,8 @@ Run the complete module suite with `go test ./...` from `mempool-il`.
 - `Loop` exists in replay configuration but is not used by the current source.
 - The replay service consumes only the public cluster JSON and CRS artifact; it
   has no access to operator shares or libp2p private keys.
+- The issue #13 class distribution is based on one dated, approximately
+  24-hour mainnet sample and is not a longitudinal workload model.
 - The service list hash does not include every placeholder metadata field and
   is not a cross-module protocol identity.
 - There is no authentication, pagination, response-size contract, persistence,

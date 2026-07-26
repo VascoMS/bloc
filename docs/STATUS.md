@@ -20,8 +20,10 @@ verification, bounded share retention/recovery, split public configuration and
 operator-local secrets, durable bounded terminal slot failures, node-owned
 bounded mempool HTTP requests, non-contaminating host resource sampling and
 validation, p99-capable Type-7/order-statistic reporting, balanced seeded
-long-campaign scheduling, explicit terminal-attempt accounting, Prometheus
-metrics, local evaluators, and VM/EC2 remote evaluation.
+long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
+100-transaction representative client corpus with balanced plaintext/encrypted
+overhead sampling, Prometheus metrics, local evaluators, and VM/EC2 remote
+evaluation.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -53,13 +55,22 @@ p50/p95 honest-path latency, stage, pairwise-network, and critical-node-region
 reporting. It is not Byzantine-safety, production-confidentiality, or causal
 same-region-versus-cross-region evidence.
 
+Issue #13 produced the local client-overhead artifact
+`results/issue-13-client-overhead/client_overhead.csv` from source
+`ced03fcf5a6b25d5eff435c5fbf351f164985561`. It contains 500 raw measurements,
+100 per transfer/128/256/1,024/4,096-byte class, and has SHA-256
+`919d3537f0df6bcccd3dc616678b2a3c2115d2a6f918242691f27c88dd7182ba`.
+It supports scoped client preparation-latency, byte-expansion, and
+gas-equivalent carrier estimates; it is not network latency, paid gas, or a
+longitudinal Ethereum workload claim.
+
 ## Open Blockers And Risks
 
 - **Evidence completeness:** the final evidence contract requires p99-capable
   local, same-region, and three-region campaigns, complete operator resource
-  measurements, RQ3 fault campaigns, and user/operator cost analysis. The
-  accepted M3 campaign remains valid historical p50/p95 evidence but is not the
-  final release-candidate campaign.
+  measurements, RQ3 fault campaigns, and operator cost synthesis. The accepted
+  M3 campaign remains valid historical p50/p95 evidence but is not the final
+  release-candidate campaign.
 
 ## Bounded Prototype Limitations
 
@@ -74,10 +85,10 @@ same-region-versus-cross-region evidence.
 
 ## Immediate Next Actions
 
-1. Complete the M4 transaction corpus/client-overhead tooling tracked by issue
-   `#13`.
-2. Freeze and validate one release-candidate source SHA and image digest in
+1. Freeze and validate one release-candidate source SHA and image digest in
    issue `#14` before running the final local and VM campaigns.
+2. Run the final M5 local and VM campaigns only from that frozen source and
+   image.
 3. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next

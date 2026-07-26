@@ -67,13 +67,13 @@ func WriteClientOverheadReport(cfg ClientOverheadConfig) error {
 	if cfg.Slot == 0 {
 		return fmt.Errorf("client overhead report slot must be greater than zero")
 	}
-	if cfg.SamplesPerClass < 100 {
-		return fmt.Errorf("client overhead report samples per class = %d, want at least 100", cfg.SamplesPerClass)
+	if cfg.SamplesPerClass != 100 {
+		return fmt.Errorf("client overhead report samples per class = %d, want exactly 100", cfg.SamplesPerClass)
 	}
 
-	targets, err := readEvidenceCorpus(cfg.CorpusPath)
+	targets, err := readClientOverheadCorpus(cfg.CorpusPath)
 	if err != nil {
-		return fmt.Errorf("read evidence corpus: %w", err)
+		return fmt.Errorf("read client overhead corpus: %w", err)
 	}
 	cluster, err := readReplayCluster(cfg.ClusterPath)
 	if err != nil {
@@ -93,27 +93,27 @@ func WriteClientOverheadReport(cfg ClientOverheadConfig) error {
 }
 
 func buildClientOverheadRows(targets []parsedTargetTx, samplesPerClass int, measure clientOverheadMeasurer) ([]ClientOverheadRow, error) {
-	if samplesPerClass < 100 {
-		return nil, fmt.Errorf("samples per class = %d, want at least 100", samplesPerClass)
+	if samplesPerClass != 100 {
+		return nil, fmt.Errorf("samples per class = %d, want exactly 100", samplesPerClass)
 	}
 	if measure == nil {
 		return nil, fmt.Errorf("client overhead measurer is required")
 	}
 
-	byClass := make(map[corpusClass][]parsedTargetTx, len(evidenceCorpusClasses))
+	byClass := make(map[corpusClass][]parsedTargetTx, len(clientOverheadCorpusClasses))
 	for _, target := range targets {
 		byClass[target.EvidenceClass] = append(byClass[target.EvidenceClass], target)
 	}
 
-	rows := make([]ClientOverheadRow, 0, len(evidenceCorpusClasses)*samplesPerClass)
+	rows := make([]ClientOverheadRow, 0, len(clientOverheadCorpusClasses)*samplesPerClass)
 	globalIndex := 0
-	for _, spec := range evidenceCorpusClasses {
+	for _, spec := range clientOverheadCorpusClasses {
 		classTargets := byClass[spec.Name]
-		if len(classTargets) == 0 {
-			return nil, fmt.Errorf("evidence corpus class %q contained no targets", spec.Name)
+		if len(classTargets) != samplesPerClass {
+			return nil, fmt.Errorf("client overhead corpus class %q contained %d targets, want %d", spec.Name, len(classTargets), samplesPerClass)
 		}
 		for sampleIndex := 0; sampleIndex < samplesPerClass; sampleIndex++ {
-			target := classTargets[sampleIndex%len(classTargets)]
+			target := classTargets[sampleIndex]
 			row, err := measure(target, globalIndex)
 			if err != nil {
 				return nil, fmt.Errorf("measure class %q sample %d: %w", spec.Name, sampleIndex, err)

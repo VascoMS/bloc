@@ -26,7 +26,12 @@ func TestRunValidatesRequiredReportArguments(t *testing.T) {
 		{
 			name: "too few samples",
 			args: []string{"-corpus", "corpus.jsonl", "-cluster-config", "cluster.json", "-samples-per-class", "99"},
-			want: "at least 100",
+			want: "exactly 100",
+		},
+		{
+			name: "too many samples",
+			args: []string{"-corpus", "corpus.jsonl", "-cluster-config", "cluster.json", "-samples-per-class", "101"},
+			want: "exactly 100",
 		},
 	}
 

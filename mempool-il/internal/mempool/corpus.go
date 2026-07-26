@@ -39,8 +39,6 @@ var protocolWorkloadClasses = []corpusClassSpec{
 	{Name: corpusClass4096, CalldataBytes: 4096, Rows: 2},
 }
 
-var evidenceCorpusClasses = clientOverheadCorpusClasses
-
 var evidenceCorpusChainID = big.NewInt(1337)
 
 func readClientOverheadCorpus(path string) ([]parsedTargetTx, error) {
@@ -49,10 +47,6 @@ func readClientOverheadCorpus(path string) ([]parsedTargetTx, error) {
 
 func readProtocolWorkloadCorpus(path string) ([]parsedTargetTx, error) {
 	return readStrictCorpus(path, "protocol workload corpus", protocolWorkloadClasses)
-}
-
-func readEvidenceCorpus(path string) ([]parsedTargetTx, error) {
-	return readClientOverheadCorpus(path)
 }
 
 func readStrictCorpus(path, name string, specs []corpusClassSpec) ([]parsedTargetTx, error) {

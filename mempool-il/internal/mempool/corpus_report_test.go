@@ -6,12 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
 func TestClientOverheadRowsUseBalancedStableSampling(t *testing.T) {
-	corpusPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
-	targets, err := readEvidenceCorpus(corpusPath)
+	corpusPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "client-overhead-targets.jsonl")
+	targets, err := readClientOverheadCorpus(corpusPath)
 	if err != nil {
 		t.Fatalf("read evidence corpus: %v", err)
 	}
@@ -30,7 +31,8 @@ func TestClientOverheadRowsUseBalancedStableSampling(t *testing.T) {
 	}
 
 	rowIndex := 0
-	for _, spec := range evidenceCorpusClasses {
+	seen := make(map[string]bool, len(rows))
+	for _, spec := range clientOverheadCorpusClasses {
 		for sampleIndex := 0; sampleIndex < 100; sampleIndex++ {
 			row := rows[rowIndex]
 			if row.Class != string(spec.Name) {
@@ -39,15 +41,39 @@ func TestClientOverheadRowsUseBalancedStableSampling(t *testing.T) {
 			if row.SampleIndex != sampleIndex {
 				t.Fatalf("row %d sample index = %d, want %d", rowIndex, row.SampleIndex, sampleIndex)
 			}
+			if seen[row.TargetHash] {
+				t.Fatalf("target %s measured more than once", row.TargetHash)
+			}
+			seen[row.TargetHash] = true
 			rowIndex++
+		}
+	}
+	if got, want := len(seen), 500; got != want {
+		t.Fatalf("distinct targets = %d, want %d", got, want)
+	}
+}
+
+func TestClientOverheadRowsRequireExactlyOneHundredSamplesPerClass(t *testing.T) {
+	for _, samples := range []int{99, 101} {
+		_, err := buildClientOverheadRows(nil, samples, nil)
+		if err == nil || !strings.Contains(err.Error(), "exactly 100") {
+			t.Fatalf("samples %d error = %v, want exactly 100", samples, err)
 		}
 	}
 }
 
-func TestClientOverheadRowsRequireOneHundredSamplesPerClass(t *testing.T) {
-	_, err := buildClientOverheadRows(nil, 99, nil)
-	if err == nil {
-		t.Fatal("expected samples-per-class validation error")
+func TestClientOverheadRowsRejectIncompleteClassInsteadOfCycling(t *testing.T) {
+	corpusPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "client-overhead-targets.jsonl")
+	targets, err := readClientOverheadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("read client corpus: %v", err)
+	}
+	targets = append([]parsedTargetTx(nil), targets[1:]...)
+	_, err = buildClientOverheadRows(targets, 100, func(parsedTargetTx, int) (ClientOverheadRow, error) {
+		return ClientOverheadRow{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), `class "transfer" contained 99 targets, want 100`) {
+		t.Fatalf("error = %v, want incomplete-class rejection", err)
 	}
 }
 

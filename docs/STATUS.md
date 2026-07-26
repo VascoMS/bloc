@@ -1,9 +1,9 @@
 # Status
 
-- Last reviewed: `2026-07-24`
+- Last reviewed: `2026-07-26`
 - Active milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Latest completed milestone: `M3. Distributed Sidecar Metrics Collection`
-- Last known good source: `73aa2be2852623531e2858109d9a757df705497d`
+- Last known good source: `699f2ad264fc394668c59dfa69f882711ffbac16`
 
 ## Current Prototype State
 

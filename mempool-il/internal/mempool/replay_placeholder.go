@@ -115,13 +115,16 @@ type replayCluster struct {
 }
 
 type targetCorpusEntry struct {
-	RawTx string `json:"raw_tx"`
+	Class corpusClass `json:"class,omitempty"`
+	RawTx string      `json:"raw_tx"`
 }
 
 type parsedTargetTx struct {
-	Raw     []byte
-	Tx      types.Transaction
-	Summary txSummary
+	DeclaredClass corpusClass
+	EvidenceClass corpusClass
+	Raw           []byte
+	Tx            types.Transaction
+	Summary       txSummary
 }
 
 type txSummary struct {
@@ -187,17 +190,20 @@ func readTargetCorpus(path string) ([]parsedTargetTx, error) {
 			continue
 		}
 		rawHex := line
+		var declaredClass corpusClass
 		if strings.HasPrefix(line, "{") {
 			var entry targetCorpusEntry
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				return nil, err
 			}
 			rawHex = entry.RawTx
+			declaredClass = entry.Class
 		}
 		target, err := parseTargetRawTx(rawHex)
 		if err != nil {
 			return nil, err
 		}
+		target.DeclaredClass = declaredClass
 		out = append(out, target)
 	}
 	if err := scanner.Err(); err != nil {

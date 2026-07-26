@@ -19,32 +19,48 @@ import (
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
-var updateEvidenceCorpus = flag.Bool("update-corpus", false, "rewrite the committed development-only issue #13 corpus")
+var updateClientOverheadCorpus = flag.Bool("update-corpus", false, "rewrite the committed development-only issue #13 client corpus")
 
-func TestCommittedEvidenceCorpus(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
-	expected := generateEvidenceCorpus(t)
-	if *updateEvidenceCorpus {
+func TestCommittedClientOverheadCorpus(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "client-overhead-targets.jsonl")
+	expected := generateEvidenceCorpus(t, clientOverheadCorpusClasses)
+	if *updateClientOverheadCorpus {
 		if err := os.WriteFile(path, expected, 0644); err != nil {
-			t.Fatalf("update evidence corpus: %v", err)
+			t.Fatalf("update client overhead corpus: %v", err)
 		}
 	}
 	committed, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read committed evidence corpus: %v", err)
+		t.Fatalf("read committed client overhead corpus: %v", err)
 	}
 	if !bytes.Equal(committed, expected) {
-		t.Fatalf("committed corpus differs from deterministic development corpus; run go test ./internal/mempool -run TestCommittedEvidenceCorpus -count=1 -args -update-corpus")
+		t.Fatalf("committed client corpus differs from deterministic development corpus; run go test ./internal/mempool -run TestCommittedClientOverheadCorpus -count=1 -args -update-corpus")
 	}
 
-	targets, err := readEvidenceCorpus(path)
+	targets, err := readClientOverheadCorpus(path)
 	if err != nil {
-		t.Fatalf("read evidence corpus: %v", err)
+		t.Fatalf("read client overhead corpus: %v", err)
+	}
+	if got, want := len(targets), 500; got != want {
+		t.Fatalf("targets = %d, want %d", got, want)
+	}
+	assertCorpusCounts(t, targets, clientOverheadCorpusClasses)
+}
+
+func TestCommittedProtocolWorkloadCorpus(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	targets, err := readProtocolWorkloadCorpus(path)
+	if err != nil {
+		t.Fatalf("read protocol workload corpus: %v", err)
 	}
 	if got, want := len(targets), 100; got != want {
 		t.Fatalf("targets = %d, want %d", got, want)
 	}
+	assertCorpusCounts(t, targets, protocolWorkloadClasses)
+}
 
+func assertCorpusCounts(t *testing.T, targets []parsedTargetTx, specs []corpusClassSpec) {
+	t.Helper()
 	counts := map[corpusClass]int{}
 	hashes := map[string]bool{}
 	for _, target := range targets {
@@ -54,14 +70,14 @@ func TestCommittedEvidenceCorpus(t *testing.T) {
 		}
 		hashes[target.Summary.Hash] = true
 	}
-	for _, spec := range evidenceCorpusClasses {
+	for _, spec := range specs {
 		if got := counts[spec.Name]; got != spec.Rows {
 			t.Fatalf("%s rows = %d, want %d", spec.Name, got, spec.Rows)
 		}
 	}
 }
 
-func generateEvidenceCorpus(t *testing.T) []byte {
+func generateEvidenceCorpus(t *testing.T, specs []corpusClassSpec) []byte {
 	t.Helper()
 	key := evidenceCorpusDevelopmentKey(t)
 	to := common.HexToAddress("0x000000000000000000000000000000000000c0de")
@@ -69,7 +85,7 @@ func generateEvidenceCorpus(t *testing.T) []byte {
 
 	var output bytes.Buffer
 	globalIndex := 0
-	for _, spec := range evidenceCorpusClasses {
+	for _, spec := range specs {
 		for classIndex := 0; classIndex < spec.Rows; classIndex++ {
 			data := make([]byte, spec.CalldataBytes)
 			for byteIndex := range data {
@@ -124,7 +140,7 @@ func evidenceCorpusDevelopmentKey(t *testing.T) *ecdsa.PrivateKey {
 }
 
 func TestReadEvidenceCorpusRejectsInvalidContracts(t *testing.T) {
-	baseEntries := decodeEvidenceCorpusEntries(t, generateEvidenceCorpus(t))
+	baseEntries := decodeEvidenceCorpusEntries(t, generateEvidenceCorpus(t, clientOverheadCorpusClasses))
 	tests := []struct {
 		name   string
 		mutate func([]targetCorpusEntry)
@@ -180,7 +196,7 @@ func TestReadEvidenceCorpusRejectsInvalidContracts(t *testing.T) {
 			name: "underfunded calldata floor",
 			mutate: func(entries []targetCorpusEntry) {
 				data := bytes.Repeat([]byte{0x01}, 128)
-				entries[28].RawTx = signedEvidenceRawTx(t, evidenceCorpusChainID, 1003, data, 21_000+40*128-1)
+				entries[100].RawTx = signedEvidenceRawTx(t, evidenceCorpusChainID, 1003, data, 21_000+40*128-1)
 			},
 			want: "intrinsic gas",
 		},
@@ -191,7 +207,7 @@ func TestReadEvidenceCorpusRejectsInvalidContracts(t *testing.T) {
 			entries := append([]targetCorpusEntry(nil), baseEntries...)
 			test.mutate(entries)
 			path := writeEvidenceCorpusEntries(t, entries)
-			_, err := readEvidenceCorpus(path)
+			_, err := readClientOverheadCorpus(path)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want fragment %q", err, test.want)
 			}

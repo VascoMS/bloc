@@ -263,14 +263,26 @@ func newReplayEncryptor(cluster replayCluster) (*be.ClusterBTE, error) {
 }
 
 func buildMockPlaceholder(target parsedTargetTx, index int, slot uint64, cluster replayCluster, encryptor *be.ClusterBTE) (Transaction, error) {
-	ct, err := encryptor.EncryptTx(target.Raw, index%cluster.BMax, cluster.ClusterID, slot)
+	encoded, err := encryptReplayTarget(target, index, slot, cluster, encryptor)
 	if err != nil {
 		return Transaction{}, err
+	}
+	return buildMockPlaceholderFromCiphertext(target, index, encoded)
+}
+
+func encryptReplayTarget(target parsedTargetTx, index int, slot uint64, cluster replayCluster, encryptor *be.ClusterBTE) ([]byte, error) {
+	ct, err := encryptor.EncryptTx(target.Raw, index%cluster.BMax, cluster.ClusterID, slot)
+	if err != nil {
+		return nil, err
 	}
 	encoded, err := ct.MarshalBinary()
 	if err != nil {
-		return Transaction{}, err
+		return nil, err
 	}
+	return encoded, nil
+}
+
+func buildMockPlaceholderFromCiphertext(target parsedTargetTx, index int, encoded []byte) (Transaction, error) {
 	calldata := buildPlaceholderCalldata(target.Summary.Hash, target.Summary.Gas, encoded)
 	placeholderRaw, placeholderSummary, err := signMockPlaceholderTx(index, calldata, target.Summary.EffectiveFeePerGasWei)
 	if err != nil {

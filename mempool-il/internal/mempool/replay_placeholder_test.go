@@ -62,6 +62,40 @@ func TestReplayPlaceholderSourceEncryptsCorpusTargets(t *testing.T) {
 	}
 }
 
+func TestReplayPlaceholderSplitEncryptionBoundary(t *testing.T) {
+	dir := t.TempDir()
+	cluster, clusterPath, _, rawTarget := writeReplayFixture(t, dir)
+	clusterConfig, err := readReplayCluster(clusterPath)
+	if err != nil {
+		t.Fatalf("read replay cluster: %v", err)
+	}
+	encryptor, err := newReplayEncryptor(clusterConfig)
+	if err != nil {
+		t.Fatalf("new replay encryptor: %v", err)
+	}
+	target, err := parseTargetRawTx("0x" + hex.EncodeToString(rawTarget))
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+
+	encoded, err := encryptReplayTarget(target, 3, 7, clusterConfig, encryptor)
+	if err != nil {
+		t.Fatalf("encrypt replay target: %v", err)
+	}
+	item, err := buildMockPlaceholderFromCiphertext(target, 3, encoded)
+	if err != nil {
+		t.Fatalf("build placeholder from ciphertext: %v", err)
+	}
+
+	plaintext := decryptReplayPayload(t, cluster, item.EncryptedPayloadHex)
+	if string(plaintext) != string(rawTarget) {
+		t.Fatalf("decrypted target mismatch")
+	}
+	if got := strings.TrimPrefix(item.EncryptedPayloadHex, "0x"); got != hex.EncodeToString(encoded) {
+		t.Fatalf("placeholder payload does not match encrypted boundary")
+	}
+}
+
 func writeReplayFixture(t *testing.T, dir string) (*be.ClusterBTE, string, string, []byte) {
 	t.Helper()
 	suite := curves.NewSuite(kilic.NewBLS12381Suite())

@@ -388,4 +388,3 @@ Commit only the status binding:
 git add docs/STATUS.md
 git commit -m "docs: bind balanced client evidence artifact"
 ```
-

@@ -161,8 +161,10 @@ def resource_evidence_summary(
             "first_timestamp": min(str(row["first_timestamp"]) for row in values),
             "last_timestamp": max(str(row["last_timestamp"]) for row in values),
             "cpu_usage_delta_us": sum(int(row["cpu_usage_delta_us"]) for row in values),
-            "memory_current_max_bytes": max(int(row["memory_current_max_bytes"]) for row in values),
-            "memory_peak_bytes": max(int(row["memory_peak_bytes"]) for row in values),
+            # This is the sum of independently observed per-node maxima, not a
+            # synchronized cluster-memory reading.
+            "memory_current_max_bytes": sum(int(row["memory_current_max_bytes"]) for row in values),
+            "memory_peak_bytes": sum(int(row["memory_peak_bytes"]) for row in values),
             "network_receive_delta_bytes": sum(int(row["network_receive_delta_bytes"]) for row in values),
             "network_transmit_delta_bytes": sum(int(row["network_transmit_delta_bytes"]) for row in values),
         })

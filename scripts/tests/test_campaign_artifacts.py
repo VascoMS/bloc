@@ -1,6 +1,7 @@
 import csv
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -212,6 +213,8 @@ class CampaignArtifactsTest(unittest.TestCase):
         self.assertEqual(node_zero["network_receive_delta_bytes"], 1200)
         cluster = next(row for row in summary if row["scope"] == "cluster")
         self.assertEqual(cluster["cpu_usage_delta_us"], 480)
+        self.assertEqual(cluster["memory_current_max_bytes"], 40)
+        self.assertEqual(cluster["memory_peak_bytes"], 50)
         self.assertEqual(cluster["network_transmit_delta_bytes"], 4800)
 
     def test_resource_evidence_rejects_missing_sample_indexes(self):
@@ -292,11 +295,24 @@ class CampaignArtifactsTest(unittest.TestCase):
         self.assertIn('sleep "$remaining_seconds"', sampler)
         self.assertIn("next_deadline_ns", sampler)
         self.assertIn('timeout "$docker_timeout_seconds" docker', sampler)
+        self.assertIn('sampler_iteration_max_seconds=$((docker_timeout_seconds * 4))', sampler)
         self.assertIn("fallback_peak_bytes", sampler)
         for name in ("run-a1-pilot.sh", "run-m3-three-region.sh"):
             text = (ROOT / "deploy/ec2" / name).read_text(encoding="utf-8")
             self.assertIn(".sampler.pid", text)
             self.assertIn("kill -0", text)
+
+    def test_runners_gate_live_sampler_and_wait_for_minimum_rows_before_stop(self):
+        for name in ("run-a1-pilot.sh", "run-m3-three-region.sh"):
+            text = (ROOT / "deploy/ec2" / name).read_text(encoding="utf-8")
+            self.assertIn("wc -l", text)
+            self.assertIn("minimum_resource_rows", text)
+            self.assertIn("sampler_iteration_max_seconds=8", text)
+            self.assertIn("sampler_stop_timeout_seconds=10", text)
+            iteration = int(re.search(r"sampler_iteration_max_seconds=(\d+)", text).group(1))
+            stop_window = int(re.search(r"sampler_stop_timeout_seconds=(\d+)", text).group(1))
+            self.assertGreater(stop_window, iteration)
+            self.assertIn("kill -0 \\$(cat '$pid_file') || exit 1; touch '$stop_file'", text)
 
 
 if __name__ == "__main__":

@@ -220,6 +220,7 @@ run_phase() (
   run_resource_phase() {
     # Keep sampler overhead out of the primary latency/p99 phase.
     local batch node id public region scenario remote_csv stop_file pid_file resource_dir next_resource_slot=100000
+    local minimum_resource_rows=4 sampler_iteration_max_seconds=8 sampler_stop_timeout_seconds=10
     local parts=() summary_args=(resource-summary --input "$phase_root/resource_timeseries.csv" --output "$phase_root/resource-summary.csv")
     mkdir -p "$phase_root/resource-parts"
     for id in $(jq -r '.nodes|sort_by(.id)[]|.id' "$inventory"); do summary_args+=(--expected-node "$id"); done
@@ -234,7 +235,7 @@ run_phase() (
       ssh -n -i "$controller_key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$controller_public" "sudo mkdir -p '$remote_dir'; sudo chown -R 10001:10001 /opt/bloc/ec2/results; cd /opt/bloc/ec2; docker run --rm -v /opt/bloc/ec2:/work -w /work '$runtime_image' eval-remote --config remote-eval.ec2.json --experiment-id '$phase_id-resource-$scenario' --first-slot '$next_resource_slot' --batch-size '$batch' --warmups 0 --repetitions '$repetitions' --out-dir 'results/$phase_id/resource-$scenario' --image-tag '$runtime_image' --git-commit '$git_commit' --timeout '$eval_timeout'"
       while IFS= read -r node; do
         id="$(jq -r .id <<<"$node")"; public="$(jq -r .public_ip <<<"$node")"; remote_csv="/opt/bloc/ec2/resources/$scenario.csv"; stop_file="/opt/bloc/ec2/resources/$scenario.stop"; pid_file="/opt/bloc/ec2/resources/$scenario.sampler.pid"
-        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "test -s '$pid_file'; kill -0 \$(cat '$pid_file'); touch '$stop_file'; for i in 1 2 3 4 5 6 7 8; do if ! kill -0 \$(cat '$pid_file') 2>/dev/null; then test -s '$remote_csv'; exit 0; fi; sleep 0.25; done; exit 1"
+        ssh -n -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public" "set -e; test -s '$pid_file' || exit 1; kill -0 \$(cat '$pid_file') || exit 1; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do test -s '$pid_file' || exit 1; kill -0 \$(cat '$pid_file') || exit 1; data_rows=\$(( \$(wc -l < '$remote_csv') - 1 )); [ \"\$data_rows\" -ge '$minimum_resource_rows' ] && break; sleep 0.25; done; data_rows=\$(( \$(wc -l < '$remote_csv') - 1 )); [ \"\$data_rows\" -ge '$minimum_resource_rows' ] || { echo 'resource sampler did not produce four data rows within ${sampler_stop_timeout_seconds}s (iteration bound ${sampler_iteration_max_seconds}s)' >&2; exit 1; }; test -s '$pid_file' || exit 1; kill -0 \$(cat '$pid_file') || exit 1; touch '$stop_file'; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do if ! kill -0 \$(cat '$pid_file') 2>/dev/null; then test -s '$remote_csv'; exit 0; fi; sleep 0.25; done; exit 1"
         scp -i "$(key_for "$node")" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$public:$remote_csv" "$resource_dir/node-$id.csv"; parts+=("$resource_dir/node-$id.csv")
       done < <(jq -c '.nodes|sort_by(.id)[]' "$inventory")
       next_resource_slot=$((next_resource_slot + repetitions))

@@ -205,8 +205,14 @@ the sampler records neither credentials nor process configuration. The raw
 `resource_timeseries.csv` retains timestamp, sample index, node/region,
 scenario/phase, CPU microseconds, memory current/peak, network receive/transmit
 bytes, restart count, and OOM state. `resource-summary.csv` reports per-node
-configuration and cluster totals. Host/container network counters are separate
-from `bloc_protocol_message_bytes_total` protocol-message metrics.
+configuration and cluster totals. Cluster memory fields are sums of per-node
+maxima/peaks, not temporally synchronized cluster readings. A sampler must stay
+live and write at least four data rows before its stop file is created; a single
+sampling iteration permits at most four two-second Docker calls, while the
+runner allows a bounded ten-second shutdown window. Host/container network
+counters are separate from `bloc_protocol_message_bytes_total` protocol-message
+metrics. Historical M3 `resource-samples.csv` artifacts retain only the coarse
+running/restart/OOM stability gate and intentionally produce no host summary.
 
 ## EC2 Merge + Plan Attribution
 

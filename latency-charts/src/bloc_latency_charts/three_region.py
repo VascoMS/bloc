@@ -28,6 +28,14 @@ REGION_PAIR_LABELS = {
     frozenset(("us-east-1", "eu-central-1")): "US–Frankfurt",
     frozenset(("eu-west-1", "eu-central-1")): "Ireland–Frankfurt",
 }
+RESOURCE_TIMESERIES_COLUMNS = {
+    "timestamp", "sample_index", "node", "region", "scenario", "phase", "cpu_usage_us",
+    "memory_current_bytes", "memory_peak_bytes", "network_receive_bytes", "network_transmit_bytes",
+    "restart_count", "oom_killed",
+}
+RESOURCE_MINIMUM_SAMPLES = 4
+RESOURCE_SAMPLE_INTERVAL_SECONDS = .25
+RESOURCE_SAMPLE_INTERVAL_TOLERANCE_SECONDS = .10
 
 
 def _nonempty(value: object) -> list[object]:
@@ -51,7 +59,57 @@ def _targets_up(path: Path, nodes: int) -> None:
         raise ValueError(f"Prometheus targets are not {nodes}/{nodes} up in {path}")
 
 
-def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _validate_legacy_resources(root: Path) -> None:
+    """Validate the pre-timeseries M3 resource-stability gate.
+
+    Historical accepted M3 evidence recorded only running/restart/OOM state.
+    It deliberately cannot support a host-counter summary.
+    """
+    path = root / "resource-samples.csv"
+    if not path.exists():
+        raise ValueError(f"{root}: missing resource evidence")
+    resources = pd.read_csv(path)
+    required = {"container_status", "restart_count", "oom_killed"}
+    if resources.empty or not required.issubset(resources.columns):
+        raise ValueError(f"{root}: invalid historical resource-stability evidence")
+    if (not resources["container_status"].astype(str).str.lower().eq("running").all()
+            or resources["restart_count"].astype(int).ne(0).any()
+            or resources["oom_killed"].astype(str).str.lower().eq("true").any()):
+        raise ValueError(f"{root}: restarted, OOM-killed, or stopped operator detected")
+
+
+def _validate_timeseries_resources(root: Path, manifest: dict, nodes: int) -> None:
+    resources = pd.read_csv(root / "resource_timeseries.csv")
+    if set(resources.columns) != RESOURCE_TIMESERIES_COLUMNS or not resources["phase"].eq("resource-measured").all():
+        raise ValueError(f"{root}: invalid resource phase evidence")
+    if (not resources["node"].astype(int).isin(range(nodes)).all()
+            or resources["restart_count"].astype(int).ne(0).any()
+            or resources["oom_killed"].astype(str).str.lower().eq("true").any()):
+        raise ValueError(f"{root}: restarted or OOM-killed operator detected")
+    expected_configurations = {(f"n{nodes}-b{int(batch)}", "resource-measured") for batch in manifest["batch_sizes"]}
+    groups = {(scenario, phase, int(node)) for scenario, phase, node in resources.groupby(["scenario", "phase", "node"]).groups}
+    expected_groups = {(scenario, phase, node) for scenario, phase in expected_configurations for node in range(nodes)}
+    if groups != expected_groups:
+        raise ValueError(f"{root}: incomplete resource configuration/node coverage")
+    for (_, _, node), samples in resources.groupby(["scenario", "phase", "node"]):
+        ordered = samples.sort_values("sample_index")
+        indexes = ordered["sample_index"].astype(int).tolist()
+        if len(indexes) < RESOURCE_MINIMUM_SAMPLES or indexes != list(range(len(indexes))):
+            raise ValueError(f"{root}: resource samples are incomplete for node {node}")
+        timestamps = [datetime.fromisoformat(value.replace("Z", "+00:00")) for value in ordered["timestamp"]]
+        if any(abs((current - previous).total_seconds() - RESOURCE_SAMPLE_INTERVAL_SECONDS) > RESOURCE_SAMPLE_INTERVAL_TOLERANCE_SECONDS for previous, current in zip(timestamps, timestamps[1:])):
+            raise ValueError(f"{root}: resource samples are off-cadence for node {node}")
+        current = ordered["memory_current_bytes"].astype(int).tolist()
+        peak = ordered["memory_peak_bytes"].astype(int).tolist()
+        if any(item_peak < item_current for item_current, item_peak in zip(current, peak)) or any(item < previous for previous, item in zip(peak, peak[1:])):
+            raise ValueError(f"{root}: resource memory peak is invalid for node {node}")
+        for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
+            values = ordered[counter].astype(int).tolist()
+            if any(current < previous for previous, current in zip(values, values[1:])):
+                raise ValueError(f"{root}: resource counter reset")
+
+
+def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     nodes, repetitions = int(manifest["node_count"]), int(manifest["repetitions"])
     regions = [manifest["primary_region"], manifest["secondary_region"], manifest["tertiary_region"]]
     if manifest.get("schema_version") != "bloc-ec2-three-region-phase/v1" or manifest.get("status") != "complete":
@@ -122,38 +180,19 @@ def _validate_phase(root: Path, manifest: dict) -> tuple[pd.DataFrame, pd.DataFr
             raise ValueError(f"{root / name}: incomplete pairwise matrix")
         if not network["attempts"].eq(5).all() or not network["successes"].eq(5).all():
             raise ValueError(f"{root / name}: not all five pairwise health attempts succeeded")
-    resources = pd.read_csv(root / "resource_timeseries.csv")
-    required_resource_columns = {
-        "timestamp", "sample_index", "node", "region", "scenario", "phase", "cpu_usage_us",
-        "memory_current_bytes", "memory_peak_bytes", "network_receive_bytes", "network_transmit_bytes",
-        "restart_count", "oom_killed",
-    }
-    if set(resources.columns) != required_resource_columns or not resources["phase"].eq("resource-measured").all():
-        raise ValueError(f"{root}: invalid resource phase evidence")
-    if not resources["node"].astype(int).isin(range(nodes)).all() or resources["restart_count"].ne(0).any() or resources["oom_killed"].astype(str).str.lower().eq("true").any():
-        raise ValueError(f"{root}: restarted or OOM-killed operator detected")
-    for (_, _, node), samples in resources.groupby(["scenario", "phase", "node"]):
-        indexes = sorted(samples["sample_index"].astype(int))
-        if len(indexes) < 4 or indexes != list(range(len(indexes))):
-            raise ValueError(f"{root}: resource samples are incomplete for node {node}")
-        timestamps = [datetime.fromisoformat(value.replace("Z", "+00:00")) for value in samples.sort_values("sample_index")["timestamp"]]
-        if any(abs((current - previous).total_seconds() - .25) > .10 for previous, current in zip(timestamps, timestamps[1:])):
-            raise ValueError(f"{root}: resource samples are off-cadence for node {node}")
-        current = samples["memory_current_bytes"].astype(int).tolist()
-        peak = samples["memory_peak_bytes"].astype(int).tolist()
-        if any(item_peak < item_current for item_current, item_peak in zip(current, peak)) or any(item < previous for previous, item in zip(peak, peak[1:])):
-            raise ValueError(f"{root}: resource memory peak is invalid for node {node}")
-        for counter in ("cpu_usage_us", "network_receive_bytes", "network_transmit_bytes"):
-            values = samples.sort_values("sample_index")[counter].astype(int).tolist()
-            if any(current < previous for previous, current in zip(values, values[1:])):
-                raise ValueError(f"{root}: resource counter reset")
+    if (root / "resource_timeseries.csv").exists():
+        _validate_timeseries_resources(root, manifest, nodes)
+        resource_schema = "timeseries-v1"
+    else:
+        _validate_legacy_resources(root)
+        resource_schema = "legacy-coarse"
     cleanup = json.loads((root / "cleanup-verification.json").read_text(encoding="utf-8-sig"))
     if _nonempty(cleanup):
         raise ValueError(f"{root}: teardown verification contains residual resources")
     errors = root / "cleanup-verification-errors.log"
     if errors.exists() and errors.stat().st_size:
         raise ValueError(f"{root}: teardown verification contains API errors")
-    return runs, node_rows
+    return runs, node_rows, resource_schema
 
 
 def validate_campaign_artifacts(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -162,14 +201,15 @@ def validate_campaign_artifacts(root: Path) -> tuple[pd.DataFrame, pd.DataFrame,
         raise ValueError("campaign manifest is not complete three-region evidence")
     if campaign.get("topology") != "T2-three-region":
         raise ValueError("campaign topology is invalid")
-    runs, nodes, digests = [], [], set()
+    runs, nodes, digests, resource_schemas = [], [], set(), set()
     for node_count in campaign["node_counts"]:
         phase_root = root / f"n{int(node_count)}"
         phase_manifest = json.loads((phase_root / "manifest.json").read_text(encoding="utf-8-sig"))
-        phase_runs, phase_nodes = _validate_phase(phase_root, phase_manifest)
+        phase_runs, phase_nodes, resource_schema = _validate_phase(phase_root, phase_manifest)
         runs.append(phase_runs)
         nodes.append(phase_nodes)
         digests.add(phase_manifest["docker_image_digest"])
+        resource_schemas.add(resource_schema)
     all_runs, all_nodes = pd.concat(runs, ignore_index=True), pd.concat(nodes, ignore_index=True)
     expected_runs = len(campaign["batch_sizes"]) * int(campaign["repetitions"]) * len(campaign["node_counts"])
     expected_nodes = len(campaign["batch_sizes"]) * int(campaign["repetitions"]) * sum(int(n) for n in campaign["node_counts"])
@@ -177,6 +217,8 @@ def validate_campaign_artifacts(root: Path) -> tuple[pd.DataFrame, pd.DataFrame,
         raise ValueError(f"campaign totals are {len(all_runs)} runs/{len(all_nodes)} node rows; expected {expected_runs}/{expected_nodes}")
     if len(digests) != 1 or campaign.get("docker_image_digest") not in digests:
         raise ValueError("campaign phases did not use one image digest")
+    campaign = dict(campaign)
+    campaign["resource_evidence_schema"] = "timeseries-v1" if resource_schemas == {"timeseries-v1"} else "legacy-coarse"
     return all_runs, all_nodes, campaign
 
 
@@ -264,7 +306,7 @@ def _resource_summary(root: Path, node_counts: list[int]) -> pd.DataFrame:
     nodes_frame = pd.DataFrame(rows)
     cluster = (nodes_frame.groupby(["nodes", "scenario", "phase"], as_index=False)
                .agg(samples=("samples", "sum"), cpu_usage_delta_us=("cpu_usage_delta_us", "sum"),
-                    memory_current_max_bytes=("memory_current_max_bytes", "max"), memory_peak_bytes=("memory_peak_bytes", "max"),
+                    memory_current_max_bytes=("memory_current_max_bytes", "sum"), memory_peak_bytes=("memory_peak_bytes", "sum"),
                     network_receive_delta_bytes=("network_receive_delta_bytes", "sum"), network_transmit_delta_bytes=("network_transmit_delta_bytes", "sum")))
     cluster.insert(0, "scope", "cluster"); cluster.insert(2, "node", "all"); cluster.insert(3, "region", "cluster")
     return pd.concat([nodes_frame, cluster[nodes_frame.columns]], ignore_index=True)
@@ -278,17 +320,18 @@ def analyze_three_region(result_dir: str | Path, output_dir: str | Path | None =
     latency, stages = _protocol_summary(runs), _stage_summary(runs)
     network = _network_summary(root, [int(value) for value in campaign["node_counts"]])
     critical = _critical_region_summary(runs)
-    resources = _resource_summary(root, [int(value) for value in campaign["node_counts"]])
     latency.to_csv(output / "three-region-latency-summary.csv", index=False)
     stages.to_csv(output / "four-stage-summary.csv", index=False)
     network.to_csv(output / "pairwise-network-summary.csv", index=False)
     critical.to_csv(output / "critical-node-region-summary.csv", index=False)
-    resources.to_csv(output / "host-resource-summary.csv", index=False)
+    if campaign["resource_evidence_schema"] == "timeseries-v1":
+        resources = _resource_summary(root, [int(value) for value in campaign["node_counts"]])
+        resources.to_csv(output / "host-resource-summary.csv", index=False)
     _set_style()
     _plot_latency(latency, experiment_id, output)
     _plot_stages(runs, experiment_id, output)
     _plot_network(network, experiment_id, output)
-    _write_report(experiment_id, runs, latency, network, critical, output)
+    _write_report(experiment_id, runs, latency, network, critical, campaign["resource_evidence_schema"], output)
     return output
 
 
@@ -329,7 +372,7 @@ def _plot_network(summary: pd.DataFrame, experiment_id: str, output: Path) -> No
 
 
 def _write_report(experiment_id: str, runs: pd.DataFrame, latency: pd.DataFrame, network: pd.DataFrame,
-                  critical: pd.DataFrame, output: Path) -> None:
+                  critical: pd.DataFrame, resource_schema: str, output: Path) -> None:
     lines = [f"# Three-Region Latency Report: {experiment_id}", "",
              "Standalone current-build evidence; all observations are retained.", "",
              f"Measured slots: {len(runs)}.", "", "## Protocol latency", "",
@@ -345,6 +388,12 @@ def _write_report(experiment_id: str, runs: pd.DataFrame, latency: pd.DataFrame,
               "| Nodes | Batch | Critical region | Samples | p50 (ms) | p95 (ms) |", "|---:|---:|---|---:|---:|---:|"]
     for row in critical.itertuples(index=False):
         lines.append(f"| {int(row.nodes)} | {int(row.batch_size)} | {row.critical_node_region} | {int(row.count)} | {row.p50_us/1000:.3f} | {row.p95_us/1000:.3f} |")
+    if resource_schema == "timeseries-v1":
+        lines += ["", "## Host resources", "",
+                  "Host resource summary uses per-node maxima summed per configuration; it is not a temporally synchronized cluster reading."]
+    else:
+        lines += ["", "## Host resources", "",
+                  "This historical artifact retains only coarse historical resource-stability (running/restart/OOM) samples; no host-resource summary is emitted."]
     lines += ["", "Four-stage attribution uses Proposal, ACS, Merge + Plan, and Decryption + Materialization; every retained row passed the 20 µs additivity gate.", ""]
     (output / "REPORT.md").write_text("\n".join(lines), encoding="utf-8")
 

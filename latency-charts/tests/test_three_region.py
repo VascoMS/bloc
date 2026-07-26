@@ -9,7 +9,7 @@ import pytest
 from bloc_latency_charts.three_region import analyze_three_region, prepare_three_region_runs
 
 
-def write_fixture(root: Path, *, bad_total: bool = False) -> None:
+def write_fixture(root: Path, *, bad_total: bool = False, legacy_resources: bool = False) -> None:
     phase = root / "n4"
     phase.mkdir()
     regions = ["us-east-1", "eu-west-1", "eu-central-1"]
@@ -80,7 +80,12 @@ def write_fixture(root: Path, *, bad_total: bool = False) -> None:
                 "network_receive_bytes": 1000 + index, "network_transmit_bytes": 2000 + index,
                 "restart_count": 0, "oom_killed": False,
             })
-    pd.DataFrame(resources).to_csv(phase / "resource_timeseries.csv", index=False)
+    if legacy_resources:
+        pd.DataFrame([{"container_status": "running", "restart_count": 0, "oom_killed": False}]).to_csv(
+            phase / "resource-samples.csv", index=False
+        )
+    else:
+        pd.DataFrame(resources).to_csv(phase / "resource_timeseries.csv", index=False)
     (phase / "cleanup-verification.json").write_text("{}", encoding="utf-8")
 
 
@@ -98,6 +103,25 @@ def test_three_region_analysis_outputs_required_summaries(tmp_path: Path) -> Non
     assert "Critical-node region attribution" in (output / "REPORT.md").read_text(encoding="utf-8")
     resources = pd.read_csv(output / "host-resource-summary.csv")
     assert set(resources["scope"]) == {"node", "cluster"}
+    cluster = resources[resources["scope"] == "cluster"].iloc[0]
+    assert cluster.memory_current_max_bytes == 40
+    assert cluster.memory_peak_bytes == 48
+
+
+def test_three_region_analysis_preserves_legacy_coarse_resource_evidence(tmp_path: Path) -> None:
+    write_fixture(tmp_path, legacy_resources=True)
+    output = analyze_three_region(tmp_path)
+    assert not (output / "host-resource-summary.csv").exists()
+    assert "coarse historical resource-stability" in (output / "REPORT.md").read_text(encoding="utf-8")
+
+
+def test_three_region_analysis_rejects_missing_resource_configuration_or_node(tmp_path: Path) -> None:
+    write_fixture(tmp_path)
+    resources = pd.read_csv(tmp_path / "n4" / "resource_timeseries.csv")
+    resources = resources[resources["node"] != 3]
+    resources.to_csv(tmp_path / "n4" / "resource_timeseries.csv", index=False)
+    with pytest.raises(ValueError, match="incomplete resource"):
+        prepare_three_region_runs(tmp_path)
 
 
 def test_three_region_analysis_rejects_non_additive_stages(tmp_path: Path) -> None:

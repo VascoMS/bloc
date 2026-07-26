@@ -21,8 +21,11 @@ Resource evidence is collected only in dedicated `resource-measured` phases,
 never while primary latency/p99 observations run. Acceptance requires 250 ms
 host-local raw samples for every node/configuration, contiguous sample indexes,
 monotonic CPU/network counters, no restart/OOM signal, and separate per-node and
-cluster summaries. Container network bytes must not be presented as protocol
-message bytes.
+cluster summaries. Cluster memory fields are sums of per-node maxima/peaks, not
+temporally synchronized readings. Container network bytes must not be presented
+as protocol message bytes. Accepted historical M3 `resource-samples.csv`
+artifacts retain their original running/restart/OOM stability gate but are coarse
+evidence and must not yield a host-resource summary.
 
 ## Validation Matrix
 

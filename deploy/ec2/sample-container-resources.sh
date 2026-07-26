@@ -8,6 +8,13 @@ RESOURCE_TIMESERIES_HEADER='timestamp,sample_index,node,region,scenario,phase,cp
 interval_ms=250
 max_samples=14400
 docker_timeout_seconds=2
+# A sample makes at most four sequential Docker calls: state, a cgroup PID
+# lookup, then fallback PID/stats when cgroup lookup fails. The Docker-bound
+# portion of one iteration is therefore <= 8s.
+# Runners wait longer than this bounded interval before declaring shutdown
+# failure; a missed 250 ms deadline is intentionally skipped rather than
+# adding sampler work to a latency-measurement phase.
+sampler_iteration_max_seconds=$((docker_timeout_seconds * 4))
 fallback_peak_bytes=0
 container=''
 output=''

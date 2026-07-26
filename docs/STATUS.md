@@ -21,9 +21,9 @@ operator-local secrets, durable bounded terminal slot failures, node-owned
 bounded mempool HTTP requests, non-contaminating host resource sampling and
 validation, p99-capable Type-7/order-statistic reporting, balanced seeded
 long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
-100-transaction representative client corpus with balanced plaintext/encrypted
-overhead sampling, Prometheus metrics, local evaluators, and VM/EC2 remote
-evaluation.
+500-transaction balanced client corpus with one plaintext/encrypted measurement
+per target, a separate 100-transaction representative full-protocol workload,
+Prometheus metrics, local evaluators, and VM/EC2 remote evaluation.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -57,12 +57,15 @@ same-region-versus-cross-region evidence.
 
 Issue #13 produced the local client-overhead artifact
 `results/issue-13-client-overhead/client_overhead.csv` from source
-`71c3584328bffd55bd2886bc7098839110d5fe1a`. It contains 500 raw measurements,
-100 per transfer/128/256/1,024/4,096-byte class, and has SHA-256
-`e9b6e77c28328f640e0e8fc98c53036207c26911f58c21b5a65a7493b9bc9d2e`.
+`62433f5b62586d2a1dd66a04ff825db20fda5e63`. It contains 500 raw
+measurements from 500 distinct signed targets, exactly 100 per
+transfer/128/256/1,024/4,096-byte class, and has SHA-256
+`d5a174e6f65fe05d9be368f918ec63a77a48c107a4433180f11c881e8da6aebc`.
 It supports scoped client preparation-latency, byte-expansion, and
 gas-equivalent carrier estimates; it is not network latency, paid gas, or a
-longitudinal Ethereum workload claim.
+weighted or longitudinal Ethereum workload claim. The separate
+`28/50/12/8/2` transaction-size mix belongs to full-protocol workload
+construction.
 
 ## Open Blockers And Risks
 

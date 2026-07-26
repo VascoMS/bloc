@@ -2,22 +2,48 @@
 
 ## Objective
 
-Issue #13 adds a deterministic, representative Ethereum transaction corpus and
-a local benchmark that compares plaintext submission preparation with encrypted
+Issue #13 adds a deterministic, balanced Ethereum client-overhead corpus and a
+local benchmark that compares plaintext submission preparation with encrypted
 placeholder construction. The result is raw `client_overhead.csv` evidence for
-the thesis, with at least 100 measurements per transaction class.
+the thesis, with exactly 100 measurements per transaction class.
 
 The implementation remains local. It does not query mainnet, submit
 transactions, or commit live-chain key material.
 
-## Corpus Contract
+The client benchmark and the full-protocol mock-placeholder workload use
+separate committed corpora. Payload size is the independent variable in the
+client experiment, while the observed Ethereum transaction-size distribution
+belongs only to the full-protocol workload.
 
-The committed corpus contains exactly 100 valid EIP-1559 transactions signed for
-chain ID 1337. Each JSONL record contains a class label and `raw_tx`. Validation
-derives the class again from the decoded transaction rather than trusting the
-label.
+## Client Corpus Contract
+
+The committed `client-overhead-targets.jsonl` corpus contains exactly 500 valid
+EIP-1559 transactions signed for chain ID 1337. Each JSONL record contains a
+class label and `raw_tx`. Validation derives the class again from the decoded
+transaction rather than trusting the label.
 
 | Class | Exact calldata bytes | Corpus rows |
+|---|---:|---:|
+| `transfer` | 0 | 100 |
+| `calldata_128` | 128 | 100 |
+| `calldata_256` | 256 | 100 |
+| `calldata_1024` | 1,024 | 100 |
+| `calldata_4096` | 4,096 | 100 |
+
+All hashes are unique. Transactions use fixed development-only key derivation,
+deterministic payloads, and distinct nonces. The repository commits signed raw
+transactions, not live-chain secrets.
+
+Every client report row measures a different signed target transaction. The
+client report does not weight, pool, or reduce class results into a synthetic
+"typical client" statistic.
+
+## Full-Protocol Workload Contract
+
+The existing `mock-targets.jsonl` remains a separate 100-transaction
+mock-placeholder workload for full-path ACS and BTE evaluation:
+
+| Class | Exact calldata bytes | Protocol workload rows |
 |---|---:|---:|
 | `transfer` | 0 | 28 |
 | `calldata_128` | 128 | 50 |
@@ -25,15 +51,16 @@ label.
 | `calldata_1024` | 1,024 | 8 |
 | `calldata_4096` | 4,096 | 2 |
 
-All hashes are unique. Transactions use fixed development-only key derivation,
-deterministic payloads, and distinct nonces. The repository commits signed raw
-transactions, not live-chain secrets.
+The mock-placeholder Compose path continues to read this workload. The client
+report does not read it. Larger final protocol batches require their own
+documented unique-transaction construction policy and are outside this issue
+amendment.
 
-## Workload-Share Rationale
+## Full-Protocol Workload-Share Rationale
 
-The corpus weights approximate transaction frequency in a recent mainnet
-sample. They are not presented as a universal or longitudinal Ethereum
-distribution.
+The protocol-workload weights approximate transaction frequency in a recent
+mainnet sample. They are not presented as a universal or longitudinal Ethereum
+distribution and do not influence the number of client measurements.
 
 The sample was collected at `2026-07-26T15:01:55Z` from the public
 `ethereum-rpc.publicnode.com` endpoint through Ethereum JSON-RPC
@@ -76,14 +103,16 @@ The fixed issue classes approximate these ranges as follows:
 - 1,024–4,095 bytes maps to the 1,024-byte representative; and
 - 4,096 bytes and above maps to the 4,096-byte representative.
 
-Rounding the resulting transaction shares to a 100-row corpus produces
-`28/50/12/8/2`. The byte-share figures do not determine row counts; they justify
-retaining the rare large-payload classes because those classes account for most
-sampled calldata bytes.
+Rounding the resulting transaction shares to the 100-row full-protocol workload
+produces `28/50/12/8/2`. The byte-share figures do not determine client-corpus
+row counts. They justify retaining the rare large-payload classes in the
+protocol workload because those classes account for most sampled calldata
+bytes.
 
 The canonical mempool README and validation guide will preserve this
-methodology, table, mapping, date, and sample caveat. No mainnet sampling command
-will be added to the repository.
+methodology under the full-protocol workload, along with the table, mapping,
+date, and sample caveat. No mainnet sampling command will be added to the
+repository.
 
 Method references:
 
@@ -97,16 +126,16 @@ Method references:
 `mempool-il/cmd/corpus-report` is a thin local command over focused report and
 corpus-validation functions in `mempool-il/internal/mempool`.
 
-The command accepts a corpus path, cluster configuration, output path, slot, and
-samples-per-class value. It defaults to at least 100 samples per class and writes
-generated output under an ignored `results/` directory.
+The command accepts the balanced client-corpus path, cluster configuration,
+output path, slot, and samples-per-class value. The evidence command requires
+exactly 100 samples per class and writes generated output under an ignored
+`results/` directory.
 
 The report path:
 
 1. Loads and fully validates the corpus before opening the output.
 2. Groups targets by their derived class.
-3. Cycles deterministically through each class until it has the requested
-   measurement count.
+3. Selects each of the 100 distinct targets in every class exactly once.
 4. Times plaintext submission serialization for the signed raw target.
 5. Times BTE encryption of those same signed target bytes.
 6. Builds and signs the existing mock placeholder from the ciphertext.
@@ -115,7 +144,7 @@ The report path:
 
 Encryption remains randomized, so ciphertext contents and timings are not
 expected to be byte-for-byte reproducible. Corpus membership, row ordering,
-schema, class counts, and size calculations are deterministic.
+schema, class counts, target hashes, and size calculations are deterministic.
 
 ## Measurement Definitions
 
@@ -156,26 +185,29 @@ different chain configuration.
 
 ## Error Handling
 
-Corpus validation fails before measurement when a row has invalid JSON or hex,
-cannot decode as a signed Ethereum transaction, has the wrong chain ID, has no
-recoverable sender, duplicates another transaction hash, has an unknown or
-mismatched class, violates the exact class distribution, or violates its exact
-calldata length.
+Client-corpus validation fails before measurement when a row has invalid JSON
+or hex, cannot decode as a signed Ethereum transaction, has the wrong chain ID,
+has no recoverable sender, duplicates another transaction hash, has an unknown
+or mismatched class, violates the exact balanced class contract, or violates
+its exact calldata length.
 
 The report also fails on invalid cluster configuration, encryption or
 placeholder construction errors, an output path that cannot be created, or a
-samples-per-class value below 100. It must not silently emit a partial artifact.
+samples-per-class value other than 100. It must not silently emit a partial
+artifact.
 
 ## Test Strategy
 
-Test-driven implementation begins with failing tests for:
+The amended implementation begins with failing tests for:
 
-- exactly 100 committed corpus rows;
-- the `28/50/12/8/2` class distribution;
+- exactly 500 committed client-corpus rows;
+- exactly 100 distinct client targets per class;
+- preservation of the separate `28/50/12/8/2` protocol workload;
 - exact class calldata lengths;
 - valid signatures, recoverable senders, chain ID 1337, and unique hashes;
 - report header and row schema;
-- at least 100 rows per class;
+- exactly 100 measurements per class;
+- one measurement per distinct client target;
 - stable class and sample ordering;
 - byte-count definitions;
 - plaintext submission serialization;
@@ -196,6 +228,7 @@ cd bloc-node && go test ./...
 
 The implementation updates:
 
+- `deploy/docker-compose/corpus/client-overhead-targets.jsonl`;
 - `mempool-il/README.md`;
 - `docs/modules/mempool-il.md`;
 - `docs/VALIDATION.md`;
@@ -214,3 +247,5 @@ only after its acceptance criteria are satisfied.
 - No generated CSV is committed outside the repository's ignored results
   convention.
 - No paid-gas claim is made.
+- No weighted or pooled client-overhead statistic is generated.
+- No final batch-128 or batch-512 protocol-workload scheduler is added.

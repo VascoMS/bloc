@@ -4,6 +4,8 @@
 !bte/**
 !bloc-node/
 !bloc-node/**
+!mempool-il/
+!mempool-il/**
 !sbc/
 !sbc/**
 

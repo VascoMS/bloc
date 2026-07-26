@@ -24,6 +24,12 @@ services:
       - http://mempool-il:8080
       - --out
       - /config/cluster.json
+      - --secret-path-template
+      - /operator-secrets/{id}/operator.json
+      - --secret-uid
+      - "10001"
+      - --secret-gid
+      - "10001"
 
   bloc-node-0:
     depends_on:

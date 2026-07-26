@@ -15,6 +15,13 @@ for script in "${scripts[@]}"; do bash -n "$script"; done
 
 PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/bloc-runner-pycache" python3 -m unittest scripts.tests.test_campaign_artifacts
 
+grep -Fqx '!mempool-il/' .dockerignore || { echo "Docker build context excludes the mempool-il module" >&2; exit 1; }
+grep -Fqx '!mempool-il/**' .dockerignore || { echo "Docker build context excludes mempool-il source files" >&2; exit 1; }
+grep -Fq -- '--secret-path-template' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not generate operator secrets" >&2; exit 1; }
+grep -Fq -- '/operator-secrets/{id}/operator.json' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder secret path does not match mounted operator volumes" >&2; exit 1; }
+grep -Fq -- '--secret-uid' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not set the operator secret UID" >&2; exit 1; }
+grep -Fq -- '--secret-gid' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not set the operator secret GID" >&2; exit 1; }
+
 bash bloc-node/scripts/run-acs-safety-campaign.sh --validate-only
 grep -Fq '"sbc/hbbft/rbc.go":$r' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC implementation" >&2; exit 1; }
 grep -Fq '"sbc/hbbft/rbc_test.go":$rt' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC regression tests" >&2; exit 1; }

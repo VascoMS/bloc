@@ -86,7 +86,7 @@ campaign, even when their CSV columns remain compatible.
 | BTE library logic | `go test ./...` in `bte/btd-impl-main` | Run the full-path benchmark for performance/planning changes |
 | `sbc/hbbft` logic | `go test ./...` in `sbc/hbbft` | Run the ACS safety campaign for safety/liveness changes |
 | Latency charts | `python -m pytest` in `latency-charts` | Render from representative accepted-schema artifacts |
-| Cross-module protocol behavior | Affected module tests plus `bloc-node` smoke | Use `eval-suite` for a local baseline; collect new cloud evidence only when explicitly authorized |
+| Cross-module protocol behavior | Affected module tests plus `bloc-node` smoke | Use `eval-suite` for local preflight validation; collect new cloud evidence only when explicitly authorized |
 | Deployment artifacts | Runner portability/validation and Terraform validation | Use the relevant deployment runbook and acceptance contract |
 | Documentation only | Local link, ownership, command, and coherence review | No code tests unless documented commands or behavior changed |
 

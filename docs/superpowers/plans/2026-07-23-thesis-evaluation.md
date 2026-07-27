@@ -158,29 +158,29 @@
 - [ ] Build and inspect the immutable amd64 image and record digest, user, architecture, and entrypoint.
 - [ ] Update status with SHA, digest, validation root, resolved blockers, and M5 actions; commit `docs: freeze thesis evaluation release candidate`.
 
-### Task 9: Collect the final local p99 and scaling baseline
+### Task 9: Run the distributed-campaign contract preflight
 
-**GitHub issue:** [#8 Collect the final local p99 and scaling baseline](https://github.com/VascoMS/bloc/issues/8)
+**GitHub issue:** [#8 Run the distributed-campaign contract preflight](https://github.com/VascoMS/bloc/issues/8)
 
-**Files:** produce ignored `results/local/final-p99-<sha>/`; modify evaluator only if a preflight rejects its contract; update status/validation/changelog after acceptance.
+**Files:** produce ignored `results/local/distributed-preflight-2bc8efc/`; modify evaluator only if a preflight rejects its contract; update status/validation/changelog after acceptance.
 
-- [ ] Run a plan and one-observation smoke for every primary/extension configuration.
-- [ ] Run `n=4/7`, batches `8/32/128`, 10 warmups, 1,000 measurements, balanced blocks, and frozen source.
-- [ ] Pilot `n=10` and batch 512 independently with 30 observations, record the rule outcome, and run either 1,000 final or 100 boundary observations.
-- [ ] Validate counts, failure visibility, consistency, additivity, source identity, p99 eligibility, and chart reproduction; promote or reject without manual data repair.
+- [ ] Run `n=4/7`, batches `8/32/128`, with 1 warmup and 1 measured observation per cell.
+- [ ] Run `n=10`, batches `8/32/128`, plus batch `512` at `n=4/7/10`, with 1 warmup and 3 measured observations per unique extension cell.
+- [ ] Validate startup/teardown, counts, outcome retention, consistency, primary 12-second completion, additivity, provenance, schema completeness, and chart loading; retain `classification=validation-only` and `performance_claims_allowed=false` without manual repair.
+- [ ] Do not collect local resource evidence or report local p99, throughput, scaling, topology, or local-versus-VM performance claims.
 
-### Task 10: Collect matched same-region p99 and resource campaigns
+### Task 10: Collect the first M5 matched same-region p99 and resource campaigns
 
 **GitHub issue:** [#15 Collect matched same-region p99 and resource campaigns](https://github.com/VascoMS/bloc/issues/15)
 
 **Files:** operate through `deploy/ec2/run-m3-same-az.sh` and the EC2 runbook; produce ignored `results/ec2/final-same-region-<sha>/`; update canonical evidence docs after acceptance.
 
 - [ ] Run validation, quota, offering, maximum-cost, and exact Terraform-plan preflights before authorization.
-- [ ] Run the primary p99 matrix with the Task 8 source/image/corpus/configuration/seed and balanced schedule.
+- [ ] After successful Task 9 preflight, run the primary p99 matrix with the Task 9-accepted source/image/corpus/configuration/seed/schema contract and balanced schedule.
 - [ ] Run independent scale pilots/continuations and a separate high-frequency resource campaign.
 - [ ] Require authenticated empty teardown and complete artifact checks before promotion.
 
-### Task 11: Collect matched three-region p99 and resource campaigns
+### Task 11: Collect matched three-region p99 and resource campaigns after accepted Task 10 manifests
 
 **GitHub issue:** [#16 Collect matched three-region p99 and resource campaigns](https://github.com/VascoMS/bloc/issues/16)
 
@@ -189,7 +189,7 @@
 - [ ] Verify three-region quota/offering/plan preflights, especially `n=10`; unavailable quota documents an uncollected extension without changing the primary matrix.
 - [ ] Run primary p99, extension pilots/continuations, and separate resource phases from the exact frozen image.
 - [ ] Authenticate teardown after every phase and reject any phase with residual scoped resources.
-- [ ] Compare same/three-region manifests before causal topology analysis and reject mismatched comparisons.
+- [ ] Require accepted Task 10 manifests, then compare same/three-region manifests before causal topology analysis and reject mismatched comparisons.
 
 ### Task 12: Collect final BTE optimization and cryptographic benchmarks
 

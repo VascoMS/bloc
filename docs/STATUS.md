@@ -1,7 +1,7 @@
 # Status
 
-- Last reviewed: `2026-07-26`
-- Active milestone: `none selected`
+- Last reviewed: `2026-07-27`
+- Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
 
@@ -62,10 +62,12 @@ release-candidate configuration contract are defined in
 ## Open Blockers And Risks
 
 - **Evidence completeness:** the final evidence contract requires p99-capable
-  local, same-region, and three-region campaigns, complete operator resource
-  measurements, RQ3 fault campaigns, and operator cost synthesis. The accepted
-  M3 campaign remains valid historical p50/p95 evidence but is not the final
-  release-candidate campaign.
+  same-region and three-region VM performance campaigns, complete per-operator
+  VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
+  The accepted M3 campaign remains valid historical p50/p95 evidence but is not
+  the final release-candidate campaign. Local issue #8 output is
+  validation-only preflight evidence, not local performance or resource
+  evidence.
 
 ## Bounded Prototype Limitations
 
@@ -80,10 +82,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Select `M5. Performance, Scaling, And Resource Evidence` explicitly before
-   starting its final campaigns.
-2. Run issue `#8` and the later same-region/three-region campaigns only from
+1. Run issue `#8` as the validation-only distributed-campaign preflight from
    the frozen source, image, corpus, configuration, seed, and schema contract.
+2. After a successful preflight, run issue `#15` as the first M5
+   thesis-performance campaign, then issue `#16` with matched manifests and
+   configurations.
 3. Treat any source or image change as an invalidation decision; do not combine
    measurements from different revisions into one final campaign.
 4. Track granular work in the [BLOC Thesis Prototype GitHub

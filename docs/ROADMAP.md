@@ -108,14 +108,14 @@ current roadmap, validation path, or thesis metric collection plan.
 
 ## M5. Performance, Scaling, And Resource Evidence
 
-- Status: not selected.
+- Status: active.
 - RQs advanced: `RQ1`, `RQ2`, `RQ4`.
 - Objective: collect the final honest-path timing, coordination, cryptographic,
   resource, and scaling evidence from the frozen release candidate.
 - Primary matrix:
   - `n=4,t=3` and `n=7,t=5`;
   - batches `8/32/128`;
-  - local, matched same-region VM, and three-region VM environments;
+  - matched same-region VM and three-region VM environments;
   - 10 warmups and 1,000 measured observations per scenario for p99.
 - Scale extension:
   - `n=10,t=7` at batches `8/32/128`;
@@ -124,18 +124,25 @@ current roadmap, validation path, or thesis metric collection plan.
     scenario remains viable or 100 boundary observations when it clearly
     exceeds the slot envelope.
 - Deliverables:
+  - validation-only issue #8 local preflight: `n=4/7`, batches `8/32/128`,
+    with 1 warmup and 1 measured observation per cell; `n=10`, batches
+    `8/32/128`, plus batch `512` at `n=4/7/10`, with 1 warmup and 3 measured
+    observations per unique extension cell;
   - p50/p95/p99, maximum, deadline completion, confidence intervals, and stage
-    attribution;
-  - CPU, peak memory, allocations, messages, bytes, and throughput;
+    attribution from VM campaigns;
+  - VM CPU, peak memory, allocations, messages, bytes, and throughput;
   - accepted results from the deterministic transaction corpus and client
     encryption/expansion benchmark;
   - share generation, reconstruction, and BTE optimization benchmarks;
-  - exact local/same-region/three-region artifact bundles.
+  - exact same-region/three-region VM artifact bundles and the separate
+    validation-only local preflight artifact.
 - Done criteria:
   - planned observations are retained without unexplained filtering;
   - failures and timeouts remain visible outside successful-run quantiles;
   - matched VM campaigns use the same source, image, instance class, corpus,
     configuration, and balanced execution blocks;
+  - the local preflight is retained only as configuration, correctness, and
+    artifact-contract validation, with no local performance or resource claim;
   - accepted artifacts pass the evidence contract in `VALIDATION.md`.
 
 ## M6. Fault And Adversarial Robustness Evidence

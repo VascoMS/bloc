@@ -393,3 +393,35 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Related files: `bloc-node/internal/app/types.go`,
   `bloc-node/internal/app/node.go`, `bloc-node/internal/app/eval.go`,
   `bloc-node/internal/app/eval_persistent.go`, `docs/VALIDATION.md`
+
+## 0022. Use local evaluation only as final-campaign preflight
+
+- Date: 2026-07-27
+- Status: Accepted
+- Context: The frozen release candidate can exercise every final campaign
+  configuration locally, but local process and host placement do not provide
+  independent operator-machine, network, resource, or failure domains. A large
+  local p99 campaign would make precise measurements of an environment that the
+  thesis does not intend to use for final sidecar performance claims.
+- Options considered: retain a local p99/scaling and resource phase alongside
+  VM campaigns; omit local evaluation entirely; or use a bounded local matrix
+  to validate configuration and artifact contracts before VM allocation.
+- Decision: Use local `eval-suite` only as the validation-only
+  distributed-campaign preflight. Issue #8 verifies the frozen source, image,
+  corpus, configuration, seed, schema, outcome retention, consistency, timing
+  additivity, and chart compatibility without collecting local resource
+  evidence or reporting local performance statistics. Final RQ1/RQ2 sidecar
+  performance and per-operator resource evidence comes from VM-per-operator
+  campaigns. Issue #15 begins that thesis-performance evidence only after
+  successful issue #8 preflight; issue #16 follows accepted issue #15 manifests.
+- Rationale: The bounded preflight detects configuration, orchestration, and
+  artifact-contract failures before AWS resources are allocated while keeping
+  performance, topology, and resource conclusions aligned with the independent
+  VM-per-operator deployment model.
+- Consequences: Local outputs are marked `classification=validation-only` and
+  `performance_claims_allowed=false`; they cannot support local quantile,
+  throughput, scaling, topology, resource, or local-versus-VM claims. A frozen
+  contract change stops the preflight for an explicit invalidation decision.
+- Related files: `docs/STATUS.md`, `docs/ROADMAP.md`,
+  `docs/VALIDATION.md`, `docs/superpowers/plans/2026-07-23-thesis-evaluation.md`,
+  GitHub issues #8, #15, and #16

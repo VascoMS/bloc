@@ -3,9 +3,9 @@
 ## Evidence Policy
 
 Module tests are the default preflight. Local `eval-local` and `eval-suite` runs
-provide the clean protocol baseline for ACS/BTE behavior under controlled
-conditions. Docker Compose validates local deployment mechanics but is not an
-independent-machine performance substrate.
+provide correctness, configuration, and artifact-contract preflight under
+controlled conditions. Docker Compose validates local deployment mechanics but
+is not an independent-machine performance substrate.
 
 VM/EC2-per-sidecar campaigns provide the distributed evidence shape: one machine
 per operator and a separate controller running `eval-remote`, artifact
@@ -16,6 +16,12 @@ or a causal topology comparison.
 
 Charts are a reporting step after valid evidence exists. They are not a reason
 to run an experiment or a substitute for raw accepted artifacts.
+
+Local `eval-suite` output is validation-only. It may establish execution,
+outcome retention, consistency, provenance, schema completeness, timing
+additivity, and chart-loader compatibility, but it must not support local
+quantile, maximum, throughput, scaling, topology, resource, or local-versus-VM
+claims. Final RQ1/RQ2 performance evidence is VM-only.
 
 Resource evidence is collected only in dedicated `resource-measured` phases,
 never while primary latency/p99 observations run. Acceptance requires 250 ms
@@ -40,13 +46,23 @@ Final M5/M6 evidence is bound to this release-candidate contract:
 - ACS safety root: `results/local/acs-common-subset-safety/rc-2bc8efc/`;
 - evaluator artifact schema: `bloc-eval-suite/v3`.
 
-The primary honest-path configuration is `n=4,t=3` and `n=7,t=5`, batches
-`8/32/128`, persistent execution, 10 warmups, 1,000 measured attempts per
-scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
+The final VM primary honest-path configuration is `n=4,t=3` and `n=7,t=5`,
+batches `8/32/128`, persistent execution, 10 warmups, 1,000 measured attempts
+per scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
 completed-within-deadline boundary. Failed, inconsistent, and timed-out
 attempts remain in the artifact but never enter latency quantiles. The guarded
-`n=10,t=7` and batch-512 extension uses its separate 30-observation
+VM `n=10,t=7` and batch-512 extension uses its separate 30-observation
 pilot/continuation rule and requires `BMax` to cover the selected batch.
+
+Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
+batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
+extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,
+with 1 warmup and 3 measured observations per unique extension cell. Primary
+measurements must succeed consistently within 12 seconds and be artifact-valid;
+extension measurements may miss the boundary when they terminate consistently
+with a complete retained outcome. The preflight retains
+`classification=validation-only` and `performance_claims_allowed=false` under
+`results/local/distributed-preflight-2bc8efc/`.
 
 Corpus-backed protocol campaigns use `tx_source=mock-placeholder` and the
 committed 100-target `28/50/12/8/2` workload. The balanced 500-target issue #13
@@ -89,7 +105,7 @@ modules rather than one root workspace.
 
 ## `bloc-node` Local Evaluation
 
-Use local evaluation for controlled protocol behavior and baseline timing:
+Use local evaluation for controlled protocol behavior and preflight validation:
 
 ```sh
 cd bloc-node
@@ -144,9 +160,9 @@ go run ./cmd/bloc-node eval-suite \
   --out-dir results/m1-smoke
 ```
 
-The complete corrected 315-sample baseline remains outstanding. Existing
-reduced local matrices are safety/liveness preflight evidence, not a replacement
-for the full M1 distribution.
+M1 remains a historical local baseline. It is not an outstanding campaign
+requirement: final p99/scaling evidence is VM-only under M5, and issue #8 uses
+local evaluation only to validate the distributed-campaign contract.
 
 ## ACS Safety Gate
 
@@ -453,11 +469,11 @@ The primary honest-path matrix is:
 |---|---|
 | Operators and threshold | `n=4,t=3`; `n=7,t=5` |
 | Batch | `8`, `32`, `128` |
-| Environment | persistent local; matched same-region VM; matched three-region VM |
+| Environment | matched same-region VM; matched three-region VM |
 | Sampling | 10 retained warmups; 1,000 measured observations per scenario |
 | Scheduling | balanced measurement blocks; scenario order and seed retained |
 
-The scale extension adds `n=10,t=7` at batches `8/32/128` and batch `512` at
+The VM scale extension adds `n=10,t=7` at batches `8/32/128` and batch `512` at
 `n=4/7/10`. Each extension scenario begins with a separate 30-observation pilot.
 If the pilot is viable, run 1,000 independent final observations. If it clearly
 exceeds the 12-second envelope or fails frequently, retain 100 independent
@@ -493,11 +509,31 @@ seconds, and no successful attempt contains divergent outputs. Campaign
 acceptance is based on artifact integrity and completeness, not on obtaining a
 positive result.
 
-The final local and VM runners accept only `n=4/7/10` and batches
-`8/32/128/512`; the configured/generated `BMax` must be at least the largest
-requested batch. `--repetitions` must divide evenly by
+The final VM runners accept only `n=4/7/10` and batches `8/32/128/512`; the
+configured/generated `BMax` must be at least the largest requested batch.
+`--repetitions` must divide evenly by
 `--repetition-blocks`. Stable seeded blocks balance scenario order while making
 the order reproducible from the manifest.
+
+#### Local Distributed-Campaign Preflight
+
+Issue #8 runs the final VM configuration space locally without producing a
+performance dataset. Its primary matrix is `n=4/7`, batches `8/32/128`, with 1
+warmup and 1 measured observation per cell. Its unique extension matrix is
+`n=10`, batches `8/32/128`, plus batch `512` at `n=4/7/10`, with 1 warmup and 3
+measured observations per cell. Every primary measurement must be successful,
+cross-node consistent, within 12 seconds, and artifact-valid. Every extension
+measurement must terminate consistently with a complete retained outcome; a
+deadline miss alone does not fail the preflight.
+
+The preflight validates startup/teardown, attempt retention and classification,
+cross-node consistency, timing additivity, release-candidate provenance, schema
+completeness, and chart-loader compatibility. It binds the exact source, image,
+corpus, configuration, seed, and schema in a manifest below
+`results/local/distributed-preflight-2bc8efc/`, which must state
+`classification=validation-only` and `performance_claims_allowed=false`. Do not
+collect local CPU, memory, or network evidence. Do not report local quantiles,
+throughput, scaling, topology, resource, or local-versus-VM comparisons.
 
 ### RQ1: Sidecar Timing Feasibility
 
@@ -506,9 +542,10 @@ transaction set within an Ethereum-slot-compatible time budget?
 
 Measure critical-path latency from the slot trigger until the slowest correct
 node publishes its result, commit-to-plaintext latency, every existing protocol
-stage, deadline completion, and cross-node consistency. Report local,
-same-region, and three-region results separately and express latency as both
-milliseconds and a fraction of the 12-second slot.
+stage, deadline completion, and cross-node consistency. Report matched
+same-region and three-region VM results separately and express latency as both
+milliseconds and a fraction of the 12-second slot. Local preflight output is
+not RQ1 performance evidence.
 
 The answer applies only to the BLOC sidecar. It does not establish complete
 block building, signing, publication, or execution-client feasibility.
@@ -518,7 +555,7 @@ block building, signing, publication, or execution-client feasibility.
 Question: what latency, communication, throughput, and resource overhead do
 distributed sidecar coordination and BTE introduce?
 
-For every primary scenario record proposal, ACS, merge/planning, share
+For every VM primary scenario record proposal, ACS, merge/planning, share
 generation, threshold wait, combine, and materialization time; ACS/share message
 and byte counts; CPU seconds; peak resident memory; selected work; and derived
 transactions per second. Stage totals and merge/plan substages must satisfy their
@@ -532,7 +569,8 @@ baseline.
 
 The answer identifies dominant stages, computational versus network effects,
 and how overhead changes with batch, operator count, threshold, topology, and
-BTE optimization. It does not include DVT threshold-signing overhead.
+BTE optimization from VM evidence. It does not include DVT threshold-signing
+overhead or local preflight performance statistics.
 
 ### RQ3: Faults And Adversarial Behavior
 
@@ -681,16 +719,16 @@ congestion effects, or actual on-chain user fees.
 | Milestone | Primary evidence |
 |---|---|
 | `M0. Current Prototype Baseline` | module tests, demo smoke, documented protocol boundary |
-| `M1. Slot Timing and Baseline Latency Evidence` | historical local `eval-suite` baseline; the final p99-capable local campaign belongs to M5 |
+| `M1. Slot Timing and Baseline Latency Evidence` | historical local `eval-suite` baseline |
 | `M2. Distributed Deployment-Ready BLOC Sidecar` | Compose rehearsal, Prometheus/Grafana, `eval-remote` |
 | `M3. Distributed Sidecar Metrics Collection` | accepted three-region VM/EC2 campaign and raw artifacts |
 | `M4. Evaluation Readiness And Prototype Hardening` | correctness blockers, terminal failures, mempool timeout, release-candidate validation and freeze |
-| `M5. Performance, Scaling, And Resource Evidence` | final p99 local/VM campaigns, resource evidence, BTE/client benchmarks, `n=10`/batch-512 extension |
+| `M5. Performance, Scaling, And Resource Evidence` | validation-only local distributed-campaign preflight; final same-region/three-region VM p99 and resource evidence, BTE/client benchmarks, `n=10`/batch-512 extension |
 | `M6. Fault And Adversarial Robustness Evidence` | deterministic adversarial regressions and 30-observation operational fault campaigns |
 | `M7. Cost Analysis And Thesis Evidence Synthesis` | user/operator cost model, RQ answer matrix, figures, limitations, checksummed final archive |
 
-M3 is the latest completed milestone and M4 is active; see
-[STATUS.md](STATUS.md). Granular task state is tracked in the [BLOC Thesis
+M4 is complete and M5 is active; see [STATUS.md](STATUS.md). Granular task
+state is tracked in the [BLOC Thesis
 Prototype GitHub Project](https://github.com/users/VascoMS/projects/1).
 
 ## Review Checklist

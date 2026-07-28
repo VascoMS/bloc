@@ -60,9 +60,20 @@ extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,
 with 1 warmup and 3 measured observations per unique extension cell. Primary
 measurements must succeed consistently within 12 seconds and be artifact-valid;
 extension measurements may miss the boundary when they terminate consistently
-with a complete retained outcome. The preflight retains
+with a complete retained outcome. The local harness uses a 60-second timeout so
+BMax-512 nodes can finish initialization; this does not change the 12-second
+slot-completion boundary. The preflight retains
 `classification=validation-only` and `performance_claims_allowed=false` under
 `results/local/distributed-preflight-2bc8efc/`.
+
+Issue #8's preflight passed from the frozen source: all six primary and all
+eighteen extension measured observations were retained successfully and
+consistently, primary deadline coverage passed, and schema, provenance,
+per-node coverage, timing additivity, aggregate, and chart-loader checks passed.
+No resource phase ran. A rejected 30-second startup attempt remains preserved
+inside the artifact root; it contains no slot observation and is not accepted
+evidence. The accepted preflight remains validation-only and contributes no
+RQ1/RQ2 performance statistic.
 
 Corpus-backed protocol campaigns use `tx_source=mock-placeholder` and the
 committed 100-target `28/50/12/8/2` workload. The balanced 500-target issue #13

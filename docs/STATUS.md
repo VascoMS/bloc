@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-07-27`
+- Last reviewed: `2026-07-28`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
@@ -52,6 +52,12 @@ rehearsals passed. The exact-source ACS campaign
 schedules, the 100-slot sustained gate, the 180-slot compatibility matrix,
 identity checks, and Merge/Plan attribution.
 
+Issue #8's accepted validation-only distributed preflight is retained at
+`results/local/distributed-preflight-2bc8efc/`. It exercised all primary and
+extension configurations from the frozen source with complete, consistent
+artifacts and chart-loader compatibility. It collected no resource evidence and
+supports no local performance claim.
+
 The accepted M3 three-region evidence remains at
 `results/ec2/m3-three-region-synthetic-accepted-20260718-1/`. Issue #13's
 balanced 500-target client-overhead artifact remains separate from the
@@ -82,11 +88,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run issue `#8` as the validation-only distributed-campaign preflight from
-   the frozen source, image, corpus, configuration, seed, and schema contract.
-2. After a successful preflight, run issue `#15` as the first M5
-   thesis-performance campaign, then issue `#16` with matched manifests and
-   configurations.
+1. Run issue `#15` as the first M5 thesis-performance campaign from the
+   preflight-accepted frozen source, image, corpus, configuration, seed, and
+   schema contract.
+2. Run issue `#16` only after issue #15 is accepted, using matched manifests
+   and configurations.
 3. Treat any source or image change as an invalidation decision; do not combine
    measurements from different revisions into one final campaign.
 4. Track granular work in the [BLOC Thesis Prototype GitHub
@@ -103,6 +109,8 @@ release-candidate configuration contract are defined in
   `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/`
 - Local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
+- Accepted distributed-campaign preflight:
+  `results/local/distributed-preflight-2bc8efc/`
 - Linux RBC/ACS/BBA race evidence:
   `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/logs/hbbft-linux-amd64-race.log`
 - Accepted distributed evidence:
@@ -114,7 +122,7 @@ release-candidate configuration contract are defined in
 
 ## Planned And Deferred Work
 
-- Planned after M4: `M5. Performance, Scaling, And Resource Evidence`
+- Active: `M5. Performance, Scaling, And Resource Evidence`
 - Planned after M5: `M6. Fault And Adversarial Robustness Evidence`
 - Planned after M6: `M7. Cost Analysis And Thesis Evidence Synthesis`
 - Deferred: Builder API boundary, SSV/DVT signing integration, secure CRS/DKG,

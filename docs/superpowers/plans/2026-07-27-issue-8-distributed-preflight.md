@@ -15,6 +15,8 @@
 - Evaluator schema is exactly `bloc-eval-suite/v3`.
 - Seed is exactly `20260621`.
 - Completed-within-deadline boundary is exactly 12 seconds.
+- The local harness timeout is 60 seconds so BMax-512 nodes can complete
+  startup; this does not change the 12-second slot-completion boundary.
 - Primary cells are `n=4,t=3` and `n=7,t=5` at batches `8/32/128`, with one warmup and one measured observation per cell.
 - Extension cells are `n=10,t=7` at batches `8/32/128` plus batch `512` at `n=4/7/10`, with one warmup and three measured observations per unique cell.
 - The protocol corpus is `deploy/docker-compose/corpus/mock-targets.jsonl`, SHA-256 `52121653abf114f7230b19794433e2a71da8726df3472acd1ce184f4d4131cc2`, with distribution `28/50/12/8/2`.
@@ -330,7 +332,7 @@ env GOCACHE=/tmp/bloc-issue8-go-build GOMODCACHE=/tmp/bloc-issue8-go-mod \
   --repetition-blocks 1 \
   --seed 20260621 \
   --deadline 12s \
-  --timeout 30s \
+  --timeout 60s \
   --base-port 24000 \
   --experiment-id distributed-preflight-primary-2bc8efc \
   --out-dir /Users/vascosilva/Projects/bloc/results/local/distributed-preflight-2bc8efc/primary
@@ -352,7 +354,7 @@ env GOCACHE=/tmp/bloc-issue8-go-build GOMODCACHE=/tmp/bloc-issue8-go-mod \
   --repetition-blocks 1 \
   --seed 20260621 \
   --deadline 12s \
-  --timeout 30s \
+  --timeout 60s \
   --base-port 28000 \
   --experiment-id distributed-preflight-extension-n10-2bc8efc \
   --out-dir /Users/vascosilva/Projects/bloc/results/local/distributed-preflight-2bc8efc/extension-n10
@@ -374,7 +376,7 @@ env GOCACHE=/tmp/bloc-issue8-go-build GOMODCACHE=/tmp/bloc-issue8-go-mod \
   --repetition-blocks 1 \
   --seed 20260621 \
   --deadline 12s \
-  --timeout 30s \
+  --timeout 60s \
   --base-port 26000 \
   --experiment-id distributed-preflight-extension-b512-2bc8efc \
   --out-dir /Users/vascosilva/Projects/bloc/results/local/distributed-preflight-2bc8efc/extension-b512

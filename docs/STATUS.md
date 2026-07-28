@@ -67,6 +67,12 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
+- **Frozen-campaign orchestration:** the frozen same-AZ runner hard-codes a
+  synthetic/direct transaction source, does not deploy or bind the committed
+  `mock-placeholder` protocol corpus, and the matrix wrapper cannot select the
+  prebuilt frozen image or enforce one end-to-end runtime/cost ceiling. Issue
+  #15 cannot start until an explicit invalidation decision establishes a
+  replacement frozen campaign contract and reruns the affected preflight.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -88,14 +94,16 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run issue `#15` as the first M5 thesis-performance campaign from the
-   preflight-accepted frozen source, image, corpus, configuration, seed, and
-   schema contract.
-2. Run issue `#16` only after issue #15 is accepted, using matched manifests
+1. Decide whether to invalidate and replace the frozen campaign contract so the
+   same-region and three-region runners bind the accepted transaction source,
+   corpus, immutable image, and bounded execution lifecycle.
+2. After a replacement freeze and affected preflight pass, run issue `#15` as
+   the first M5 thesis-performance campaign.
+3. Run issue `#16` only after issue #15 is accepted, using matched manifests
    and configurations.
-3. Treat any source or image change as an invalidation decision; do not combine
-   measurements from different revisions into one final campaign.
-4. Track granular work in the [BLOC Thesis Prototype GitHub
+4. Do not combine measurements from different source, image, corpus,
+   configuration, or schema revisions into one final campaign.
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

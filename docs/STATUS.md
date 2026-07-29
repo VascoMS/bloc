@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-07-28`
+- Last reviewed: `2026-07-29`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
@@ -67,12 +67,14 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Frozen-campaign orchestration:** the frozen same-AZ runner hard-codes a
-  synthetic/direct transaction source, does not deploy or bind the committed
-  `mock-placeholder` protocol corpus, and the matrix wrapper cannot select the
-  prebuilt frozen image or enforce one end-to-end runtime/cost ceiling. Issue
-  #15 cannot start until an explicit invalidation decision establishes a
-  replacement frozen campaign contract and reruns the affected preflight.
+- **Replacement campaign candidate:** the explicit invalidation decision was
+  made on 2026-07-29. Issue #15 now requires an epochless hybrid-ciphertext
+  wire, immutable cluster-specific encrypted corpora served through the
+  `mock-placeholder` path, per-slot provider limits, replacement node and
+  mempool image digests, and a rerun of every affected local validation and
+  distributed-campaign preflight. No final campaign may start or combine
+  observations until that replacement contract is implemented, validated, and
+  frozen.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -89,21 +91,27 @@ release-candidate configuration contract are defined in
   creates all shares; secure setup and DKG are future work.
 - Shares have no public correctness proof. Admission and subset recovery remain
   bounded, and invalid shares are detected through reconstruction failure.
+- The current prototype assigns BTE puncture indexes from local/corpus
+  position. This coordinated model is retained for the thesis metrics;
+  paper-aligned independent index sampling and collision-distribution evidence
+  are deferred to issue #22.
 - Builder API integration, DVT/SSV signing, execution payload construction, and
   block publication are future integration work and outside the measured path.
 
 ## Immediate Next Actions
 
-1. Decide whether to invalidate and replace the frozen campaign contract so the
-   same-region and three-region runners bind the accepted transaction source,
-   corpus, immutable image, and bounded execution lifecycle.
-2. After a replacement freeze and affected preflight pass, run issue `#15` as
+1. Implement and validate the approved epochless hybrid-ciphertext and static
+   encrypted-corpus design, then freeze replacement source, node/mempool
+   images, corpus identities, configuration, and schema.
+2. Rerun the affected local distributed-campaign preflight against only that
+   replacement contract.
+3. After the replacement freeze and affected preflight pass, run issue `#15` as
    the first M5 thesis-performance campaign.
-3. Run issue `#16` only after issue #15 is accepted, using matched manifests
+4. Run issue `#16` only after issue #15 is accepted, using matched manifests
    and configurations.
-4. Do not combine measurements from different source, image, corpus,
+5. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

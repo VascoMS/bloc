@@ -55,36 +55,45 @@ type List struct {
 }
 
 func (b *Builder) Build(snapshot mempool.Snapshot) List {
-	unique := make(map[string]mempool.Transaction, len(snapshot.Transactions))
+	return b.build(snapshot, true)
+}
+
+// BuildOrdered applies inclusion bounds without reordering an already
+// canonical encrypted-corpus prefix.
+func (b *Builder) BuildOrdered(snapshot mempool.Snapshot) List {
+	return b.build(snapshot, false)
+}
+
+func (b *Builder) build(snapshot mempool.Snapshot, sortByFee bool) List {
+	seen := make(map[string]bool, len(snapshot.Transactions))
+	candidates := make([]mempool.Transaction, 0, len(snapshot.Transactions))
 	for _, tx := range snapshot.Transactions {
 		if tx.Hash == "" || tx.Gas == 0 {
 			continue
 		}
-		if _, ok := unique[tx.Hash]; ok {
+		if seen[tx.Hash] {
 			continue
 		}
-		unique[tx.Hash] = tx
-	}
-
-	candidates := make([]mempool.Transaction, 0, len(unique))
-	for _, tx := range unique {
+		seen[tx.Hash] = true
 		candidates = append(candidates, tx)
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		feeI := candidates[i].EffectiveFeePerGas()
-		feeJ := candidates[j].EffectiveFeePerGas()
-		if cmp := feeI.Cmp(feeJ); cmp != 0 {
-			return cmp > 0
-		}
-		if candidates[i].From != candidates[j].From {
-			return candidates[i].From < candidates[j].From
-		}
-		if candidates[i].Nonce != candidates[j].Nonce {
-			return candidates[i].Nonce < candidates[j].Nonce
-		}
-		return candidates[i].Hash < candidates[j].Hash
-	})
+	if sortByFee {
+		sort.Slice(candidates, func(i, j int) bool {
+			feeI := candidates[i].EffectiveFeePerGas()
+			feeJ := candidates[j].EffectiveFeePerGas()
+			if cmp := feeI.Cmp(feeJ); cmp != 0 {
+				return cmp > 0
+			}
+			if candidates[i].From != candidates[j].From {
+				return candidates[i].From < candidates[j].From
+			}
+			if candidates[i].Nonce != candidates[j].Nonce {
+				return candidates[i].Nonce < candidates[j].Nonce
+			}
+			return candidates[i].Hash < candidates[j].Hash
+		})
+	}
 
 	items := make([]Item, 0, minInt(b.cfg.MaxTransactions, len(candidates)))
 	var totalGas uint64

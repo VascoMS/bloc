@@ -50,6 +50,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleInclusionList(w http.ResponseWriter, r *http.Request) {
 	snapshot := s.store.Snapshot()
+	var page mempool.SlotPage
 	if s.slotSource != nil {
 		slot := uint64(0)
 		if raw := r.URL.Query().Get("slot"); raw != "" {
@@ -60,12 +61,46 @@ func (s *Server) handleInclusionList(w http.ResponseWriter, r *http.Request) {
 			}
 			slot = parsed
 		}
-		txs, err := s.slotSource.FetchSlot(r.Context(), slot)
+		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+		if err != nil || limit <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		page, err = s.slotSource.FetchSlot(r.Context(), slot, limit)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		snapshot = mempool.Snapshot{Transactions: txs}
+		snapshot = mempool.Snapshot{Transactions: page.Transactions}
+	}
+	if s.slotSource != nil {
+		list := s.builder.BuildOrdered(snapshot)
+		writeJSON(w, http.StatusOK, struct {
+			SchemaVersion           string `json:"schema_version"`
+			CiphertextWireVersion   string `json:"ciphertext_wire_version"`
+			PublicConfigID          string `json:"public_config_id"`
+			PlaintextMasterCorpusID string `json:"plaintext_master_corpus_id"`
+			EncryptedCorpusID       string `json:"encrypted_corpus_id"`
+			EncryptedPrefixSetID    string `json:"encrypted_prefix_set_id"`
+			Slot                    uint64 `json:"slot"`
+			RequestedCount          int    `json:"requested_count"`
+			AvailableCount          int    `json:"available_count"`
+			ReturnedCount           int    `json:"returned_count"`
+			inclusion.List
+		}{
+			SchemaVersion:           page.SchemaVersion,
+			CiphertextWireVersion:   page.CiphertextWireVersion,
+			PublicConfigID:          page.PublicConfigID,
+			PlaintextMasterCorpusID: page.PlaintextMasterCorpusID,
+			EncryptedCorpusID:       page.EncryptedCorpusID,
+			EncryptedPrefixSetID:    page.EncryptedPrefixSetID,
+			Slot:                    page.Slot,
+			RequestedCount:          page.RequestedCount,
+			AvailableCount:          page.AvailableCount,
+			ReturnedCount:           list.Count,
+			List:                    list,
+		})
+		return
 	}
 	list := s.builder.Build(snapshot)
 	writeJSON(w, http.StatusOK, list)

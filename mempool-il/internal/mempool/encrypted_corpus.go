@@ -2,6 +2,7 @@ package mempool
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -67,6 +68,74 @@ type encryptedCorpusSecret struct {
 	OperatorID        uint32 `json:"operator_id"`
 	BTEShareScalarHex string `json:"bte_share_scalar_hex"`
 	P2PPrivateKeyHex  string `json:"p2p_private_key_hex,omitempty"`
+}
+
+type EncryptedCorpusSource struct {
+	manifest *EncryptedCorpusManifest
+}
+
+func NewEncryptedCorpusSource(path string) (*EncryptedCorpusSource, error) {
+	manifest, err := LoadEncryptedCorpus(path)
+	if err != nil {
+		return nil, err
+	}
+	return &EncryptedCorpusSource{manifest: manifest}, nil
+}
+
+func (source *EncryptedCorpusSource) Fetch(_ context.Context) ([]Transaction, error) {
+	page, err := source.FetchSlot(context.Background(), 0, source.manifest.AvailableCount)
+	return page.Transactions, err
+}
+
+func (source *EncryptedCorpusSource) FetchSlot(_ context.Context, slot uint64, limit int) (SlotPage, error) {
+	if limit <= 0 {
+		return SlotPage{}, fmt.Errorf("encrypted corpus limit must be positive")
+	}
+	if limit > source.manifest.BMax {
+		return SlotPage{}, fmt.Errorf("requested limit %d exceeds BMax %d", limit, source.manifest.BMax)
+	}
+	returned := limit
+	if returned > source.manifest.AvailableCount {
+		returned = source.manifest.AvailableCount
+	}
+	transactions := make([]Transaction, returned)
+	for i := 0; i < returned; i++ {
+		transactions[i] = cloneCorpusTransaction(source.manifest.Candidates[i].Transaction)
+	}
+	return SlotPage{
+		SchemaVersion:           source.manifest.SchemaVersion,
+		CiphertextWireVersion:   source.manifest.CiphertextWireVersion,
+		PublicConfigID:          source.manifest.PublicConfigID,
+		PlaintextMasterCorpusID: source.manifest.PlaintextMasterCorpusID,
+		EncryptedCorpusID:       source.manifest.EncryptedCorpusID,
+		EncryptedPrefixSetID:    encryptedCandidateSetID(source.manifest.Candidates[:returned]),
+		Slot:                    slot,
+		RequestedCount:          limit,
+		AvailableCount:          source.manifest.AvailableCount,
+		ReturnedCount:           returned,
+		Transactions:            transactions,
+	}, nil
+}
+
+func cloneCorpusTransaction(transaction Transaction) Transaction {
+	out := transaction
+	if transaction.GasPriceWei != nil {
+		out.GasPriceWei = new(big.Int).Set(transaction.GasPriceWei)
+	}
+	if transaction.MaxFeePerGasWei != nil {
+		out.MaxFeePerGasWei = new(big.Int).Set(transaction.MaxFeePerGasWei)
+	}
+	if transaction.MaxPriorityFeeWei != nil {
+		out.MaxPriorityFeeWei = new(big.Int).Set(transaction.MaxPriorityFeeWei)
+	}
+	if transaction.EffectiveFeePerGasW != nil {
+		out.EffectiveFeePerGasW = new(big.Int).Set(transaction.EffectiveFeePerGasW)
+	}
+	if transaction.Placeholder != nil {
+		placeholder := *transaction.Placeholder
+		out.Placeholder = &placeholder
+	}
+	return out
 }
 
 func GenerateEncryptedCorpus(options EncryptedCorpusOptions) (*EncryptedCorpusManifest, error) {

@@ -1,6 +1,7 @@
 package mempool
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -101,6 +102,56 @@ func TestLoadEncryptedCorpusRejectsMutation(t *testing.T) {
 	}
 	if _, err := LoadEncryptedCorpus(mutatedPath); err == nil {
 		t.Fatal("mutated encrypted corpus was accepted")
+	}
+}
+
+func TestEncryptedCorpusSourceReturnsImmutablePrefixesAcrossSlots(t *testing.T) {
+	clusterPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
+	if _, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
+		PlaintextPath:     plaintextPath,
+		ClusterConfigPath: clusterPath,
+		SecretPaths:       secretPaths,
+		Limit:             8,
+		OutputPath:        outputPath,
+	}); err != nil {
+		t.Fatalf("generate encrypted corpus: %v", err)
+	}
+	source, err := NewEncryptedCorpusSource(outputPath)
+	if err != nil {
+		t.Fatalf("load source: %v", err)
+	}
+
+	first, err := source.FetchSlot(context.Background(), 11, 8)
+	if err != nil {
+		t.Fatalf("fetch first slot: %v", err)
+	}
+	second, err := source.FetchSlot(context.Background(), 12, 8)
+	if err != nil {
+		t.Fatalf("fetch second slot: %v", err)
+	}
+	if first.Slot != 11 || second.Slot != 12 || first.EncryptedPrefixSetID != second.EncryptedPrefixSetID {
+		t.Fatalf("unexpected slot correlation: first=%+v second=%+v", first, second)
+	}
+	for i := range first.Transactions {
+		if first.Transactions[i].EncryptedPayloadHex != second.Transactions[i].EncryptedPayloadHex {
+			t.Fatalf("slot changed ciphertext %d", i)
+		}
+	}
+	first.Transactions[0].EncryptedPayloadHex = "mutated"
+	third, err := source.FetchSlot(context.Background(), 13, 8)
+	if err != nil {
+		t.Fatalf("fetch third slot: %v", err)
+	}
+	if third.Transactions[0].EncryptedPayloadHex == "mutated" {
+		t.Fatal("caller mutation changed static source")
+	}
+	if _, err := source.FetchSlot(context.Background(), 13, 0); err == nil {
+		t.Fatal("zero limit accepted")
+	}
+	if _, err := source.FetchSlot(context.Background(), 13, 9); err == nil {
+		t.Fatal("limit above BMax accepted")
 	}
 }
 

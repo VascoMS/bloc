@@ -17,17 +17,17 @@ import (
 
 func main() {
 	var (
-		rpcURL       = flag.String("rpc-url", "http://127.0.0.1:8545", "execution/public JSON-RPC URL")
-		sourceType   = flag.String("source", "txpool", "mempool source: txpool | public-pending | alchemy-pending | replay-placeholder")
-		alchemyTTL   = flag.Duration("alchemy-ttl", 5*time.Minute, "retention for alchemy pending tx cache")
-		corpusPath   = flag.String("corpus", "", "JSONL corpus of raw signed Ethereum target transactions for replay-placeholder")
-		clusterPath  = flag.String("cluster-config", "", "BLOC cluster config for replay-placeholder encryption")
-		replaySlot   = flag.Uint64("replay-slot", 1, "slot id used when encrypting replay-placeholder payloads")
-		listenAddr   = flag.String("listen", ":8080", "HTTP listen address")
-		pollInterval = flag.Duration("poll-interval", 2*time.Second, "mempool polling interval")
-		maxTxs       = flag.Int("max-items", 128, "max inclusion list tx count")
-		maxGas       = flag.Uint64("max-gas", 0, "max inclusion list total gas (0 means auto)")
-		maxBlockGas  = flag.Uint64("max-block-gas", 30_000_000, "max block gas used for auto inclusion list cap")
+		rpcURL              = flag.String("rpc-url", "http://127.0.0.1:8545", "execution/public JSON-RPC URL")
+		sourceType          = flag.String("source", "txpool", "mempool source: txpool | public-pending | alchemy-pending | encrypted-corpus | replay-placeholder-dev")
+		alchemyTTL          = flag.Duration("alchemy-ttl", 5*time.Minute, "retention for alchemy pending tx cache")
+		encryptedCorpusPath = flag.String("encrypted-corpus", "", "immutable encrypted-corpus artifact")
+		corpusPath          = flag.String("corpus", "", "development-only plaintext corpus for replay-placeholder-dev")
+		clusterPath         = flag.String("cluster-config", "", "development-only cluster config for replay-placeholder-dev")
+		listenAddr          = flag.String("listen", ":8080", "HTTP listen address")
+		pollInterval        = flag.Duration("poll-interval", 2*time.Second, "mempool polling interval")
+		maxTxs              = flag.Int("max-items", 128, "max inclusion list tx count")
+		maxGas              = flag.Uint64("max-gas", 0, "max inclusion list total gas (0 means auto)")
+		maxBlockGas         = flag.Uint64("max-block-gas", 30_000_000, "max block gas used for auto inclusion list cap")
 	)
 	flag.Parse()
 
@@ -46,20 +46,26 @@ func main() {
 		source = mempool.NewPublicRPCClient(*rpcURL, httpClient)
 	case "alchemy-pending":
 		source = mempool.NewAlchemyPendingClient(*rpcURL, httpClient, *alchemyTTL)
-	case "replay-placeholder":
+	case "encrypted-corpus":
+		var err error
+		encryptedSource, err := mempool.NewEncryptedCorpusSource(*encryptedCorpusPath)
+		if err != nil {
+			log.Fatalf("load encrypted-corpus source: %v", err)
+		}
+		source = encryptedSource
+		slotSource = encryptedSource
+	case "replay-placeholder-dev":
 		var err error
 		replaySource, err := mempool.NewReplayPlaceholderClient(mempool.ReplayPlaceholderConfig{
 			CorpusPath:  *corpusPath,
 			ClusterPath: *clusterPath,
-			Slot:        *replaySlot,
 		})
 		if err != nil {
 			log.Fatalf("load replay-placeholder source: %v", err)
 		}
 		source = replaySource
-		slotSource = replaySource
 	default:
-		log.Fatalf("invalid -source %q; expected txpool, public-pending, alchemy-pending or replay-placeholder", *sourceType)
+		log.Fatalf("invalid -source %q", *sourceType)
 	}
 
 	reader := mempool.NewReader(source, store, *pollInterval)

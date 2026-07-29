@@ -10,8 +10,22 @@ type Source interface {
 	Fetch(ctx context.Context) ([]Transaction, error)
 }
 
+type SlotPage struct {
+	SchemaVersion           string
+	CiphertextWireVersion   string
+	PublicConfigID          string
+	PlaintextMasterCorpusID string
+	EncryptedCorpusID       string
+	EncryptedPrefixSetID    string
+	Slot                    uint64
+	RequestedCount          int
+	AvailableCount          int
+	ReturnedCount           int
+	Transactions            []Transaction
+}
+
 type SlotSource interface {
-	FetchSlot(ctx context.Context, slot uint64) ([]Transaction, error)
+	FetchSlot(ctx context.Context, slot uint64, limit int) (SlotPage, error)
 }
 
 type Reader struct {

@@ -187,6 +187,12 @@ git commit -m "refactor: remove application context from BTE capsule"
 
 ## Task 2: Introduce The Minimal `bte-tx-v2` Hybrid Ciphertext
 
+**Execution note:** Tasks 2 and 3 form one atomic BTE compatibility checkpoint.
+Removing the legacy object fields necessarily removes the scope APIs and
+plaintext-hash recovery contract that consume those fields. Run both tasks'
+focused tests and the complete BTE suite before creating the checkpoint commit;
+do not preserve a transient API that accepts a scope and silently ignores it.
+
 **Files:**
 
 - Modify: `bte/btd-impl-main/be/cluster.go`
@@ -1000,4 +1006,3 @@ Report:
 
 Do not begin the issue #15 n=4 pilot until the user gives separate explicit AWS
 authorization against the replacement identities.
-

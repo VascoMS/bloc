@@ -19,8 +19,11 @@ import (
 )
 
 const (
-	LibraryVersion                       = "bte-tx-v1"
+	LibraryVersion                       = "bte-tx-v2"
 	defaultSuiteID                       = "BLS12-381-kilic"
+	hybridKeyDomain                      = "bloc-hybrid-key-v2"
+	hybridAADDomain                      = "bloc-hybrid-aad-v2"
+	batchIDDomain                        = "bloc-batch-v2"
 	aeadNonceSize                        = 12
 	aeadTagSize                          = 16
 	defaultMaxCombineAttemptsPerSubBatch = 256
@@ -43,22 +46,8 @@ type SecretShare struct {
 }
 
 type Ciphertext struct {
-	Version       string
-	ClusterID     string
-	Slot          uint64
-	Index         int
-	Capsule       CT
-	Nonce         []byte
-	EncryptedTx   []byte
-	PlaintextHash [32]byte
-}
-
-// CiphertextScope binds ciphertext processing to the application cluster and
-// slot that are currently active. Generic library callers may continue to use
-// the unscoped APIs when no single runtime scope exists.
-type CiphertextScope struct {
-	ClusterID string
-	Slot      uint64
+	Capsule     CT
+	EncryptedTx []byte
 }
 
 type DecryptionShare struct {
@@ -84,8 +73,6 @@ type BatchPlan struct {
 type DecodedBatch struct {
 	ciphertexts []Ciphertext
 	batchID     [32]byte
-	scope       CiphertextScope
-	scopeBound  bool
 }
 
 // Len returns the number of decoded ciphertexts.
@@ -104,10 +91,13 @@ func (b DecodedBatch) Ciphertexts() []Ciphertext {
 }
 
 type PlaintextResult struct {
-	OriginalPosition int
-	RawTx            []byte
-	HashOK           bool
-	Err              error
+	Plaintext []byte
+	Err       error
+}
+
+type positionedPlaintextResult struct {
+	position int
+	result   PlaintextResult
 }
 
 // CombineOptions bounds invalid-share recovery work independently for every
@@ -166,9 +156,17 @@ func NewNode(btd *BTD, pk kyber.Point, sk SecretShare, n, t int) *ClusterBTE {
 	}
 }
 
-func (c *ClusterBTE) EncryptTx(rawTx []byte, index int, clusterID string, slot uint64) (Ciphertext, error) {
+func (c *ClusterBTE) EncryptTx(rawTx []byte, index int) (Ciphertext, error) {
 	capsuleSecret := c.pickGT()
-	aead, err := aeadFromGT(capsuleSecret, aeadAAD(clusterID, slot, index))
+	capsule, err := c.btd.Enc(c.PK.Point, index, capsuleSecret)
+	if err != nil {
+		return Ciphertext{}, err
+	}
+	capsuleDigest, err := digestCapsule(capsule)
+	if err != nil {
+		return Ciphertext{}, err
+	}
+	aead, err := aeadFromGT(capsuleSecret, capsuleDigest)
 	if err != nil {
 		return Ciphertext{}, err
 	}
@@ -176,20 +174,11 @@ func (c *ClusterBTE) EncryptTx(rawTx []byte, index int, clusterID string, slot u
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return Ciphertext{}, err
 	}
-	encryptedTx := aead.Seal(nil, nonce, rawTx, aeadAAD(clusterID, slot, index))
-	capsule, err := c.btd.Enc(c.PK.Point, index, capsuleSecret)
-	if err != nil {
-		return Ciphertext{}, err
-	}
+	encryptedTx := append([]byte(nil), nonce...)
+	encryptedTx = aead.Seal(encryptedTx, nonce, rawTx, hybridAAD(capsuleDigest))
 	return Ciphertext{
-		Version:       LibraryVersion,
-		ClusterID:     clusterID,
-		Slot:          slot,
-		Index:         index,
-		Capsule:       capsule,
-		Nonce:         nonce,
-		EncryptedTx:   encryptedTx,
-		PlaintextHash: sha256.Sum256(rawTx),
+		Capsule:     capsule,
+		EncryptedTx: encryptedTx,
 	}, nil
 }
 
@@ -200,7 +189,6 @@ func (c *ClusterBTE) pickGT() kyber.Point {
 
 func cloneCiphertext(ct Ciphertext) Ciphertext {
 	out := ct
-	out.Nonce = append([]byte(nil), ct.Nonce...)
 	out.EncryptedTx = append([]byte(nil), ct.EncryptedTx...)
 	out.Capsule = CT{
 		I:     ct.Capsule.I,
@@ -233,17 +221,7 @@ func cloneScalar(scalar kyber.Scalar) kyber.Scalar {
 }
 
 func (c *ClusterBTE) PlanBatch(ciphertexts []Ciphertext) (BatchPlan, error) {
-	return c.planBatch(ciphertexts, nil)
-}
-
-// PlanBatchFor plans an in-memory batch only when every ciphertext belongs to
-// the expected application cluster and slot.
-func (c *ClusterBTE) PlanBatchFor(ciphertexts []Ciphertext, scope CiphertextScope) (BatchPlan, error) {
-	return c.planBatch(ciphertexts, &scope)
-}
-
-func (c *ClusterBTE) planBatch(ciphertexts []Ciphertext, scope *CiphertextScope) (BatchPlan, error) {
-	alpha, subBatches, err := c.arrangeBatchFor(ciphertexts, scope)
+	alpha, subBatches, err := c.arrangeBatch(ciphertexts)
 	if err != nil {
 		return BatchPlan{}, err
 	}
@@ -256,28 +234,14 @@ func (c *ClusterBTE) planBatch(ciphertexts []Ciphertext, scope *CiphertextScope)
 
 // DecodeBatch parses ordered canonical ciphertext encodings exactly once.
 func (c *ClusterBTE) DecodeBatch(encoded [][]byte) (DecodedBatch, error) {
-	return c.decodeBatch(encoded, nil)
-}
-
-// DecodeBatchFor parses a canonical batch and binds it to the expected
-// application cluster and slot.
-func (c *ClusterBTE) DecodeBatchFor(encoded [][]byte, scope CiphertextScope) (DecodedBatch, error) {
-	return c.decodeBatch(encoded, &scope)
-}
-
-func (c *ClusterBTE) decodeBatch(encoded [][]byte, scope *CiphertextScope) (DecodedBatch, error) {
 	if len(encoded) > c.Params.BMax {
 		return DecodedBatch{}, fmt.Errorf("batch size %d exceeds BMax %d", len(encoded), c.Params.BMax)
 	}
 	decoded := DecodedBatch{
 		ciphertexts: make([]Ciphertext, 0, len(encoded)),
 	}
-	if scope != nil {
-		decoded.scope = *scope
-		decoded.scopeBound = true
-	}
 	for i, raw := range encoded {
-		ct, err := c.unmarshalCiphertext(raw, scope)
+		ct, err := c.UnmarshalCiphertext(raw)
 		if err != nil {
 			return DecodedBatch{}, fmt.Errorf("decode ciphertext %d: %w", i, err)
 		}
@@ -290,11 +254,7 @@ func (c *ClusterBTE) decodeBatch(encoded [][]byte, scope *CiphertextScope) (Deco
 // PlanDecodedBatch arranges a decoded batch and reuses the immutable identity
 // derived from the canonical encodings accepted by DecodeBatch.
 func (c *ClusterBTE) PlanDecodedBatch(decoded DecodedBatch) (BatchPlan, error) {
-	var scope *CiphertextScope
-	if decoded.scopeBound {
-		scope = &decoded.scope
-	}
-	alpha, subBatches, err := c.arrangeBatchFor(decoded.ciphertexts, scope)
+	alpha, subBatches, err := c.arrangeBatch(decoded.ciphertexts)
 	if err != nil {
 		return BatchPlan{}, err
 	}
@@ -308,16 +268,7 @@ func (c *ClusterBTE) PlanDecodedBatch(decoded DecodedBatch) (BatchPlan, error) {
 // DecodeAndPlanBatch is the one-call API for callers that do not need a timing
 // boundary between ciphertext decoding and batch arrangement.
 func (c *ClusterBTE) DecodeAndPlanBatch(encoded [][]byte) ([]Ciphertext, BatchPlan, error) {
-	return c.decodeAndPlanBatch(encoded, nil)
-}
-
-// DecodeAndPlanBatchFor is the scoped one-call decode and planning API.
-func (c *ClusterBTE) DecodeAndPlanBatchFor(encoded [][]byte, scope CiphertextScope) ([]Ciphertext, BatchPlan, error) {
-	return c.decodeAndPlanBatch(encoded, &scope)
-}
-
-func (c *ClusterBTE) decodeAndPlanBatch(encoded [][]byte, scope *CiphertextScope) ([]Ciphertext, BatchPlan, error) {
-	decoded, err := c.decodeBatch(encoded, scope)
+	decoded, err := c.DecodeBatch(encoded)
 	if err != nil {
 		return nil, BatchPlan{}, err
 	}
@@ -329,10 +280,6 @@ func (c *ClusterBTE) decodeAndPlanBatch(encoded [][]byte, scope *CiphertextScope
 }
 
 func (c *ClusterBTE) arrangeBatch(ciphertexts []Ciphertext) (int, [][]BatchItem, error) {
-	return c.arrangeBatchFor(ciphertexts, nil)
-}
-
-func (c *ClusterBTE) arrangeBatchFor(ciphertexts []Ciphertext, scope *CiphertextScope) (int, [][]BatchItem, error) {
 	if len(ciphertexts) == 0 {
 		return 0, nil, fmt.Errorf("empty batch")
 	}
@@ -341,10 +288,10 @@ func (c *ClusterBTE) arrangeBatchFor(ciphertexts []Ciphertext, scope *Ciphertext
 	}
 	counts := make(map[int]int)
 	for _, ct := range ciphertexts {
-		if err := c.validateCiphertextMetadata(ct, scope); err != nil {
+		if err := c.validateCiphertext(ct); err != nil {
 			return 0, nil, err
 		}
-		counts[ct.Index]++
+		counts[ct.Capsule.I]++
 	}
 	alpha := int(math.Ceil(2 * math.Sqrt(float64(len(ciphertexts)))))
 	if alpha < 1 {
@@ -363,8 +310,8 @@ func (c *ClusterBTE) arrangeBatchFor(ciphertexts []Ciphertext, scope *Ciphertext
 		items[i] = BatchItem{OriginalPosition: i, Ciphertext: ct}
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		ci := counts[items[i].Ciphertext.Index]
-		cj := counts[items[j].Ciphertext.Index]
+		ci := counts[items[i].Ciphertext.Capsule.I]
+		cj := counts[items[j].Ciphertext.Capsule.I]
 		if ci != cj {
 			return ci > cj
 		}
@@ -395,7 +342,7 @@ func arrangeCollisionFree(items []BatchItem, alpha int) ([][]BatchItem, error) {
 		seen[i] = make(map[int]bool)
 	}
 	for _, item := range items {
-		index := item.Ciphertext.Index
+		index := item.Ciphertext.Capsule.I
 		selected := -1
 		for subBatchID := 0; subBatchID < alpha; subBatchID++ {
 			if seen[subBatchID][index] {
@@ -418,7 +365,7 @@ func validateSubBatchIndices(subBatches [][]BatchItem) error {
 	for id, subBatch := range subBatches {
 		seen := make(map[int]bool)
 		for _, item := range subBatch {
-			idx := item.Ciphertext.Index
+			idx := item.Ciphertext.Capsule.I
 			if seen[idx] {
 				return fmt.Errorf("duplicate index %d in sub-batch %d", idx, id)
 			}
@@ -506,16 +453,16 @@ func (c *ClusterBTE) CombineSharesBounded(plan BatchPlan, shares []DecryptionSha
 		if err != nil {
 			return nil, stats, fmt.Errorf("sub-batch %d: %w", subBatchID, err)
 		}
-		for _, result := range subResults {
-			results[result.OriginalPosition] = result
+		for _, positioned := range subResults {
+			results[positioned.position] = positioned.result
 		}
 	}
 	return results, stats, nil
 }
 
-func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare, maxAttempts int) ([]PlaintextResult, int, error) {
+func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare, maxAttempts int) ([]positionedPlaintextResult, int, error) {
 	var firstErr error
-	var out []PlaintextResult
+	var out []positionedPlaintextResult
 	attempts := 0
 	forEachShareCombination(len(shares), c.btd.T, func(indices []int) bool {
 		if attempts >= maxAttempts {
@@ -534,10 +481,10 @@ func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare
 			return false
 		}
 		candidateResults := plaintextResultsFromMessages(items, msgs)
-		for _, result := range candidateResults {
-			if result.Err != nil || !result.HashOK {
+		for _, positioned := range candidateResults {
+			if positioned.result.Err != nil {
 				if firstErr == nil {
-					firstErr = result.Err
+					firstErr = positioned.result.Err
 				}
 				return false
 			}
@@ -557,20 +504,16 @@ func (c *ClusterBTE) combineSubBatch(items []BatchItem, shares []*share.PubShare
 	return out, attempts, nil
 }
 
-func plaintextResultsFromMessages(items []BatchItem, msgs []kyber.Point) []PlaintextResult {
-	results := make([]PlaintextResult, len(msgs))
+func plaintextResultsFromMessages(items []BatchItem, msgs []kyber.Point) []positionedPlaintextResult {
+	results := make([]positionedPlaintextResult, len(msgs))
 	for i, msg := range msgs {
 		item := items[i]
 		rawTx, err := decryptTx(msg, item.Ciphertext)
-		result := PlaintextResult{OriginalPosition: item.OriginalPosition, Err: err}
+		result := PlaintextResult{Err: err}
 		if err == nil {
-			result.RawTx = rawTx
-			result.HashOK = sha256.Sum256(rawTx) == item.Ciphertext.PlaintextHash
-			if !result.HashOK {
-				result.Err = fmt.Errorf("plaintext hash mismatch")
-			}
+			result.Plaintext = rawTx
 		}
-		results[i] = result
+		results[i] = positionedPlaintextResult{position: item.OriginalPosition, result: result}
 	}
 	return results
 }
@@ -622,22 +565,39 @@ func capsulesFromItems(items []BatchItem) []CT {
 }
 
 func decryptTx(secret kyber.Point, ct Ciphertext) ([]byte, error) {
-	if err := validateAEADPayloadShape(ct.Nonce, ct.EncryptedTx); err != nil {
+	if err := validateAEADPayloadShape(ct.EncryptedTx); err != nil {
 		return nil, err
 	}
-	aead, err := aeadFromGT(secret, aeadAAD(ct.ClusterID, ct.Slot, ct.Index))
+	capsuleDigest, err := digestCapsule(ct.Capsule)
 	if err != nil {
 		return nil, err
 	}
-	return aead.Open(nil, ct.Nonce, ct.EncryptedTx, aeadAAD(ct.ClusterID, ct.Slot, ct.Index))
+	aead, err := aeadFromGT(secret, capsuleDigest)
+	if err != nil {
+		return nil, err
+	}
+	nonce := ct.EncryptedTx[:aeadNonceSize]
+	sealed := ct.EncryptedTx[aeadNonceSize:]
+	return aead.Open(nil, nonce, sealed, hybridAAD(capsuleDigest))
 }
 
-func aeadFromGT(secret kyber.Point, aad []byte) (cipher.AEAD, error) {
+func digestCapsule(capsule CT) ([32]byte, error) {
+	encoded, err := capsule.MarshalBinary()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(encoded), nil
+}
+
+func aeadFromGT(secret kyber.Point, capsuleDigest [32]byte) (cipher.AEAD, error) {
 	secretBytes, err := secret.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-	reader := hkdf.New(sha256.New, secretBytes, nil, append([]byte(LibraryVersion), aad...))
+	info := make([]byte, 0, len(hybridKeyDomain)+len(capsuleDigest))
+	info = append(info, hybridKeyDomain...)
+	info = append(info, capsuleDigest[:]...)
+	reader := hkdf.New(sha256.New, secretBytes, nil, info)
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(reader, key); err != nil {
 		return nil, err
@@ -649,15 +609,10 @@ func aeadFromGT(secret kyber.Point, aad []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-func aeadAAD(clusterID string, slot uint64, index int) []byte {
-	var buf bytes.Buffer
-	buf.WriteString(LibraryVersion)
-	buf.WriteByte(0)
-	buf.WriteString(clusterID)
-	buf.WriteByte(0)
-	_ = binary.Write(&buf, binary.BigEndian, slot)
-	_ = binary.Write(&buf, binary.BigEndian, int64(index))
-	return buf.Bytes()
+func hybridAAD(capsuleDigest [32]byte) []byte {
+	aad := make([]byte, 0, len(hybridAADDomain)+len(capsuleDigest))
+	aad = append(aad, hybridAADDomain...)
+	return append(aad, capsuleDigest[:]...)
 }
 
 func computeBatchID(ciphertexts []Ciphertext) ([32]byte, error) {
@@ -674,7 +629,7 @@ func computeBatchID(ciphertexts []Ciphertext) ([32]byte, error) {
 
 func computeBatchIDFromEncoded(encoded [][]byte) [32]byte {
 	h := sha256.New()
-	h.Write([]byte(LibraryVersion))
+	h.Write([]byte(batchIDDomain))
 	for _, raw := range encoded {
 		_ = binary.Write(h, binary.BigEndian, uint64(len(raw)))
 		h.Write(raw)
@@ -684,52 +639,24 @@ func computeBatchIDFromEncoded(encoded [][]byte) [32]byte {
 	return out
 }
 
-func (c *ClusterBTE) validateCiphertextMetadata(ct Ciphertext, scope *CiphertextScope) error {
-	if ct.Version != LibraryVersion {
-		return fmt.Errorf("unsupported ciphertext version %q", ct.Version)
+func (c *ClusterBTE) validateCiphertext(ct Ciphertext) error {
+	if ct.Capsule.I < 0 || ct.Capsule.I >= c.Params.N {
+		return fmt.Errorf("ciphertext index out of domain: %d", ct.Capsule.I)
 	}
-	if scope != nil {
-		if ct.ClusterID != scope.ClusterID {
-			return fmt.Errorf("ciphertext cluster %q does not match expected cluster %q", ct.ClusterID, scope.ClusterID)
-		}
-		if ct.Slot != scope.Slot {
-			return fmt.Errorf("ciphertext slot %d does not match expected slot %d", ct.Slot, scope.Slot)
-		}
-	}
-	if ct.Index < 0 || ct.Index >= c.Params.N {
-		return fmt.Errorf("ciphertext index out of domain: %d", ct.Index)
-	}
-	if ct.Capsule.I != ct.Index {
-		return fmt.Errorf("outer index %d does not match capsule index %d", ct.Index, ct.Capsule.I)
-	}
-	return validateAEADPayloadShape(ct.Nonce, ct.EncryptedTx)
+	return validateAEADPayloadShape(ct.EncryptedTx)
 }
 
-func validateAEADPayloadShape(nonce, encryptedTx []byte) error {
-	if len(nonce) != aeadNonceSize {
-		return fmt.Errorf("invalid AEAD nonce length %d, expected %d", len(nonce), aeadNonceSize)
-	}
-	if len(encryptedTx) < aeadTagSize {
-		return fmt.Errorf("encrypted transaction length %d is smaller than AEAD tag size %d", len(encryptedTx), aeadTagSize)
+func validateAEADPayloadShape(encryptedTx []byte) error {
+	minimum := aeadNonceSize + aeadTagSize
+	if len(encryptedTx) < minimum {
+		return fmt.Errorf("encrypted transaction length %d is smaller than nonce and AEAD tag size %d", len(encryptedTx), minimum)
 	}
 	return nil
 }
 
 func (ct Ciphertext) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
-	buf.WriteString(ct.Version)
-	buf.WriteByte(0)
-	buf.WriteString(ct.ClusterID)
-	buf.WriteByte(0)
-	_ = binary.Write(&buf, binary.BigEndian, ct.Slot)
-	_ = binary.Write(&buf, binary.BigEndian, int64(ct.Index))
-	if err := writeBytes(&buf, ct.Nonce); err != nil {
-		return nil, err
-	}
-	if err := writeBytes(&buf, ct.EncryptedTx); err != nil {
-		return nil, err
-	}
-	buf.Write(ct.PlaintextHash[:])
+	buf.WriteString(LibraryVersion)
 	capsule, err := ct.Capsule.MarshalBinary()
 	if err != nil {
 		return nil, err
@@ -737,62 +664,20 @@ func (ct Ciphertext) MarshalBinary() ([]byte, error) {
 	if err := writeBytes(&buf, capsule); err != nil {
 		return nil, err
 	}
+	if err := writeBytes(&buf, ct.EncryptedTx); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
 func (c *ClusterBTE) UnmarshalCiphertext(data []byte) (Ciphertext, error) {
-	return c.unmarshalCiphertext(data, nil)
-}
-
-func (c *ClusterBTE) unmarshalCiphertext(data []byte, scope *CiphertextScope) (Ciphertext, error) {
 	reader := bytes.NewReader(data)
-	version, err := readNullTerminated(reader)
-	if err != nil {
-		return Ciphertext{}, err
+	magic := make([]byte, len(LibraryVersion))
+	if _, err := io.ReadFull(reader, magic); err != nil {
+		return Ciphertext{}, fmt.Errorf("read ciphertext version: %w", err)
 	}
-	if version != LibraryVersion {
-		return Ciphertext{}, fmt.Errorf("unsupported ciphertext version %q", version)
-	}
-	clusterID, err := readNullTerminated(reader)
-	if err != nil {
-		return Ciphertext{}, err
-	}
-	var slot uint64
-	if err := binary.Read(reader, binary.BigEndian, &slot); err != nil {
-		return Ciphertext{}, err
-	}
-	var index int64
-	if err := binary.Read(reader, binary.BigEndian, &index); err != nil {
-		return Ciphertext{}, err
-	}
-	if scope != nil {
-		if clusterID != scope.ClusterID {
-			return Ciphertext{}, fmt.Errorf("ciphertext cluster %q does not match expected cluster %q", clusterID, scope.ClusterID)
-		}
-		if slot != scope.Slot {
-			return Ciphertext{}, fmt.Errorf("ciphertext slot %d does not match expected slot %d", slot, scope.Slot)
-		}
-	}
-	if index < 0 || index >= int64(c.Params.N) {
-		return Ciphertext{}, fmt.Errorf("ciphertext index out of domain: %d", index)
-	}
-	nonce, err := readBytes(reader)
-	if err != nil {
-		return Ciphertext{}, err
-	}
-	if len(nonce) != aeadNonceSize {
-		return Ciphertext{}, fmt.Errorf("invalid AEAD nonce length %d, expected %d", len(nonce), aeadNonceSize)
-	}
-	encryptedTx, err := readBytes(reader)
-	if err != nil {
-		return Ciphertext{}, err
-	}
-	if len(encryptedTx) < aeadTagSize {
-		return Ciphertext{}, fmt.Errorf("encrypted transaction length %d is smaller than AEAD tag size %d", len(encryptedTx), aeadTagSize)
-	}
-	var plaintextHash [32]byte
-	if _, err := io.ReadFull(reader, plaintextHash[:]); err != nil {
-		return Ciphertext{}, err
+	if string(magic) != LibraryVersion {
+		return Ciphertext{}, fmt.Errorf("unsupported ciphertext version %q", string(magic))
 	}
 	capsuleBytes, err := readBytes(reader)
 	if err != nil {
@@ -802,20 +687,18 @@ func (c *ClusterBTE) unmarshalCiphertext(data []byte, scope *CiphertextScope) (C
 	if err != nil {
 		return Ciphertext{}, err
 	}
+	encryptedTx, err := readBytes(reader)
+	if err != nil {
+		return Ciphertext{}, err
+	}
 	if reader.Len() != 0 {
 		return Ciphertext{}, fmt.Errorf("trailing ciphertext bytes: %d", reader.Len())
 	}
 	decoded := Ciphertext{
-		Version:       version,
-		ClusterID:     clusterID,
-		Slot:          slot,
-		Index:         int(index),
-		Capsule:       capsule,
-		Nonce:         nonce,
-		EncryptedTx:   encryptedTx,
-		PlaintextHash: plaintextHash,
+		Capsule:     capsule,
+		EncryptedTx: encryptedTx,
 	}
-	if err := c.validateCiphertextMetadata(decoded, scope); err != nil {
+	if err := c.validateCiphertext(decoded); err != nil {
 		return Ciphertext{}, err
 	}
 	return decoded, nil
@@ -922,18 +805,4 @@ func readBytes(reader *bytes.Reader) ([]byte, error) {
 	out := make([]byte, size)
 	_, err := io.ReadFull(reader, out)
 	return out, err
-}
-
-func readNullTerminated(reader *bytes.Reader) (string, error) {
-	var out []byte
-	for {
-		b, err := reader.ReadByte()
-		if err != nil {
-			return "", err
-		}
-		if b == 0 {
-			return string(out), nil
-		}
-		out = append(out, b)
-	}
 }

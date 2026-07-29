@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	clusterConfigVersion = "bloc-cluster-v2"
+	clusterConfigVersion = "bloc-cluster-v3"
 	nodeSecretVersion    = "bloc-node-secret-v1"
 
 	defaultMaxProposalBytes                     = 8 << 20
@@ -49,7 +49,7 @@ type ConfigFile struct {
 }
 
 // ResourceLimits bounds attacker-influenced protocol memory and cryptographic
-// work. Zero values are filled with the stable v2 defaults.
+// work. Zero values are filled with the stable v3 defaults.
 type ResourceLimits struct {
 	MaxProposalBytes              int `json:"max_proposal_bytes,omitempty"`
 	MaxEnvelopeBytes              int `json:"max_envelope_bytes,omitempty"`

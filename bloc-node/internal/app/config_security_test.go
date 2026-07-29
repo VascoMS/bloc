@@ -43,31 +43,31 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	if cfg.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
 		t.Fatalf("generated mempool timeout = %d ms, want %d", cfg.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
 	}
-	var legacyV2 map[string]any
-	if err := json.Unmarshal(publicJSON, &legacyV2); err != nil {
+	var configWithoutLimits map[string]any
+	if err := json.Unmarshal(publicJSON, &configWithoutLimits); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := legacyV2["limits"]; !ok {
+	if _, ok := configWithoutLimits["limits"]; !ok {
 		t.Fatal("generated public config omitted explicit resource limits")
 	}
-	delete(legacyV2, "limits")
-	legacyV2["provider"] = map[string]any{"mode": "direct"}
-	legacyJSON, err := json.Marshal(legacyV2)
+	delete(configWithoutLimits, "limits")
+	configWithoutLimits["provider"] = map[string]any{"mode": "direct"}
+	configJSON, err := json.Marshal(configWithoutLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(clusterPath, legacyJSON, 0644); err != nil {
+	if err := os.WriteFile(clusterPath, configJSON, 0644); err != nil {
 		t.Fatal(err)
 	}
-	legacyCfg, err := readConfig(clusterPath)
+	defaultedCfg, err := readConfig(clusterPath)
 	if err != nil {
-		t.Fatalf("read v2 config without limits: %v", err)
+		t.Fatalf("read v3 config without limits: %v", err)
 	}
-	if legacyCfg.Limits != defaultResourceLimits() {
-		t.Fatalf("legacy v2 defaults = %+v, want %+v", legacyCfg.Limits, defaultResourceLimits())
+	if defaultedCfg.Limits != defaultResourceLimits() {
+		t.Fatalf("v3 defaults = %+v, want %+v", defaultedCfg.Limits, defaultResourceLimits())
 	}
-	if legacyCfg.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
-		t.Fatalf("legacy v2 mempool timeout = %d ms, want %d", legacyCfg.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
+	if defaultedCfg.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
+		t.Fatalf("v3 mempool timeout = %d ms, want %d", defaultedCfg.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
 	}
 
 	secretPath := filepath.Join(dir, "secrets", "operator-2.json")
@@ -110,6 +110,41 @@ func TestGenConfigSeparatesPublicAndOperatorSecrets(t *testing.T) {
 	}
 	if _, err := readConfig(clusterPath); err == nil || !strings.Contains(err.Error(), "public CRS hash mismatch") {
 		t.Fatalf("tampered CRS error = %v", err)
+	}
+}
+
+func TestReadConfigRejectsV2CiphertextContract(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4",
+		"--threshold", "3",
+		"--bmax", "8",
+		"--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+
+	data, err := os.ReadFile(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["version"] = "bloc-cluster-v2"
+	data, err = json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clusterPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = readConfig(clusterPath)
+	if err == nil || !strings.Contains(err.Error(), `unsupported cluster config version "bloc-cluster-v2"`) {
+		t.Fatalf("v2 config error = %v", err)
 	}
 }
 

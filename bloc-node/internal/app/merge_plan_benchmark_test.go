@@ -49,7 +49,7 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 						agreed := inclusion.NewAgreedSet(1, lists)
 						merged := inclusion.Merge(1, lists, BlockspaceConfig{}, 128)
 						encoded := encodedBenchmarkCiphertexts(merged.Items)
-						decoded, err := fixture.cluster.DecodeBatchFor(encoded, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
+						decoded, err := fixture.cluster.DecodeBatch(encoded)
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -93,7 +93,7 @@ func BenchmarkMergePlanAttribution(b *testing.B) {
 				b.Run(name+"/ciphertext-decode", func(b *testing.B) {
 					b.ReportAllocs()
 					for range b.N {
-						decoded, err := fixture.cluster.DecodeBatchFor(fixture.encoded, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
+						decoded, err := fixture.cluster.DecodeBatch(fixture.encoded)
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -128,7 +128,7 @@ func newMergePlanBenchmarkFixture(tb testing.TB, nodes, batch int, overlap bool)
 	items := make([]EncryptedPlaceholder, batch)
 	for i := range items {
 		raw := bytes.Repeat([]byte{byte(i + 1)}, 256)
-		ct, err := cluster.EncryptTx(raw, i, "merge-plan-bench", 1)
+		ct, err := cluster.EncryptTx(raw, i)
 		if err != nil {
 			tb.Fatal(err)
 		}
@@ -168,7 +168,7 @@ func newMergePlanBenchmarkFixture(tb testing.TB, nodes, batch int, overlap bool)
 	}
 	merged := inclusion.Merge(1, lists, BlockspaceConfig{}, 128)
 	encodedCiphertexts := encodedBenchmarkCiphertexts(merged.Items)
-	decoded, err := cluster.DecodeBatchFor(encodedCiphertexts, be.CiphertextScope{ClusterID: "merge-plan-bench", Slot: 1})
+	decoded, err := cluster.DecodeBatch(encodedCiphertexts)
 	if err != nil {
 		tb.Fatal(err)
 	}

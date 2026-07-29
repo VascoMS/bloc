@@ -373,7 +373,7 @@ func (n *Node) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	n.mu.Lock()
 	index := len(n.pending) % n.cfg.BMax
 	n.mu.Unlock()
-	ct, err := n.cluster.EncryptTx(raw, index, n.cfg.ClusterID, n.id)
+	ct, err := n.cluster.EncryptTx(raw, index)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -626,7 +626,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	for _, item := range merged.Items {
 		encodedCiphertexts = append(encodedCiphertexts, item.Ciphertext)
 	}
-	decodedBatch, err := n.cluster.DecodeBatchFor(encodedCiphertexts, be.CiphertextScope{ClusterID: n.cfg.ClusterID, Slot: n.id})
+	decodedBatch, err := n.cluster.DecodeBatch(encodedCiphertexts)
 	if err != nil {
 		log.Printf("decode ciphertext batch: %v", err)
 		n.markSlotFailed("decode")
@@ -835,14 +835,14 @@ func (n *Node) tryCombine() {
 	ethereumTxHashes := make([]string, len(results))
 	ethereumTxs := make([]EthereumTxSummary, len(results))
 	for i, r := range results {
-		if r.Err != nil || !r.HashOK {
+		if r.Err != nil {
 			plaintexts[i] = "ERROR:" + r.Err.Error()
 			plaintextHashes[i] = ""
 			continue
 		}
-		plaintexts[i] = "0x" + hex.EncodeToString(r.RawTx)
-		plaintextHashes[i] = hashHex(r.RawTx)
-		txSummary, err := ethdemo.Parse(r.RawTx)
+		plaintexts[i] = "0x" + hex.EncodeToString(r.Plaintext)
+		plaintextHashes[i] = hashHex(r.Plaintext)
+		txSummary, err := ethdemo.Parse(r.Plaintext)
 		if err != nil {
 			plaintexts[i] = "ERROR:invalid ethereum transaction:" + err.Error()
 			continue

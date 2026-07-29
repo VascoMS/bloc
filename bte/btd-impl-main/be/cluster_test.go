@@ -49,7 +49,7 @@ func TestBatchCombineMessagesReturnsPlaintexts(t *testing.T) {
 func TestVerifyCTRejectsMutations(t *testing.T) {
 	cluster := newTestCluster(t, 8, 10, 5)
 	msg := cluster.pickGT()
-	ct, err := cluster.btd.EncWithContext(cluster.PK.Point, 1, msg, []byte("metadata"))
+	ct, err := cluster.btd.Enc(cluster.PK.Point, 1, msg)
 	require.NoError(t, err)
 	ok, err := cluster.btd.VerifyCT(ct)
 	require.NoError(t, err)
@@ -68,16 +68,32 @@ func TestVerifyCTRejectsMutations(t *testing.T) {
 			mut.C.A = cluster.btd.suite.G1().Point().Add(mut.C.A, cluster.btd.suite.G1().Point().Base())
 			return mut
 		},
+		"elgamal B": func(mut CT) CT {
+			mut.C.B = cluster.btd.suite.G1().Point().Add(mut.C.B, cluster.btd.suite.G1().Point().Base())
+			return mut
+		},
 		"index": func(mut CT) CT {
 			mut.I = 2
 			return mut
 		},
-		"proof": func(mut CT) CT {
+		"proof Ap": func(mut CT) CT {
+			mut.Pi.Ap = cluster.btd.suite.G1().Point().Add(mut.Pi.Ap, cluster.btd.suite.G1().Point().Base())
+			return mut
+		},
+		"proof Bp": func(mut CT) CT {
+			mut.Pi.Bp = cluster.btd.suite.G1().Point().Add(mut.Pi.Bp, cluster.btd.suite.G1().Point().Base())
+			return mut
+		},
+		"proof Yp": func(mut CT) CT {
+			mut.Pi.Yp = cluster.btd.suite.G1().Point().Add(mut.Pi.Yp, cluster.btd.suite.G1().Point().Base())
+			return mut
+		},
+		"proof KHat": func(mut CT) CT {
 			mut.Pi.KHat = cluster.btd.suite.G1().Scalar().Add(mut.Pi.KHat, cluster.btd.suite.G1().Scalar().One())
 			return mut
 		},
-		"context": func(mut CT) CT {
-			mut.Context = []byte("other-metadata")
+		"proof UHat": func(mut CT) CT {
+			mut.Pi.UHat = cluster.btd.suite.G1().Scalar().Add(mut.Pi.UHat, cluster.btd.suite.G1().Scalar().One())
 			return mut
 		},
 	}
@@ -88,6 +104,63 @@ func TestVerifyCTRejectsMutations(t *testing.T) {
 			require.False(t, ok)
 		})
 	}
+}
+
+func TestProofChallengeBindsSelectedCRSPoint(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.btd.Enc(cluster.PK.Point, 3, cluster.pickGT())
+	require.NoError(t, err)
+
+	original, err := cluster.btd.SHash(cluster.PK.Point, ct, ct.Pi.Ap, ct.Pi.Bp, ct.Pi.Yp)
+	require.NoError(t, err)
+
+	selected := cluster.btd.prf.G1xi[ct.I]
+	cluster.btd.prf.G1xi[ct.I] = cluster.btd.suite.G1().Point().Add(
+		selected,
+		cluster.btd.suite.G1().Point().Base(),
+	)
+	t.Cleanup(func() {
+		cluster.btd.prf.G1xi[ct.I] = selected
+	})
+
+	changed, err := cluster.btd.SHash(cluster.PK.Point, ct, ct.Pi.Ap, ct.Pi.Bp, ct.Pi.Yp)
+	require.NoError(t, err)
+	require.False(t, original.Equal(changed))
+}
+
+func TestCapsuleEncodingContainsOnlyCryptographicStatement(t *testing.T) {
+	cluster := newTestCluster(t, 8, 10, 5)
+	ct, err := cluster.btd.Enc(cluster.PK.Point, 3, cluster.pickGT())
+	require.NoError(t, err)
+
+	var expected bytes.Buffer
+	require.NoError(t, binary.Write(&expected, binary.BigEndian, int64(ct.I)))
+	for _, point := range []kyber.Point{
+		ct.Gamma,
+		ct.Kp,
+		ct.C.A,
+		ct.C.B,
+		ct.Pi.Ap,
+		ct.Pi.Bp,
+		ct.Pi.Yp,
+	} {
+		encoded, marshalErr := point.MarshalBinary()
+		require.NoError(t, marshalErr)
+		require.NoError(t, binary.Write(&expected, binary.BigEndian, uint64(len(encoded))))
+		_, writeErr := expected.Write(encoded)
+		require.NoError(t, writeErr)
+	}
+	for _, scalar := range []kyber.Scalar{ct.Pi.KHat, ct.Pi.UHat} {
+		encoded, marshalErr := scalar.MarshalBinary()
+		require.NoError(t, marshalErr)
+		require.NoError(t, binary.Write(&expected, binary.BigEndian, uint64(len(encoded))))
+		_, writeErr := expected.Write(encoded)
+		require.NoError(t, writeErr)
+	}
+
+	actual, err := ct.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, expected.Bytes(), actual)
 }
 
 func TestHybridEncryptionRoundTrip(t *testing.T) {
@@ -523,7 +596,6 @@ func TestDecodedBatchCiphertextsAreDeepCopies(t *testing.T) {
 	first := decoded.Ciphertexts()
 	first[0].Nonce[0] ^= 0xff
 	first[0].EncryptedTx[0] ^= 0xff
-	first[0].Capsule.Context[0] ^= 0xff
 	first[0].Capsule.Gamma.Null()
 	first[0].Capsule.Pi.KHat.Zero()
 
@@ -733,7 +805,7 @@ func structuralCiphertext(index int, clusterID string, slot uint64) Ciphertext {
 		ClusterID:   clusterID,
 		Slot:        slot,
 		Index:       index,
-		Capsule:     CT{I: index, Context: aeadAAD(clusterID, slot, index)},
+		Capsule:     CT{I: index},
 		Nonce:       make([]byte, aeadNonceSize),
 		EncryptedTx: make([]byte, aeadTagSize),
 	}
@@ -759,15 +831,6 @@ func TestBatchDecRejectsDuplicateIndices(t *testing.T) {
 	ctB, err := cluster.btd.Enc(cluster.PK.Point, 1, msgB)
 	require.NoError(t, err)
 	_, err = cluster.btd.BatchDec([]CT{ctA, ctB}, 0, true)
-	require.Error(t, err)
-}
-
-func TestPlanBatchRejectsMetadataMismatch(t *testing.T) {
-	cluster := newTestCluster(t, 8, 10, 5)
-	ct, err := cluster.EncryptTx([]byte("tx"), 0, "cluster-a", 123)
-	require.NoError(t, err)
-	ct.ClusterID = "cluster-b"
-	_, err = cluster.PlanBatch([]Ciphertext{ct})
 	require.Error(t, err)
 }
 

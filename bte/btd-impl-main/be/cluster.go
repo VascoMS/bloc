@@ -177,8 +177,7 @@ func (c *ClusterBTE) EncryptTx(rawTx []byte, index int, clusterID string, slot u
 		return Ciphertext{}, err
 	}
 	encryptedTx := aead.Seal(nil, nonce, rawTx, aeadAAD(clusterID, slot, index))
-	aad := aeadAAD(clusterID, slot, index)
-	capsule, err := c.btd.EncWithContext(c.PK.Point, index, capsuleSecret, aad)
+	capsule, err := c.btd.Enc(c.PK.Point, index, capsuleSecret)
 	if err != nil {
 		return Ciphertext{}, err
 	}
@@ -204,11 +203,10 @@ func cloneCiphertext(ct Ciphertext) Ciphertext {
 	out.Nonce = append([]byte(nil), ct.Nonce...)
 	out.EncryptedTx = append([]byte(nil), ct.EncryptedTx...)
 	out.Capsule = CT{
-		I:       ct.Capsule.I,
-		Gamma:   clonePoint(ct.Capsule.Gamma),
-		Kp:      clonePoint(ct.Capsule.Kp),
-		C:       elgamal.CT{A: clonePoint(ct.Capsule.C.A), B: clonePoint(ct.Capsule.C.B)},
-		Context: append([]byte(nil), ct.Capsule.Context...),
+		I:     ct.Capsule.I,
+		Gamma: clonePoint(ct.Capsule.Gamma),
+		Kp:    clonePoint(ct.Capsule.Kp),
+		C:     elgamal.CT{A: clonePoint(ct.Capsule.C.A), B: clonePoint(ct.Capsule.C.B)},
 		Pi: Proof{
 			Ap:   clonePoint(ct.Capsule.Pi.Ap),
 			Bp:   clonePoint(ct.Capsule.Pi.Bp),
@@ -704,27 +702,7 @@ func (c *ClusterBTE) validateCiphertextMetadata(ct Ciphertext, scope *Ciphertext
 	if ct.Capsule.I != ct.Index {
 		return fmt.Errorf("outer index %d does not match capsule index %d", ct.Index, ct.Capsule.I)
 	}
-	if !matchesAEADAAD(ct.Capsule.Context, ct.ClusterID, ct.Slot, ct.Index) {
-		return fmt.Errorf("ciphertext context does not match metadata")
-	}
 	return validateAEADPayloadShape(ct.Nonce, ct.EncryptedTx)
-}
-
-func matchesAEADAAD(context []byte, clusterID string, slot uint64, index int) bool {
-	prefixLen := len(LibraryVersion) + 1 + len(clusterID) + 1
-	if len(context) != prefixLen+16 {
-		return false
-	}
-	if string(context[:len(LibraryVersion)]) != LibraryVersion || context[len(LibraryVersion)] != 0 {
-		return false
-	}
-	clusterStart := len(LibraryVersion) + 1
-	clusterEnd := clusterStart + len(clusterID)
-	if string(context[clusterStart:clusterEnd]) != clusterID || context[clusterEnd] != 0 {
-		return false
-	}
-	return binary.BigEndian.Uint64(context[prefixLen:prefixLen+8]) == slot &&
-		int64(binary.BigEndian.Uint64(context[prefixLen+8:])) == int64(index)
 }
 
 func validateAEADPayloadShape(nonce, encryptedTx []byte) error {
@@ -846,9 +824,6 @@ func (c *ClusterBTE) unmarshalCiphertext(data []byte, scope *CiphertextScope) (C
 func (ct CT) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	_ = binary.Write(&buf, binary.BigEndian, int64(ct.I))
-	if err := writeBytes(&buf, ct.Context); err != nil {
-		return nil, err
-	}
 	for _, point := range []kyber.Point{ct.Gamma, ct.Kp, ct.C.A, ct.C.B, ct.Pi.Ap, ct.Pi.Bp, ct.Pi.Yp} {
 		encoded, err := point.MarshalBinary()
 		if err != nil {
@@ -874,10 +849,6 @@ func (b *BTD) UnmarshalCT(data []byte) (CT, error) {
 	reader := bytes.NewReader(data)
 	var index int64
 	if err := binary.Read(reader, binary.BigEndian, &index); err != nil {
-		return CT{}, err
-	}
-	context, err := readBytes(reader)
-	if err != nil {
 		return CT{}, err
 	}
 	points := []kyber.Point{
@@ -915,10 +886,9 @@ func (b *BTD) UnmarshalCT(data []byte) (CT, error) {
 		return CT{}, fmt.Errorf("trailing capsule bytes: %d", reader.Len())
 	}
 	return CT{
-		I:       int(index),
-		Context: context,
-		Gamma:   points[0],
-		Kp:      points[1],
+		I:     int(index),
+		Gamma: points[0],
+		Kp:    points[1],
 		C: elgamal.CT{
 			A: points[2],
 			B: points[3],

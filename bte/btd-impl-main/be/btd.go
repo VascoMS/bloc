@@ -22,12 +22,11 @@ type Proof struct {
 }
 
 type CT struct {
-	I       int
-	Gamma   kyber.Point
-	Kp      kyber.Point
-	C       elgamal.CT
-	Pi      Proof
-	Context []byte
+	I     int
+	Gamma kyber.Point
+	Kp    kyber.Point
+	C     elgamal.CT
+	Pi    Proof
 }
 
 type BTD struct {
@@ -125,10 +124,6 @@ func (b *BTD) KeyGen(n, t int) ([]*share.PriShare, kyber.Point) {
 }
 
 func (b *BTD) Enc(pk kyber.Point, i int, m kyber.Point) (CT, error) {
-	return b.EncWithContext(pk, i, m, nil)
-}
-
-func (b *BTD) EncWithContext(pk kyber.Point, i int, m kyber.Point, context []byte) (CT, error) {
 	// Generate a PRF key
 	k := b.prf.KeyGen()
 	// Puncture it in the i-th index
@@ -155,11 +150,10 @@ func (b *BTD) EncWithContext(pk kyber.Point, i int, m kyber.Point, context []byt
 	Bp := b.suite.G1().Point().Add(b.suite.G1().Point().Mul(uN, b.eg.PK), b.suite.G1().Point().Mul(kN, nil))
 	yp := b.suite.G1().Point().Mul(kN, b.prf.G1xi[i])
 	ct := CT{
-		I:       i,
-		Gamma:   gamma,
-		Kp:      kp,
-		C:       egct,
-		Context: append([]byte(nil), context...),
+		I:     i,
+		Gamma: gamma,
+		Kp:    kp,
+		C:     egct,
 	}
 	h, err := b.SHash(pk, ct, Ap, Bp, yp)
 	if err != nil {
@@ -419,11 +413,14 @@ func (b *BTD) SHash(pk kyber.Point, c CT, Ap, Bp, yp kyber.Point) (kyber.Scalar,
 	// Hash to compute the challenge for Schnorr ZK proof.
 	h := b.suite.Hash()
 	h.Reset()
-	if _, err := h.Write([]byte(fmt.Sprintf("bte-v1:B=%d", b.B))); err != nil {
+	if _, err := h.Write([]byte(fmt.Sprintf("bte-capsule-v2:B=%d", b.B))); err != nil {
 		return nil, err
 
 	}
 	if _, err := pk.MarshalTo(h); err != nil {
+		return nil, err
+	}
+	if _, err := b.prf.G1xi[c.I].MarshalTo(h); err != nil {
 		return nil, err
 	}
 	if _, err := Ap.MarshalTo(h); err != nil {
@@ -436,9 +433,6 @@ func (b *BTD) SHash(pk kyber.Point, c CT, Ap, Bp, yp kyber.Point) (kyber.Scalar,
 		return nil, err
 	}
 	if _, err := h.Write([]byte(strconv.Itoa(c.I))); err != nil {
-		return nil, err
-	}
-	if _, err := h.Write(c.Context); err != nil {
 		return nil, err
 	}
 	if _, err := c.Gamma.MarshalTo(h); err != nil {

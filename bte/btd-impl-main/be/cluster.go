@@ -139,6 +139,27 @@ func NewClusterBTE(btd *BTD, pk kyber.Point, shares []*share.PriShare) *ClusterB
 	}
 }
 
+// NewClusterBTEFromShares restores a threshold cluster from externally stored
+// private shares without requiring the trusted-dealer polynomial.
+func NewClusterBTEFromShares(btd *BTD, pk kyber.Point, shares []*share.PriShare, n, t int) (*ClusterBTE, error) {
+	if n <= 0 || t <= 0 || t > n {
+		return nil, fmt.Errorf("invalid threshold configuration n=%d t=%d", n, t)
+	}
+	if len(shares) < t {
+		return nil, fmt.Errorf("provided %d shares, need threshold %d", len(shares), t)
+	}
+	seen := make(map[uint32]bool, len(shares))
+	for _, secret := range shares {
+		if secret == nil || secret.V == nil || int(secret.I) >= n || seen[secret.I] {
+			return nil, fmt.Errorf("invalid or duplicate private share")
+		}
+		seen[secret.I] = true
+	}
+	btd.T = t
+	btd.N = n
+	return NewClusterBTE(btd, pk, shares), nil
+}
+
 func NewNode(btd *BTD, pk kyber.Point, sk SecretShare, n, t int) *ClusterBTE {
 	btd.eg.PK = pk
 	btd.T = t

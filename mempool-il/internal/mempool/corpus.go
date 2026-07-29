@@ -32,11 +32,29 @@ var clientOverheadCorpusClasses = []corpusClassSpec{
 }
 
 var protocolWorkloadClasses = []corpusClassSpec{
-	{Name: corpusClassTransfer, CalldataBytes: 0, Rows: 28},
-	{Name: corpusClass128, CalldataBytes: 128, Rows: 50},
-	{Name: corpusClass256, CalldataBytes: 256, Rows: 12},
-	{Name: corpusClass1024, CalldataBytes: 1024, Rows: 8},
-	{Name: corpusClass4096, CalldataBytes: 4096, Rows: 2},
+	{Name: corpusClassTransfer, CalldataBytes: 0, Rows: 143},
+	{Name: corpusClass128, CalldataBytes: 128, Rows: 256},
+	{Name: corpusClass256, CalldataBytes: 256, Rows: 62},
+	{Name: corpusClass1024, CalldataBytes: 1024, Rows: 41},
+	{Name: corpusClass4096, CalldataBytes: 4096, Rows: 10},
+}
+
+var protocolWorkloadPrefixes = []struct {
+	Size   int
+	Counts map[corpusClass]int
+}{
+	{Size: 8, Counts: map[corpusClass]int{
+		corpusClassTransfer: 2, corpusClass128: 4, corpusClass256: 1, corpusClass1024: 1, corpusClass4096: 0,
+	}},
+	{Size: 32, Counts: map[corpusClass]int{
+		corpusClassTransfer: 9, corpusClass128: 16, corpusClass256: 4, corpusClass1024: 2, corpusClass4096: 1,
+	}},
+	{Size: 128, Counts: map[corpusClass]int{
+		corpusClassTransfer: 36, corpusClass128: 64, corpusClass256: 15, corpusClass1024: 10, corpusClass4096: 3,
+	}},
+	{Size: 512, Counts: map[corpusClass]int{
+		corpusClassTransfer: 143, corpusClass128: 256, corpusClass256: 62, corpusClass1024: 41, corpusClass4096: 10,
+	}},
 }
 
 var evidenceCorpusChainID = big.NewInt(1337)
@@ -46,7 +64,28 @@ func readClientOverheadCorpus(path string) ([]parsedTargetTx, error) {
 }
 
 func readProtocolWorkloadCorpus(path string) ([]parsedTargetTx, error) {
-	return readStrictCorpus(path, "protocol workload corpus", protocolWorkloadClasses)
+	targets, err := readStrictCorpus(path, "protocol workload corpus", protocolWorkloadClasses)
+	if err != nil {
+		return nil, err
+	}
+	for _, prefix := range protocolWorkloadPrefixes {
+		counts := make(map[corpusClass]int, len(protocolWorkloadClasses))
+		for _, target := range targets[:prefix.Size] {
+			counts[target.EvidenceClass]++
+		}
+		for class, want := range prefix.Counts {
+			if got := counts[class]; got != want {
+				return nil, fmt.Errorf(
+					"protocol workload corpus prefix %d class distribution for %q = %d, want %d",
+					prefix.Size,
+					class,
+					got,
+					want,
+				)
+			}
+		}
+	}
+	return targets, nil
 }
 
 func readStrictCorpus(path, name string, specs []corpusClassSpec) ([]parsedTargetTx, error) {

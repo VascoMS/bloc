@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -49,14 +51,100 @@ func TestCommittedClientOverheadCorpus(t *testing.T) {
 
 func TestCommittedProtocolWorkloadCorpus(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	expected := generateCampaignMasterCorpus(t)
+	if *updateClientOverheadCorpus {
+		if err := os.WriteFile(path, expected, 0644); err != nil {
+			t.Fatalf("update campaign master corpus: %v", err)
+		}
+	}
+	committed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read committed campaign master corpus: %v", err)
+	}
+	if !bytes.Equal(committed, expected) {
+		t.Fatalf("committed campaign master corpus differs from deterministic fixture; run go test ./internal/mempool -run TestCommittedProtocolWorkloadCorpus -count=1 -args -update-corpus")
+	}
+
 	targets, err := readProtocolWorkloadCorpus(path)
 	if err != nil {
 		t.Fatalf("read protocol workload corpus: %v", err)
 	}
-	if got, want := len(targets), 100; got != want {
+	if got, want := len(targets), 512; got != want {
 		t.Fatalf("targets = %d, want %d", got, want)
 	}
 	assertCorpusCounts(t, targets, protocolWorkloadClasses)
+}
+
+func generateCampaignMasterCorpus(t *testing.T) []byte {
+	t.Helper()
+	var schedule []corpusClassSpec
+	previous := map[corpusClass]int{}
+	for _, prefix := range protocolWorkloadPrefixes {
+		type scheduledClass struct {
+			spec corpusClassSpec
+			key  [32]byte
+		}
+		var segment []scheduledClass
+		for _, class := range protocolWorkloadClasses {
+			count := prefix.Counts[class.Name] - previous[class.Name]
+			for ordinal := 0; ordinal < count; ordinal++ {
+				entry := class
+				entry.Rows = 1
+				segment = append(segment, scheduledClass{
+					spec: entry,
+					key: sha256.Sum256([]byte(fmt.Sprintf(
+						"bloc-campaign-master-v1:%d:%s:%d",
+						prefix.Size,
+						entry.Name,
+						ordinal,
+					))),
+				})
+			}
+			previous[class.Name] = prefix.Counts[class.Name]
+		}
+		sort.Slice(segment, func(i, j int) bool {
+			return bytes.Compare(segment[i].key[:], segment[j].key[:]) < 0
+		})
+		for _, entry := range segment {
+			schedule = append(schedule, entry.spec)
+		}
+	}
+	return generateEvidenceCorpus(t, schedule)
+}
+
+func TestCampaignMasterCorpusNestedPrefixes(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	targets, err := readTargetCorpus(path)
+	if err != nil {
+		t.Fatalf("read campaign master corpus: %v", err)
+	}
+	if got, want := len(targets), 512; got != want {
+		t.Fatalf("targets = %d, want %d", got, want)
+	}
+
+	expected := map[int]map[int]int{
+		8:   {0: 2, 128: 4, 256: 1, 1024: 1, 4096: 0},
+		32:  {0: 9, 128: 16, 256: 4, 1024: 2, 4096: 1},
+		128: {0: 36, 128: 64, 256: 15, 1024: 10, 4096: 3},
+		512: {0: 143, 128: 256, 256: 62, 1024: 41, 4096: 10},
+	}
+	for prefix, want := range expected {
+		counts := map[int]int{0: 0, 128: 0, 256: 0, 1024: 0, 4096: 0}
+		hashes := map[string]bool{}
+		for index, target := range targets[:prefix] {
+			counts[len(target.Tx.Data())]++
+			if hashes[target.Summary.Hash] {
+				t.Fatalf("prefix %d row %d duplicates hash %s", prefix, index+1, target.Summary.Hash)
+			}
+			hashes[target.Summary.Hash] = true
+			if target.Tx.ChainId() == nil || target.Tx.ChainId().Cmp(big.NewInt(1337)) != 0 {
+				t.Fatalf("prefix %d row %d chain id = %v, want 1337", prefix, index+1, target.Tx.ChainId())
+			}
+		}
+		if !maps.Equal(counts, want) {
+			t.Fatalf("prefix %d class counts = %v, want %v", prefix, counts, want)
+		}
+	}
 }
 
 func assertCorpusCounts(t *testing.T, targets []parsedTargetTx, specs []corpusClassSpec) {

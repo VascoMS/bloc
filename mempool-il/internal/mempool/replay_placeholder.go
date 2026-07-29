@@ -150,7 +150,7 @@ func readReplayCluster(path string) (replayCluster, error) {
 	if err := json.Unmarshal(data, &cluster); err != nil {
 		return replayCluster{}, err
 	}
-	if cluster.Version != "bloc-cluster-v2" {
+	if cluster.Version != "bloc-cluster-v3" {
 		return replayCluster{}, fmt.Errorf("unsupported cluster config version %q", cluster.Version)
 	}
 	if cluster.ClusterID == "" || cluster.BMax <= 0 || cluster.CRSFile == "" || cluster.CRSSHA256 == "" || cluster.PublicKeyHex == "" {
@@ -271,7 +271,7 @@ func buildMockPlaceholder(target parsedTargetTx, index int, slot uint64, cluster
 }
 
 func encryptReplayTarget(target parsedTargetTx, index int, slot uint64, cluster replayCluster, encryptor *be.ClusterBTE) ([]byte, error) {
-	ct, err := encryptor.EncryptTx(target.Raw, index%cluster.BMax, cluster.ClusterID, slot)
+	ct, err := encryptor.EncryptTx(target.Raw, index%cluster.BMax)
 	if err != nil {
 		return nil, err
 	}

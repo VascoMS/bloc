@@ -125,7 +125,7 @@ func writeReplayFixture(t *testing.T, dir string) (*be.ClusterBTE, string, strin
 		t.Fatalf("marshal pk: %v", err)
 	}
 	clusterDoc := map[string]any{
-		"version":        "bloc-cluster-v2",
+		"version":        "bloc-cluster-v3",
 		"cluster_id":     "replay-test",
 		"bmax":           8,
 		"n":              4,
@@ -205,8 +205,8 @@ func decryptReplayPayload(t *testing.T, cluster *be.ClusterBTE, payloadHex strin
 	if err != nil {
 		t.Fatalf("combine: %v", err)
 	}
-	if len(results) != 1 || results[0].Err != nil || !results[0].HashOK {
+	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("bad results: %+v", results)
 	}
-	return results[0].RawTx
+	return results[0].Plaintext
 }

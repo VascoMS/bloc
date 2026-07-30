@@ -5,13 +5,12 @@
 `bte/btd-impl-main` is the repository's BEAT-MEV-derived batched threshold
 encryption implementation plus a cluster-facing Go API for raw transaction
 bytes. It owns BTE setup, hybrid encryption, canonical ciphertext encoding,
-scope validation, deterministic batch planning, decryption-share generation,
-threshold reconstruction, AEAD opening, and plaintext-integrity checking.
+structural validation, deterministic batch planning, decryption-share
+generation, threshold reconstruction, and authenticated AEAD opening.
 
 The library does not run consensus, select transactions, transport shares,
 validate Ethereum semantics, construct execution payloads, or manage operator
-identity. `bloc-node` supplies the consensus-fixed ciphertext order and active
-cluster/slot scope.
+identity. `bloc-node` supplies the consensus-fixed ciphertext order.
 
 The code is a research prototype, not production cryptography. The concrete
 setup and key-distribution shortcuts described below do not realize the
@@ -24,7 +23,7 @@ paper's setup and key-custody assumptions.
 | Pairing suite adapter | [`curves/curves.go`](../../bte/btd-impl-main/curves/curves.go): `Suite`, `GTBase`, `PickGT` |
 | Puncturable PRF | [`prf/prf.go`](../../bte/btd-impl-main/prf/prf.go): setup, puncture, direct/punctured/exponential evaluation |
 | Threshold ElGamal | [`elgamal/elgamal.go`](../../bte/btd-impl-main/elgamal/elgamal.go): key generation, additive ciphertexts, partial decryption, interpolation |
-| BTD construction | [`be/btd.go`](../../bte/btd-impl-main/be/btd.go): `BTD`, `CT`, `Proof`, `EncWithContext`, `VerifyCT`, batch decryption/combine |
+| BTD construction | [`be/btd.go`](../../bte/btd-impl-main/be/btd.go): `BTD`, `CT`, `Proof`, `Enc`, `VerifyCT`, batch decryption/combine |
 | Cluster-facing API | [`be/cluster.go`](../../bte/btd-impl-main/be/cluster.go): `ClusterBTE`, `Ciphertext`, `DecodedBatch`, `BatchPlan`, `DecryptionShare` |
 | Integrated tests/benchmarks | [`be/cluster_test.go`](../../bte/btd-impl-main/be/cluster_test.go) |
 | Inherited benchmark harness | [`main_test.go`](../../bte/btd-impl-main/main_test.go), [`bench.sh`](../../bte/btd-impl-main/bench.sh) |
@@ -36,11 +35,10 @@ paper's setup and key-custody assumptions.
 - `BTD` owns the pairing suite, PRF setup, threshold ElGamal object, maximum
   batch/index domain `B`, and committee threshold parameters.
 - `CT` is the group-valued BTE capsule: puncture index, padded `GT` message,
-  punctured key, ElGamal ciphertext, proof, and application context.
-- `Ciphertext` adds version, cluster, slot, outer index, AES-GCM nonce and
-  ciphertext, and SHA-256 plaintext commitment around a `CT`.
+  punctured key, ElGamal ciphertext, and proof.
+- `Ciphertext` contains only the capsule and `nonce || AES-GCM payload || tag`.
 - `DecodedBatch` privately owns parsed ciphertexts, the `BatchID` computed from
-  accepted canonical bytes, and optional application scope.
+  accepted canonical bytes.
 - `BatchPlan` exposes `BatchID`, `Alpha`, and ordered `BatchItem` sub-batches.
 - `DecryptionShare` exposes operator ID, `BatchID`, sub-batch ID, and a Kyber
   public share.
@@ -57,7 +55,7 @@ as the ciphertext index-domain size rather than the operator count. The actual
 operator count used by interpolation is stored in the lower-level BTD/ElGamal
 state. The naming is misleading and tracked as a review finding.
 
-### Scoped and unscoped APIs
+### Batch APIs
 
 Generic callers may use:
 
@@ -65,14 +63,8 @@ Generic callers may use:
 - `DecodeBatch`
 - `DecodeAndPlanBatch`
 
-Application callers that know their runtime context may use:
-
-- `PlanBatchFor(ciphertexts, CiphertextScope)`
-- `DecodeBatchFor(encoded, CiphertextScope)`
-- `DecodeAndPlanBatchFor(encoded, CiphertextScope)`
-
-`bloc-node` uses `DecodeBatchFor`. A scope contains only cluster ID and slot;
-index is validated against the BTE domain and against the inner capsule.
+`bloc-node` uses the same canonical decode/plan APIs. Slot and cluster labels
+are protocol-envelope and routing metadata, not ciphertext fields.
 
 ## Cryptographic Data Flow
 
@@ -105,7 +97,7 @@ a secret whose cluster or operator identity does not match.
 
 ### 2. BTE capsule encryption
 
-`BTD.EncWithContext(pk, i, m, context)`:
+`BTD.Enc(pk, i, m)`:
 
 1. samples PRF key `k`;
 2. computes punctured key `Kp` for index `i`;
@@ -113,9 +105,9 @@ a secret whose cluster or operator identity does not match.
 4. evaluates the PRF at `i` and adds that pad to message `m` in `GT`;
 5. constructs a Schnorr-like proof tying the punctured key and ElGamal
    ciphertext to the same `k` and encryption randomness; and
-6. Fiat-Shamir hashes the BTE domain/`BMax`, public key, proof commitments,
-   index, application context, padded message, punctured key, and ElGamal
-   points.
+6. Fiat-Shamir hashes the v2 capsule domain, BTE domain/`BMax`, selected CRS
+   point, public key, proof commitments, index, padded message, punctured key,
+   and ElGamal points.
 
 `VerifyCT` checks index bounds and the three proof equations. Proof verification
 is deferred until share generation or batch combine; planning validates
@@ -123,24 +115,25 @@ metadata and structure but not the proof equations.
 
 ### 3. Hybrid transaction encryption
 
-`ClusterBTE.EncryptTx(rawTx, index, clusterID, slot)` bridges raw byte strings
+`ClusterBTE.EncryptTx(rawTx, index)` bridges raw byte strings
 to the group-valued construction:
 
 1. sample a random `GT` capsule secret;
-2. build application context from library version, cluster ID, slot, and index;
-3. derive a 32-byte key with HKDF-SHA256 over the serialized `GT` secret;
-4. encrypt raw bytes with AES-256-GCM and a random 12-byte nonce;
-5. BTE-encrypt the `GT` capsule secret with the same context in the proof; and
-6. commit `SHA256(rawTx)` in the outer ciphertext.
+2. BTE-encrypt that secret in a capsule at the selected index;
+3. hash the canonical capsule;
+4. derive a 32-byte key with HKDF-SHA256 over the serialized `GT` secret and
+   capsule digest;
+5. encrypt raw bytes with AES-256-GCM and a random 12-byte nonce, authenticating
+   the capsule digest as AAD.
 
 The AEAD associated data is:
 
 ```text
-LibraryVersion || 0x00 || ClusterID || 0x00 || uint64(slot) || int64(index)
+bloc-hybrid-aad-v2 || canonicalCapsuleDigest
 ```
 
-Integers use big-endian encoding. Changing cluster, slot, or index invalidates
-both the GCM authentication and BTE proof transcript.
+Swapping a payload or capsule invalidates GCM authentication. The same complete
+ciphertext remains valid in later slots under the same public setup.
 
 ## Canonical Wire Encoding
 
@@ -148,28 +141,21 @@ both the GCM authentication and BTE proof transcript.
 
 `Ciphertext.MarshalBinary` emits, in order:
 
-1. NUL-terminated version string;
-2. NUL-terminated cluster ID;
-3. big-endian `uint64` slot;
-4. big-endian `int64` outer index;
-5. `uint64` length plus nonce bytes;
-6. `uint64` length plus encrypted transaction bytes;
-7. 32-byte plaintext hash; and
-8. `uint64` length plus encoded BTE capsule.
+1. `bte-tx-v2` wire magic;
+2. `uint64` length plus encoded BTE capsule; and
+3. `uint64` length plus `nonce || AES-GCM ciphertext || tag`.
 
-The suite ID is not encoded. Version `bte-tx-v1`, the 12-byte GCM nonce, a
-payload of at least the 16-byte GCM tag, index domain, context equality, and
-absence of trailing bytes are validated during decoding.
+The suite ID is not encoded. The v2 magic, nonce/tag shape, index domain, and
+absence of trailing bytes are validated during decoding. `bte-tx-v1` rejects.
 
 ### Capsule
 
 `CT.MarshalBinary` emits:
 
 1. big-endian `int64` puncture index;
-2. length-prefixed context;
-3. seven length-prefixed points: `Gamma`, `Kp`, ElGamal `A/B`, and proof
+2. seven length-prefixed points: `Gamma`, `Kp`, ElGamal `A/B`, and proof
    `Ap/Bp/Yp`; and
-4. two length-prefixed proof scalars: `KHat/UHat`.
+3. two length-prefixed proof scalars: `KHat/UHat`.
 
 `UnmarshalCT` reconstructs each element using the initialized suite and rejects
 invalid point/scalar encodings and trailing bytes. It does not independently
@@ -181,20 +167,15 @@ negotiation.
 
 ## Decoding, Identity, And Ownership
 
-`DecodeBatch` and `DecodeBatchFor` reject `len(encoded) > BMax` before parsing
-any item. They decode sequentially and return the first indexed error. Empty
+`DecodeBatch` rejects `len(encoded) > BMax` before parsing
+any item. It decodes sequentially and returns the first indexed error. Empty
 input decodes successfully, allowing `bloc-node` to take its explicit empty-set
 completion path; planning an empty decoded batch remains an error.
 
-Scoped decoding validates expected cluster and slot before expensive capsule
-decoding when possible, then revalidates the fully reconstructed object.
 Validation covers:
 
-- supported outer version;
-- cluster and slot scope when present;
-- outer index in `[0,BMax)`;
-- inner capsule index equal to outer index;
-- capsule context exactly equal to the expected AEAD context;
+- supported v2 wire magic;
+- capsule index in `[0,BMax)`;
 - standard GCM nonce and minimum payload shape; and
 - canonical end-of-input for both encodings.
 
@@ -332,7 +313,7 @@ The lower-level construction follows
 [BEAT-MEV: Epochless Approach to Batched Threshold Encryption for MEV Prevention](../../papers/BEAT-MEV.pdf):
 
 - `PRFSetup`/`KeyGen` correspond to setup and threshold-key generation;
-- `EncWithContext` corresponds to indexed BTE encryption plus proof;
+- `Enc` corresponds to indexed BTE encryption plus proof;
 - `VerifyCT` checks the ciphertext proof;
 - `BatchDecWithShare` verifies/aggregates a batch and emits one partial share;
 - `BatchCombineMessages` reconstructs the batch messages; and
@@ -347,7 +328,7 @@ Implementation-specific adaptations and deviations are:
 
 - source groups are swapped for BLS12-381 performance;
 - raw bytes use a new AES-GCM hybrid envelope around the `GT` message;
-- cluster/slot/index context is added to AEAD and the proof transcript;
+- the canonical capsule digest is added to HKDF and AEAD AAD;
 - deterministic binary encodings and `BatchID` are repository interfaces;
 - the integrated API fixes Opt-2 instead of exposing normal/Opt-1/parallel
   choices;
@@ -363,7 +344,7 @@ Implementation-specific adaptations and deviations are:
 - hybrid round trips and arbitrary valid threshold subsets;
 - wrong/invalid extra candidates;
 - canonical serialization and decode/plan equivalence;
-- scoped cluster/slot rejection;
+- capsule/payload substitution rejection;
 - oversized, unsupported-version, trailing, malformed point/scalar, nonce, and
   payload errors;
 - immutable `DecodedBatch` identity and deep copies;

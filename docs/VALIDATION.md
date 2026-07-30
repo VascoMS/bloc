@@ -33,9 +33,10 @@ as protocol message bytes. Accepted historical M3 `resource-samples.csv`
 artifacts retain their original running/restart/OOM stability gate but are coarse
 evidence and must not yield a host-resource summary.
 
-## Frozen Evaluation Release Candidate
+## Superseded Evaluation Release Candidate
 
-Final M5/M6 evidence is bound to this release-candidate contract:
+The following M4 candidate is historical and must not be used for new M5/M6
+evidence:
 
 - source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`;
 - image: `bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`;
@@ -75,12 +76,16 @@ inside the artifact root; it contains no slot observation and is not accepted
 evidence. The accepted preflight remains validation-only and contributes no
 RQ1/RQ2 performance statistic.
 
-Corpus-backed protocol campaigns use `tx_source=mock-placeholder` and the
-committed 100-target `28/50/12/8/2` workload. The balanced 500-target issue #13
+Replacement corpus-backed protocol campaigns use
+`tx_source=mock-encrypted-corpus` and immutable cluster-specific encrypted
+artifacts derived from the committed 512-target nested master corpus. Exact
+prefixes 8, 32, and 128 preserve the agreed size distribution and carry
+plaintext/encrypted prefix identities. The balanced 500-target issue #13
 corpus is only for per-class client-overhead evidence and must not be substituted
 for the protocol workload. Manifests and CSV/JSON rows must retain the source
-SHA, image tag/digest, seed, block/order metadata, planned scenario count,
-transaction source, configuration, attempt outcome, and schema version.
+SHA, both image digests, public/corpus/prefix identities, requested and received
+counts, seed, block/order metadata, planned scenario count, transaction source,
+configuration, attempt outcome, and schema version.
 
 No final campaign may mix source revisions or image digests. A code,
 configuration, corpus, or schema change requires an explicit invalidation
@@ -363,7 +368,7 @@ histogram_quantile(
 
 Evaluator CSV/JSON retains microsecond columns for offline analysis.
 
-## Compose And Mock-Placeholder Acceptance
+## Compose And Encrypted-Corpus Acceptance
 
 Operational commands live in
 [deploy/docker-compose/README.md](../deploy/docker-compose/README.md).
@@ -372,12 +377,13 @@ The standard rehearsal requires four healthy sidecars, four Prometheus targets
 up, successful cross-node-consistent evaluator output, and chart-compatible
 artifacts. Compose latency remains diagnostic.
 
-Mock-placeholder acceptance additionally requires:
+Encrypted-corpus acceptance additionally requires:
 
 - materialized Ethereum hashes match target corpus transactions;
 - inclusion-list responses expose encrypted payload and target metadata derived
   from placeholder calldata without exposing raw target bytes; and
-- evaluator manifests record `tx_source=mock-placeholder`.
+- evaluator manifests record `tx_source=mock-encrypted-corpus`, exact
+  requested/received counts, and public/plaintext/encrypted prefix identities.
 
 ## VM/EC2 Evidence Acceptance
 
@@ -473,6 +479,13 @@ transaction set. Builder API adaptation, execution payload construction,
 DVT/SSV signing, and block publication are not part of any measured interval.
 
 ### Shared Final-Campaign Contract
+
+No replacement source or image is frozen yet. Before a live command is
+authorized, validation must prove `bloc-cluster-v3`, `bte-tx-v2`, the two
+per-cluster BMax-128 corpus artifacts, digest-addressed node and mempool images,
+and a clean source commit. Latency collection and dedicated resource sampling
+are separate phases. The primary same-AZ control is `us-east-1a` on
+`t3.small`; n=10 and batch 512 remain a later 30-observation extension pilot.
 
 The primary honest-path matrix is:
 

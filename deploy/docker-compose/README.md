@@ -1,109 +1,62 @@
-# Docker Compose Rehearsal
+# Docker Compose Encrypted-Corpus Rehearsal
 
-This directory runs a local four-operator BLOC sidecar cluster with Prometheus
-and Grafana. It validates container configuration, service discovery, metrics,
-and remote-evaluator mechanics. It is not an independent-machine performance
-environment and does not replace the accepted VM/EC2 evidence.
+This directory runs four local BLOC operators, one read-only `mempool-il`
+encrypted-corpus service, Prometheus, and Grafana. It validates container and
+artifact contracts only; it is not VM performance evidence.
 
-## Prerequisites
-
-- Docker with Compose support
-- local ports `18000`–`18003`, `19090`, and `13000`
-- the Go toolchain required by `bloc-node` for evaluator commands
-
-## Standard Rehearsal
-
-From this directory:
+Prepare a `bloc-cluster-v3` config and secrets, generate and self-check one
+`bloc-encrypted-corpus-v1` artifact offline, then bind the config:
 
 ```sh
-docker compose up --build
+cd bloc-node
+go run ./cmd/bloc-node bind-encrypted-corpus \
+  --config ../deploy/docker-compose/generated/n4/cluster.json \
+  --corpus ../deploy/docker-compose/generated/n4/encrypted-corpus.json \
+  --mempool-url http://mempool-il:8080 \
+  --remote-eval ../deploy/docker-compose/remote-eval.compose.json
 ```
 
-Useful endpoints:
-
-- sidecars: `http://127.0.0.1:18000` through `http://127.0.0.1:18003`
-- Prometheus: `http://127.0.0.1:19090`
-- Grafana: `http://127.0.0.1:13000`
-
-Verify health and metric discovery:
+Copy `.env.example` to a local ignored environment file and replace every
+placeholder with an existing read-only path and immutable image digest. Resolve
+the stack without starting containers:
 
 ```sh
-curl -s http://127.0.0.1:18000/healthz
-curl -s http://127.0.0.1:18000/metrics
-curl -s http://127.0.0.1:19090/api/v1/targets
+docker compose --env-file .env.campaign -f compose.yaml config
 ```
 
-Run the evaluator from `bloc-node/`:
+Only after the resolved configuration and artifact identities pass validation:
+
+```sh
+docker compose --env-file .env.campaign -f compose.yaml up --no-build
+```
+
+Run an exact-prefix diagnostic from `bloc-node/`:
 
 ```sh
 go run ./cmd/bloc-node eval-remote \
   --config ../deploy/docker-compose/remote-eval.compose.json \
-  --experiment-id compose-smoke \
-  --batch-size 8 \
-  --warmups 0 \
-  --repetitions 1 \
-  --out-dir results/distributed/compose-smoke
-```
-
-Acceptance requires four healthy sidecars, four Prometheus targets up, a
-successful and cross-node-consistent evaluator result, and chart-compatible
-CSV/JSON output. Compose latency is diagnostic only.
-
-Stop the rehearsal with:
-
-```sh
-docker compose down -v
-```
-
-The `-v` cleanup removes the generated cluster-config and operator-secret
-volumes as well as the containers and network.
-
-## Mock-Placeholder Rehearsal
-
-This overlay uses a deterministic corpus and `mempool-il` as a mock external
-submitter. It encrypts each target once, signs a placeholder transaction, and
-serves the encrypted payload parsed from placeholder calldata.
-
-```sh
-docker compose -f compose.yaml -f compose.mock-placeholder.yaml up --build
-```
-
-Run the evaluator from `bloc-node/` without direct `/tx` submissions:
-
-```sh
-go run ./cmd/bloc-node eval-remote \
-  --config ../deploy/docker-compose/remote-eval.mock-placeholder.json \
-  --experiment-id compose-mock-placeholder \
-  --tx-source mock-placeholder \
+  --experiment-id compose-encrypted-corpus \
+  --final-campaign \
+  --tx-source mock-encrypted-corpus \
   --mempool-url http://127.0.0.1:18080 \
   --batch-size 8 \
   --warmups 0 \
   --repetitions 1 \
-  --out-dir results/distributed/compose-mock-placeholder
+  --deadline 12s \
+  --out-dir results/distributed/compose-encrypted-corpus
 ```
 
-Acceptance additionally requires materialized Ethereum hashes to match corpus
-targets, inclusion-list responses to omit raw target bytes, and the evaluator
-manifest to record `tx_source=mock-placeholder`.
+Acceptance requires four healthy, consistent results; exact requested/received
+count; matching public, plaintext, encrypted-corpus, and prefix identities; and
+no image build, plaintext mount, request-time encryption, or mutable tag. The
+legacy `compose.mock-placeholder.yaml` filename is a no-op compatibility
+overlay and cannot re-enable the old runtime-encryption path.
 
-Stop both files explicitly:
+Stop with:
 
 ```sh
-docker compose -f compose.yaml -f compose.mock-placeholder.yaml down -v
+docker compose --env-file .env.campaign -f compose.yaml down
 ```
 
-## Metrics And Charts
-
-Prometheus metrics use base units and bounded labels. Exact metric contracts and
-Grafana query requirements are in
-[docs/VALIDATION.md](../../docs/VALIDATION.md). Evaluator CSV/JSON remains the
-offline chart interface.
-
-When chart compatibility itself changed, render the Compose output from
-`latency-charts/`:
-
-```sh
-python -m bloc_latency_charts ../bloc-node/results/distributed/compose-smoke
-```
-
-Do not present Compose charts as distributed thesis evidence.
+Compose charts remain diagnostic and must not be reported as distributed thesis
+evidence.

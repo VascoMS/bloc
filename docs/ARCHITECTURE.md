@@ -100,10 +100,10 @@ sequenceDiagram
         S->>S: EncryptTx using public cluster material
         S->>M: encrypted placeholder transaction
         M-->>N: encrypted placeholder candidates
-    else prototype replay-placeholder adapter
-        S->>M: signed target transaction corpus
-        M->>M: act as mock submitter and call EncryptTx
-        M-->>N: encrypted placeholder candidates
+    else measured immutable-corpus adapter
+        S->>S: encrypt and self-check corpus before startup
+        S->>M: cluster-specific encrypted-corpus artifact
+        M-->>N: requested immutable ciphertext prefix
     else prototype direct evaluator adapter
         S->>N: raw transaction bytes and metadata
         N->>N: call EncryptTx for synthetic testing
@@ -113,7 +113,7 @@ sequenceDiagram
     P-->>A: slot-scoped RBC and BBA messages
     A-->>N: ordered accepted proposer batches
     N->>N: validate, canonicalize, merge, and bound
-    N->>B: DecodeBatchFor and PlanDecodedBatch
+    N->>B: DecodeBatch and PlanDecodedBatch
     N->>B: MakeShare for each sub-batch
     N->>P: BatchID-scoped decryption shares
     P-->>N: BatchID-scoped decryption shares
@@ -126,26 +126,24 @@ sequenceDiagram
 The first branch is the intended confidentiality boundary: a submitter can
 encrypt with public cluster material before any mempool service or operator sees
 the target plaintext. The other two branches are prototype scaffolding.
-`mempool-il` encrypts only in `replay-placeholder` mode, where it deliberately
-acts as a mock external submitter, and `bloc-node` encrypts only for the direct
-evaluator `/tx` path. Those adapters support repeatable experiments; they are
-not the intended production transaction-submission flow, because their host
-process sees the target plaintext before ACS agreement and threshold
-decryption.
+For measured runs, `mempool-il` loads a cluster-specific artifact that was
+encrypted and fully decrypted as an offline self-check before startup. It
+serves immutable nested prefixes and never sees plaintext or encrypts during a
+timed slot. The direct evaluator `/tx` path remains development scaffolding.
 
 ### Stage Handoffs
 
 | Stage | Owner | Input | Output and identity | Network activity | Failure behavior |
 | --- | --- | --- | --- | --- | --- |
 | Source ingestion | `mempool-il` or `bloc-node` | RPC candidates, corpus entries, or direct raw bytes | Normalized candidate metadata | RPC/HTTP outside consensus | Source errors prevent proposal construction or polling refresh |
-| Hybrid encryption | Submitter-side BTE or a prototype adapter | Raw bytes, index, cluster ID, slot | Canonical `Ciphertext`; AEAD and proof context bind cluster, slot, and index | None inside BTE | Encryption or serialization error rejects the item/request |
+| Hybrid encryption | Submitter-side BTE or offline corpus generator | Raw bytes, coordinated prototype index, public BTE setup | `bte-tx-v2` capsule plus AEAD payload | None inside BTE | Encryption, proof, self-check, or serialization error rejects the artifact |
 | Proposal construction | `bloc-node` | Local encrypted candidates | Protobuf `InclusionList(slot, operator, items)`; local canonical JSON hash is diagnostic before ACS | Proposal becomes RBC input | Provider/encoding failure publishes a bounded terminal slot failure |
 | Reliable broadcast | `hbbft` RBC | One opaque proposal per proposer | Available proposal bytes associated with proposer ID | PROOF, ECHO, and READY messages | Invalid/duplicate messages are rejected; no timeout exists in the asynchronous core |
 | Binary agreement and ACS | `hbbft` BBA/ACS | RBC completion signals and BBA messages | Common subset of proposer IDs and proposal bytes | BVAL and AUX messages | ACS waits for all BBA decisions and every truthy RBC result |
 | Accepted-list decoding | `bloc-node` | Proposer-tagged ACS output | Lists whose slot equals the active slot and operator equals proposer | None | Any malformed or mismatched accepted list fails the slot closed |
 | Agreed-set construction | `bloc-node` inclusion package | Accepted lists | Canonically sorted lists and `AgreedSetHash` | None | Pure deterministic transformation |
 | Merge and bounds | `bloc-node` inclusion package | Canonical accepted lists | Ordered unique ciphertext prefix, `MergedSetHash`, gas and count totals | None | Invalid candidates are skipped; malformed selected BTE data fails later decoding |
-| Ciphertext decode and plan | BTE | Ordered canonical ciphertext bytes and active scope | Immutable decoded batch, `BatchID`, `alpha`, and deterministic sub-batches | None | Any selected structural/context error fails the slot; empty selection completes successfully |
+| Ciphertext decode and plan | BTE | Ordered canonical ciphertext bytes | Immutable decoded batch, `BatchID`, `alpha`, and deterministic sub-batches | None | Any selected structural error fails the slot; empty selection completes successfully |
 | Share generation | BTE plus `bloc-node` | Secret share and one planned sub-batch | `DecryptionShare(operator, BatchID, subBatchID, point)` | Direct share envelopes | Proof/share generation error fails the slot; configured withholding sends nothing |
 | Threshold combine | BTE | Plan and candidate shares | Raw plaintext bytes restored to original positions | None | Requires threshold candidates per sub-batch and searches for a reconstructing subset |
 | Materialization | `bloc-node` | Ordered raw bytes | `MaterializedTransactionSet` and `Result` | HTTP result/metrics only | Invalid Ethereum bytes are currently reported per item while the slot still completes |
@@ -161,7 +159,7 @@ Several different hashes exist and are not interchangeable:
 | Agreed-set hash | SHA-256 of canonical JSON over lists sorted by list hash then operator ID | `bloc-node/internal/app/inclusion` |
 | Merged-set hash | SHA-256 of canonical JSON over slot, selected ordered items, and selected gas | `bloc-node/internal/app/inclusion` |
 | `BatchID` | SHA-256 over library version and length-prefixed canonical ciphertext encodings in selected order | BTE |
-| Plaintext hash | SHA-256 of raw transaction bytes, stored inside each BTE ciphertext | BTE and materialized result |
+| Corpus identities | SHA-256 identities for the plaintext master/prefixes and encrypted corpus/prefixes | Offline corpus manifest and evaluator evidence |
 
 ACS output is first ordered by proposer ID by the slot adapter. `bloc-node` then
 recomputes list identities and sorts accepted lists by list hash and operator ID
@@ -173,11 +171,11 @@ only input order used to compute `BatchID` and original positions.
 ## Cross-Module Invariants
 
 - **Slot and proposer binding:** network envelopes, `SlotMessage`, `SlotOutput`,
-  accepted inclusion lists, and BTE ciphertexts must all match the active slot;
-  each accepted list's operator must equal its ACS proposer.
-- **Cluster binding:** production ciphertext decoding uses `DecodeBatchFor` with
-  the active cluster ID and slot. The same context is present in AEAD associated
-  data and the BTE proof transcript.
+  accepted inclusion lists, and shares match the active slot; each accepted
+  list's operator must equal its ACS proposer. Ciphertext validity is epochless.
+- **Cluster routing:** nodes derive `PublicConfigID` from their loaded BMax, CRS
+  digest, suite, and public key and reject a corpus with different provenance.
+  The canonical capsule digest binds HKDF and AEAD AAD.
 - **Opaque consensus payload:** ACS decides bytes and proposer membership. It
   does not parse inclusion lists, merge candidates, plan BTE batches, or release
   shares.

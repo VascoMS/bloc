@@ -35,10 +35,10 @@ slashing protection, or PBS prefix enforcement.
 
 ## Latest Completed Milestone
 
-M4 is complete. The final evaluation release candidate is source
+M4 is complete. Its now-superseded evaluation candidate was source
 `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d` and local immutable image
 `bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`.
-The image contract is `linux/amd64`, user `10001:10001`, entrypoint
+That historical image contract was `linux/amd64`, user `10001:10001`, entrypoint
 `["bloc-node"]`, and default command
 `["run","--config","/config/cluster.json"]`.
 
@@ -70,11 +70,16 @@ release-candidate configuration contract are defined in
 - **Replacement campaign candidate:** the explicit invalidation decision was
   made on 2026-07-29. Issue #15 now requires an epochless hybrid-ciphertext
   wire, immutable cluster-specific encrypted corpora served through the
-  `mock-placeholder` path, per-slot provider limits, replacement node and
+  `mock-encrypted-corpus` path, per-slot provider limits, replacement node and
   mempool image digests, and a rerun of every affected local validation and
   distributed-campaign preflight. No final campaign may start or combine
   observations until that replacement contract is implemented, validated, and
   frozen.
+- **Live-run plumbing:** local refactor validation and a fail-closed
+  `--validate-only` primary contract now exist. Live AWS execution remains
+  blocked until immutable node/mempool image distribution, per-cluster corpus
+  staging, failure retention, and authenticated cleanup are implemented and
+  validated without a synthetic fallback.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.

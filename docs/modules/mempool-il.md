@@ -5,7 +5,7 @@
 `mempool-il` is a standalone candidate-data service. It reads Ethereum-shaped
 pending transactions, normalizes them into one internal model, maintains a
 snapshot, and builds a deterministic bounded inclusion list. In
-`replay-placeholder` mode it also acts as the prototype's mock external
+`encrypted-corpus` mode it also acts as the prototype's mock external
 submitter: it encrypts signed target transactions once and embeds the encrypted
 payload in a signed placeholder transaction.
 
@@ -87,8 +87,10 @@ list identity defined by `bloc-node`.
 - `alchemy-pending` creates an `eth_newPendingTransactionFilter`, consumes
   `eth_getFilterChanges`, and resolves each hash through
   `eth_getTransactionByHash`.
-- `replay-placeholder` loads a static signed-transaction corpus and cluster
-  material, then implements both `Source` and slot-aware `SlotSource`.
+- `encrypted-corpus` validates a cluster-specific artifact at startup and
+  implements both `Source` and bounded `SlotSource`.
+- `replay-placeholder-dev` retains public-key runtime encryption only for
+  development and is rejected by final-campaign validation.
 
 For ordinary sources, `Reader.Run` polls immediately and then on a ticker. A
 failed poll is logged and the previous store remains intact. A successful poll
@@ -155,24 +157,25 @@ slice, so HTTP encoding and list construction do not block writers.
 The CLI default list cap is 128. A zero CLI `max-gas` becomes twice
 `max-block-gas`; the builder's independent library default is 15,000,000 gas.
 
-### 5. Replay-placeholder construction
+### 5. Offline encrypted-corpus construction
 
-The replay source reads JSONL entries containing `raw_tx`, optionally with a
-class label, or a raw hex line. For every entry it:
+The generator reads the deterministic nested JSONL master corpus. For every
+selected entry it:
 
 1. decodes a signed Ethereum transaction;
 2. requires a nonzero chain ID and recovers the sender;
 3. verifies the configured CRS SHA-256 and reconstructs the BTE public object
    from the versioned public CRS artifact, `BMax`, and public key;
-4. calls `EncryptTx(raw, index % BMax, clusterID, slot)`;
+4. calls `EncryptTx(raw, index % BMax)`;
 5. encodes calldata using the custom placeholder format;
 6. derives a deterministic mock private key from the corpus index;
 7. signs an EIP-1559 placeholder transaction on development chain 1337;
 8. parses the resulting calldata through the normal classifier; and
-9. exposes the parsed encrypted payload and metadata without exposing raw
-   target bytes in the inclusion-list response.
+9. verifies proofs, threshold-decrypts the completed artifact, compares every
+   plaintext, and writes atomically.
 
-The first request for a slot encrypts the complete corpus and caches the
+The measured source loads and validates that artifact at startup and returns
+immutable bounded prefixes without an encryption cache or per-slot mutation.
 result. Later requests return a shallow copy of the cached transaction slice.
 Encryption is randomized, so the cached value is stable within a process but a
 fresh service process produces different ciphertext bytes for the same corpus
@@ -229,13 +232,13 @@ rate limits, or a production API schema.
 - Ordinary-source snapshots and lists are deterministic for an identical set
   of normalized records, independent of Go map iteration.
 - Alchemy replacement ties are deterministic.
-- Replay keys, placeholder sender/nonce, and corpus traversal are deterministic;
-  BTE encryption randomness means ciphertext bytes are stable only after the
-  per-process slot cache is populated.
-- Target raw bytes are encrypted once by replay mode. `bloc-node` consumes the
-  parsed encrypted payload and must not encrypt the target again.
-- The sidecar requests the active slot and BTE later rejects any ciphertext
-  whose embedded cluster or slot differs.
+- Measured artifacts are encrypted and threshold-decrypted as an offline
+  self-check. Static serving performs no encryption and returns byte-identical
+  prefixes across slots.
+- `slot` is request correlation only; `limit` selects the exact nested prefix.
+  `PublicConfigID` and corpus/prefix IDs reject misrouting before ACS.
+- Target raw bytes never appear in the measured HTTP response. `bloc-node`
+  consumes the parsed encrypted payload and must not encrypt it again.
 - `mempool-il` ordering is proposal-local. ACS and `bloc-node` merge determine
   the final selected ordering.
 

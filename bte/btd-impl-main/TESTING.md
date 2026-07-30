@@ -57,7 +57,8 @@ What it does:
 Why it matters:
 
 - Confirms proof verification is non-panicking and rejects malformed capsules.
-- Confirms the proof transcript is bound to ciphertext contents and context metadata.
+- Confirms the proof transcript is bound to the capsule contents and selected
+  CRS/public inputs.
 
 ### `TestHybridEncryptionRoundTrip`
 
@@ -71,14 +72,14 @@ What it does:
 - Combines all shares with `CombineShares`.
 - Verifies that each result:
   - has no error,
-  - has `HashOK = true`,
   - returns the original raw bytes in consensus order.
 
 Why it matters:
 
 - Confirms the hybrid encryption strategy works end to end.
 - Confirms BTE decrypts the `GT` capsule secret and AES-GCM decrypts the raw transaction bytes.
-- Confirms plaintext hash checking works.
+- Confirms AES-GCM authentication verifies the recovered capsule secret,
+  canonical capsule binding, and raw transaction bytes.
 
 ### `TestCiphertextSerializationRoundTrip`
 
@@ -98,16 +99,16 @@ Why it matters:
 - Confirms encrypted placeholder payloads can be serialized and recovered by cluster nodes.
 - Confirms group elements/scalars survive binary round-trip.
 
-### Scoped decoding, AEAD shape, and decoded-batch ownership
+### AEAD shape, capsule binding, and decoded-batch ownership
 
-`TestScopedBatchAPIsRejectForeignContext`, `TestCiphertextAEADShapeValidation`,
+`TestCiphertextAEADShapeValidation`,
 `TestCombineSharesRejectsMutatedNonceWithoutPanic`,
 `TestDecodedBatchFreezesCanonicalIdentity`, and
 `TestDecodedBatchCiphertextsAreDeepCopies` check the post-ACS safety boundary.
 
 They confirm that:
 
-- scope-bound decoding rejects a foreign cluster or slot while generic APIs remain compatible;
+- capsule/payload substitution fails authenticated opening;
 - malformed nonce and authenticated-payload lengths are rejected during decode and planning;
 - defensive decryption returns an error rather than allowing GCM to panic;
 - caller mutation of canonical input bytes cannot change a decoded batch's `BatchID`;
@@ -158,15 +159,13 @@ Checks metadata binding between the outer cluster ciphertext and the inner BTE c
 
 What it does:
 
-- Encrypts one transaction for `cluster-a`.
-- Mutates the outer `ClusterID` to `cluster-b`.
+- Encrypts transactions with repeated puncture indexes.
 - Calls `PlanBatch`.
-- Expects an error.
+- Verifies equal indexes are assigned to distinct sub-batches.
 
 Why it matters:
 
-- Confirms cluster/slot/index metadata cannot be changed after encryption without detection.
-- Confirms `PlanBatch` checks that outer metadata matches the proof-bound capsule context.
+- Confirms the deterministic planner preserves the collision constraint.
 
 ### `TestCombineSharesRequiresThreshold`
 
@@ -337,7 +336,7 @@ Before integrating with a real cluster, add:
 - Tests for duplicate operator shares in `CombineShares`.
 - Tests for wrong `BatchID` and wrong `SubBatchID` shares.
 - Tests for tampered AEAD ciphertext and nonce.
-- Tests for plaintext hash mismatch.
+- Tests for capsule/payload substitution and AEAD authentication failure.
 - A deterministic test vector for `Ciphertext.MarshalBinary`.
 - A simulation where one or more operators withhold shares.
 - A simulation where a malformed share is included, then future share-verifiability rejects it.

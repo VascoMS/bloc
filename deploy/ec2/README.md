@@ -35,7 +35,8 @@ Individual runners also accept `--validate-only`.
 ## Deployment Model
 
 Each operator EC2 host runs exactly one `bloc-node` container from
-`operator-compose.yaml`. A separate controller host runs Prometheus/Grafana from
+`operator-compose.yaml` plus one local immutable-corpus `mempool-il` container.
+A separate controller host runs Prometheus/Grafana from
 `controller-compose.yaml` and executes `eval-remote`.
 
 Generated configuration separates:
@@ -47,6 +48,23 @@ Generated configuration separates:
   operator secrets.
 
 Never commit secret files or include them in experiment artifacts.
+
+The issue #15 replacement runner is currently validation-only:
+
+```sh
+bash deploy/ec2/run-same-az-campaign.sh \
+  --source-sha <replacement-sha> \
+  --bloc-image bloc-node@sha256:<digest> \
+  --mempool-image mempool-il@sha256:<digest> \
+  --n4-config <path> --n4-corpus <path> \
+  --n7-config <path> --n7-corpus <path> \
+  --validate-only
+```
+
+It enforces the primary same-AZ matrix and config/corpus identities without
+contacting AWS. Its live path intentionally remains disabled until immutable
+two-image/corpus distribution, artifact recovery, failure retention, and
+authenticated cleanup are implemented and validated.
 
 ## Manual Deployment Recipe
 

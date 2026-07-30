@@ -404,7 +404,7 @@ EncryptTx(rawTx, index)
 ```
 
 It retains coordinated local allocation for this candidate. The final
-campaigns require `tx_source=mock-placeholder` and must reject a synthetic or
+campaigns require `tx_source=mock-encrypted-corpus` and must reject a synthetic or
 direct fallback.
 
 ## Replay And Duplicate Boundary

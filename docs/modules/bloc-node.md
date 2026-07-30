@@ -260,21 +260,21 @@ and ciphertext hash ascending. The scan stops at the effective transaction cap
 that does not fit the remaining gas. The selected order, gas, skipped count,
 and canonical `MergedSetHash` are protocol outputs.
 
-### 4. Scoped decode and deterministic plan
+### 4. Canonical decode and deterministic plan
 
 The node passes selected canonical ciphertext bytes to:
 
 ```text
-DecodeBatchFor(encoded, {ClusterID: config.ClusterID, Slot: activeSlot})
+DecodeBatch(encoded)
 ```
 
-Any selected structural, version, index, context, AEAD-shape, curve, or trailing
+Any selected structural, version, index, AEAD-shape, curve, or trailing
 byte error records `decode` failure for the whole slot. A zero-length selected
 batch completes successfully through the explicit empty-result path without a
 `BatchPlan` or decryption shares.
 
-Nonempty decoded batches call `PlanDecodedBatch`, which revalidates the retained
-scope and returns the immutable `BatchID` plus deterministic Opt-2 sub-batches.
+Nonempty decoded batches call `PlanDecodedBatch`, which returns the immutable
+`BatchID` plus deterministic Opt-2 sub-batches.
 Planning failure records reason `planning`.
 
 ## Share Exchange And Threshold Combine
@@ -373,7 +373,8 @@ arrays and an empty `BatchID`, marks metrics finalized, and transitions to
 - Accepted list slot/operator metadata must agree with the ACS wrapper.
 - Canonical list hashing and sorting precede merge.
 - Merge order and bounds determine the only ciphertext order passed to BTE.
-- Production BTE decoding binds cluster ID and slot before share release.
+- The provider verifies public/corpus/prefix provenance before proposal
+  decoding. Slot remains bound by lists, ACS, envelopes, and node state.
 - `BatchID`, sub-batch memberships, and original positions must match at every
   correct operator.
 - Only matching-batch, in-range sub-batch shares reach BTE combine.

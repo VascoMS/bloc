@@ -425,3 +425,32 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Related files: `docs/STATUS.md`, `docs/ROADMAP.md`,
   `docs/VALIDATION.md`, `docs/superpowers/plans/2026-07-23-thesis-evaluation.md`,
   GitHub issues #8, #15, and #16
+
+## 0023. Use epochless capsule-authenticated ciphertexts and immutable campaign corpora
+
+- Date: 2026-07-29
+- Status: Accepted
+- Context: Slot-bound ciphertext context made a valid encrypted transaction
+  unusable in later slots and forced measured replay to encrypt at request
+  time. The issue #15 campaign also needed a fixed, comparable workload for
+  each requested occupancy.
+- Decision: `bte-tx-v2` contains only the BTE capsule and AES-GCM payload. The
+  canonical capsule digest is bound into HKDF and AEAD AAD; GCM authentication
+  is the decryption-correctness check. Ciphertexts are reusable across slots
+  under the same BTE public configuration. Per-cluster corpora are encrypted
+  and fully self-checked offline, assigned coordinated prototype indexes, and
+  served as immutable nested prefixes. `bloc-cluster-v3` binds the node to the
+  expected public configuration, plaintext master corpus, encrypted corpus,
+  and encrypted prefix identities.
+- Rationale: This matches the paper's cluster-key lifetime more closely, keeps
+  operational slot state outside ciphertext validity, removes redundant
+  plaintext hashes, and makes campaign occupancy deterministic without runtime
+  encryption or endpoint state.
+- Consequences: Decision 0012's ciphertext-slot binding is superseded; slot
+  binding remains mandatory for inclusion lists, ACS messages, decryption-share
+  envelopes, and node lifecycle state. `bte-tx-v1`, `bloc-cluster-v2`, the old
+  frozen source/image, and synthetic final-campaign fallback are rejected.
+  Coordinated index assignment remains a documented prototype limitation
+  tracked by issue #22.
+- Related files: `bte/btd-impl-main/be`, `mempool-il/internal/mempool`,
+  `bloc-node/internal/app`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md`

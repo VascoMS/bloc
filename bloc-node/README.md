@@ -265,12 +265,13 @@ and libp2p addresses are reachable between the controller and operator hosts,
 run one sidecar per machine, and point the remote-evaluator config at those
 operator HTTP endpoints.
 
-For mock-placeholder runs, start the sidecars with a mempool-backed provider and
-run `eval-remote --tx-source mock-placeholder --mempool-url <mempool-il>`. In
-that mode the evaluator does not submit `/tx` payloads; sidecars fetch encrypted
-placeholder candidates from `mempool-il` and materialize the original target
-transactions after threshold decryption. Set the sidecar request bound when
-generating its cluster config with `--mempool-timeout-ms <milliseconds>`.
+For final encrypted-corpus runs, generate and self-check a cluster-specific
+artifact offline, bind it with `bind-encrypted-corpus`, and run
+`eval-remote --final-campaign --tx-source mock-encrypted-corpus
+--mempool-url <mempool-il>`. The evaluator requests the exact scenario batch
+size, does not submit `/tx` payloads, validates corpus provenance, and records
+requested/received counts. `mock-placeholder` remains development-only and is
+rejected by final-campaign mode.
 
 ## Local Campaign Runners
 

@@ -3,7 +3,7 @@
 Standalone Go service that ingests pending Ethereum transactions, builds a deterministic mempool snapshot, and produces a deterministic bounded inclusion list.
 
 For the cross-module architecture, read [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
-For source normalization, replay-placeholder construction, list identity, and
+For source normalization, encrypted-corpus serving, list identity, and
 HTTP-boundary details, read
 [docs/modules/mempool-il.md](../docs/modules/mempool-il.md). For validation
 expectations, read [docs/VALIDATION.md](../docs/VALIDATION.md).
@@ -14,7 +14,8 @@ expectations, read [docs/VALIDATION.md](../docs/VALIDATION.md).
   - `txpool`
   - `public-pending`
   - `alchemy-pending`
-  - `replay-placeholder`
+  - `encrypted-corpus`
+  - `replay-placeholder-dev`
 - Classifies transactions as `plaintext` or `placeholder`
 - Maintains an in-memory indexed mempool view
 - Exposes deterministic snapshot and inclusion list over HTTP
@@ -53,7 +54,7 @@ go run ./cmd/service \
 
 ## CLI Flags
 
-- `-source`: `txpool | public-pending | alchemy-pending | replay-placeholder`
+- `-source`: `txpool | public-pending | alchemy-pending | encrypted-corpus | replay-placeholder-dev`
 - `-rpc-url`: JSON-RPC URL
 - `-listen`: HTTP listen address
 - `-poll-interval`: mempool polling interval
@@ -61,9 +62,9 @@ go run ./cmd/service \
 - `-max-gas`: maximum inclusion-list gas
 - `-max-block-gas`: block gas used when auto-computing the cap
 - `-alchemy-ttl`: retention for `alchemy-pending` cache
-- `-corpus`: signed transaction JSONL for `replay-placeholder`
-- `-cluster-config`: public BLOC cluster configuration for replay encryption
-- `-replay-slot`: slot bound into replay ciphertexts
+- `-encrypted-corpus`: immutable cluster-specific artifact for measured replay
+- `-corpus` and `-cluster-config`: development-only inputs for
+  `replay-placeholder-dev`
 
 When `-max-gas=0`, the service uses `2 * max_block_gas`.
 
@@ -86,28 +87,34 @@ curl -s http://127.0.0.1:8080/inclusion-list | jq
 - `txpool`: closest to a real node mempool
 - `public-pending`: pending-block candidate only
 - `alchemy-pending`: approximate mempool view reconstructed from provider events and backfill
-- `replay-placeholder`: deterministic thesis/mock mode; reads real signed target
-  transactions from a corpus, encrypts them once using BLOC public cluster
-  material, and exposes mock placeholder candidates with `encrypted_payload_hex`
+- `encrypted-corpus`: measured thesis/mock mode; validates one offline-encrypted
+  artifact at startup and serves byte-identical bounded prefixes without
+  request-time encryption or mutable slot state
+- `replay-placeholder-dev`: development-only public-key encryption adapter
 
-### Replay Placeholder Mode
+### Immutable Encrypted-Corpus Mode
 
 ```sh
 go run ./cmd/service \
-  -source replay-placeholder \
+  -source encrypted-corpus \
+  -encrypted-corpus ./encrypted-corpus.json
+```
+
+Generate the artifact offline after cluster configuration and before startup:
+
+```sh
+go run ./cmd/encrypt-corpus \
+  -plaintext ../deploy/docker-compose/corpus/mock-targets.jsonl \
   -cluster-config ../bloc-node/cluster.json \
-  -corpus ../deploy/docker-compose/corpus/mock-targets.jsonl \
-  -replay-slot 1
+  -secrets ../bloc-node/secrets/operator-0.json,../bloc-node/secrets/operator-1.json,../bloc-node/secrets/operator-2.json \
+  -limit 128 \
+  -out ./encrypted-corpus.json
 ```
 
-The corpus is JSONL with one labelled object per target transaction:
-
-```json
-{"class":"calldata_128","raw_tx":"0x..."}
-```
-
-The inclusion-list API exposes placeholder metadata and encrypted payloads. It
-does not expose raw target transaction bytes to sidecar proposals.
+`GET /inclusion-list?slot=<slot>&limit=<count>` returns the exact immutable
+prefix and its public/plaintext/encrypted identities. It never returns raw
+target bytes. Use `bloc-node bind-encrypted-corpus` to bind the matching public
+and remote-evaluator configs before node startup.
 
 ## Client-Overhead Corpus And Report
 

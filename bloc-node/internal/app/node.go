@@ -69,6 +69,13 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 	if err != nil {
 		return nil, err
 	}
+	publicConfigID, err := be.PublicConfigID(cfg.BMax, cfg.CRSSHA256, pk)
+	if err != nil {
+		return nil, fmt.Errorf("derive public config id: %w", err)
+	}
+	if expected := cfg.Provider.ExpectedPublicConfigID; expected != "" && expected != publicConfigID {
+		return nil, fmt.Errorf("provider public config id %q does not match loaded setup %q", expected, publicConfigID)
+	}
 	scalar, err := unmarshalScalarHex(suite, secrets.BTEShareScalarHex)
 	if err != nil {
 		return nil, fmt.Errorf("decode BTE share for operator %d: %w", id, err)
@@ -97,6 +104,7 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 		suite:            suite,
 		faults:           faults,
 		mempoolClient:    &http.Client{Timeout: time.Duration(cfg.Provider.MempoolTimeoutMS) * time.Millisecond},
+		publicConfigID:   publicConfigID,
 		lastSlot:         cfg.Slot,
 		observability:    newNodeMetrics(cfg.ClusterID, id),
 	}
@@ -106,8 +114,13 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 }
 
 func (n *Node) newSlotState(slotID uint64) *slotState {
+	return n.newSlotStateWithLimit(slotID, 0)
+}
+
+func (n *Node) newSlotStateWithLimit(slotID uint64, proposalLimit int) *slotState {
 	state := &slotState{
 		id:              slotID,
+		proposalLimit:   proposalLimit,
 		phase:           slotPrepared,
 		seenPending:     make(map[string]bool),
 		shareCandidates: make(map[int]*operatorShareCandidates),
@@ -237,7 +250,8 @@ func (n *Node) handleResult(w http.ResponseWriter, r *http.Request) {
 }
 
 type prepareSlotRequest struct {
-	Slot uint64 `json:"slot"`
+	Slot          uint64 `json:"slot"`
+	ProposalLimit int    `json:"proposal_limit,omitempty"`
 }
 
 // handlePrepareSlot replaces a terminal slot while retaining the process,
@@ -249,7 +263,7 @@ func (n *Node) handlePrepareSlot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := n.prepareSlot(req.Slot); err != nil {
+	if err := n.prepareSlotWithLimit(req.Slot, req.ProposalLimit); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
@@ -257,6 +271,13 @@ func (n *Node) handlePrepareSlot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (n *Node) prepareSlot(slotID uint64) error {
+	return n.prepareSlotWithLimit(slotID, 0)
+}
+
+func (n *Node) prepareSlotWithLimit(slotID uint64, proposalLimit int) error {
+	if proposalLimit < 0 || proposalLimit > n.cfg.BMax {
+		return fmt.Errorf("proposal limit %d must be in [0,%d]", proposalLimit, n.cfg.BMax)
+	}
 	n.lifecycleMu.Lock()
 	defer n.lifecycleMu.Unlock()
 	if slotID <= n.lastSlot {
@@ -270,7 +291,7 @@ func (n *Node) prepareSlot(slotID uint64) error {
 	}
 	n.slot.Close()
 	n.cfg.Slot = slotID
-	n.slotState = n.newSlotState(slotID)
+	n.slotState = n.newSlotStateWithLimit(slotID, proposalLimit)
 	n.lastSlot = slotID
 	return nil
 }

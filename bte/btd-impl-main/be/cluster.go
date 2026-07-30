@@ -8,10 +8,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
 	"sort"
+	"strings"
 
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/share"
@@ -175,6 +177,40 @@ func NewNode(btd *BTD, pk kyber.Point, sk SecretShare, n, t int) *ClusterBTE {
 		Shares: []SecretShare{sk},
 		btd:    btd,
 	}
+}
+
+// PublicConfigID derives the stable identity of the public cryptographic
+// inputs required to produce and consume a cluster-specific ciphertext corpus.
+func PublicConfigID(bMax int, crsSHA256 string, pk kyber.Point) (string, error) {
+	if bMax <= 0 {
+		return "", fmt.Errorf("BMax must be positive")
+	}
+	normalizedCRS := strings.ToLower(strings.TrimSpace(crsSHA256))
+	if len(normalizedCRS) != sha256.Size*2 {
+		return "", fmt.Errorf("CRS SHA-256 must contain %d hex characters", sha256.Size*2)
+	}
+	if _, err := hex.DecodeString(normalizedCRS); err != nil {
+		return "", fmt.Errorf("decode CRS SHA-256: %w", err)
+	}
+	if pk == nil {
+		return "", fmt.Errorf("public key is required")
+	}
+	encodedPK, err := pk.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("encode public key: %w", err)
+	}
+	h := sha256.New()
+	writePublicConfigField(h, []byte("bloc-bte-public-config-v1"))
+	writePublicConfigField(h, []byte(defaultSuiteID))
+	_ = binary.Write(h, binary.BigEndian, uint64(bMax))
+	writePublicConfigField(h, []byte(normalizedCRS))
+	writePublicConfigField(h, encodedPK)
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func writePublicConfigField(writer io.Writer, value []byte) {
+	_ = binary.Write(writer, binary.BigEndian, uint64(len(value)))
+	_, _ = writer.Write(value)
 }
 
 func (c *ClusterBTE) EncryptTx(rawTx []byte, index int) (Ciphertext, error) {

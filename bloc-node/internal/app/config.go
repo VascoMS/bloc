@@ -228,6 +228,14 @@ func validateProviderConfig(provider ProviderConfig) error {
 	if provider.MempoolTimeoutMS > maximumMempoolTimeoutMS {
 		return fmt.Errorf("provider.mempool_timeout_ms must be at most %d", maximumMempoolTimeoutMS)
 	}
+	if provider.RequireExactCount {
+		if provider.ExpectedPublicConfigID == "" || provider.ExpectedPlaintextMasterID == "" || provider.ExpectedEncryptedCorpusID == "" {
+			return fmt.Errorf("provider exact corpus mode requires public, plaintext master, and encrypted corpus ids")
+		}
+		if len(provider.ExpectedEncryptedPrefixSetIDs) == 0 {
+			return fmt.Errorf("provider exact corpus mode requires encrypted prefix ids")
+		}
+	}
 	return nil
 }
 

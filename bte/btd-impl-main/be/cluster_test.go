@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"testing"
 
 	"btd/curves"
@@ -20,6 +21,21 @@ func newTestCluster(t testing.TB, bMax, n, threshold int) *ClusterBTE {
 	btd := NewBTD(suite, bMax)
 	shares, pk := btd.KeyGen(n, threshold)
 	return NewClusterBTE(btd, pk, shares)
+}
+
+func TestPublicConfigIDBindsClusterPublicInputs(t *testing.T) {
+	cluster := newTestCluster(t, 8, 4, 3)
+	crsDigest := strings.Repeat("ab", 32)
+
+	first, err := PublicConfigID(cluster.Params.BMax, crsDigest, cluster.PK.Point)
+	require.NoError(t, err)
+	second, err := PublicConfigID(cluster.Params.BMax, strings.ToUpper(crsDigest), cluster.PK.Point)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+
+	otherBMax, err := PublicConfigID(cluster.Params.BMax+1, crsDigest, cluster.PK.Point)
+	require.NoError(t, err)
+	require.NotEqual(t, first, otherBMax)
 }
 
 func TestBatchCombineMessagesReturnsPlaintexts(t *testing.T) {

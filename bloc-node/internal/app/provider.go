@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"bloc-node/internal/app/inclusion"
+	"btd/be"
 )
 
 // buildInclusionList loads the node's proposal from the configured provider.
@@ -56,7 +58,13 @@ func (n *Node) fetchMempoolInclusionListContext(ctx context.Context) (InclusionL
 	if n.mempoolClient == nil {
 		return InclusionList{}, fmt.Errorf("provider mempool-http client is not initialized")
 	}
+	n.mu.Lock()
+	proposalLimit := n.proposalLimit
+	n.mu.Unlock()
 	requestURL := fmt.Sprintf("%s/inclusion-list?slot=%d", strings.TrimRight(n.cfg.Provider.MempoolURL, "/"), n.id)
+	if proposalLimit > 0 {
+		requestURL += "&limit=" + strconv.Itoa(proposalLimit)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return InclusionList{}, fmt.Errorf("create mempool inclusion-list request: %w", err)
@@ -74,7 +82,17 @@ func (n *Node) fetchMempoolInclusionListContext(ctx context.Context) (InclusionL
 		return InclusionList{}, fmt.Errorf("mempool inclusion-list failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	var remote struct {
-		Items []struct {
+		SchemaVersion           string `json:"schema_version"`
+		CiphertextWireVersion   string `json:"ciphertext_wire_version"`
+		PublicConfigID          string `json:"public_config_id"`
+		PlaintextMasterCorpusID string `json:"plaintext_master_corpus_id"`
+		EncryptedCorpusID       string `json:"encrypted_corpus_id"`
+		EncryptedPrefixSetID    string `json:"encrypted_prefix_set_id"`
+		Slot                    uint64 `json:"slot"`
+		RequestedCount          int    `json:"requested_count"`
+		AvailableCount          int    `json:"available_count"`
+		ReturnedCount           int    `json:"returned_count"`
+		Items                   []struct {
 			Hash                   string `json:"hash"`
 			EncryptedPayloadHex    string `json:"encrypted_payload_hex"`
 			CiphertextHex          string `json:"ciphertext_hex"`
@@ -88,6 +106,47 @@ func (n *Node) fetchMempoolInclusionListContext(ctx context.Context) (InclusionL
 	}
 	if err := json.Unmarshal(body, &remote); err != nil {
 		return InclusionList{}, err
+	}
+	provenanceRequired := n.cfg.Provider.ExpectedPublicConfigID != "" ||
+		n.cfg.Provider.ExpectedPlaintextMasterID != "" ||
+		n.cfg.Provider.ExpectedEncryptedCorpusID != "" ||
+		n.cfg.Provider.RequireExactCount
+	if provenanceRequired && remote.SchemaVersion == "" {
+		return InclusionList{}, fmt.Errorf("mempool inclusion-list omitted encrypted corpus provenance")
+	}
+	if remote.SchemaVersion != "" {
+		if remote.SchemaVersion != "bloc-encrypted-corpus-v1" {
+			return InclusionList{}, fmt.Errorf("unsupported encrypted corpus schema %q", remote.SchemaVersion)
+		}
+		if remote.CiphertextWireVersion != be.LibraryVersion {
+			return InclusionList{}, fmt.Errorf("ciphertext wire version %q does not match %q", remote.CiphertextWireVersion, be.LibraryVersion)
+		}
+		if remote.Slot != n.id {
+			return InclusionList{}, fmt.Errorf("mempool response slot %d does not match active slot %d", remote.Slot, n.id)
+		}
+		if proposalLimit > 0 && remote.RequestedCount != proposalLimit {
+			return InclusionList{}, fmt.Errorf("mempool requested count %d does not match proposal limit %d", remote.RequestedCount, proposalLimit)
+		}
+		if remote.AvailableCount < remote.ReturnedCount || remote.ReturnedCount < 0 {
+			return InclusionList{}, fmt.Errorf("invalid mempool returned/available counts")
+		}
+		if n.publicConfigID != "" && remote.PublicConfigID != n.publicConfigID {
+			return InclusionList{}, fmt.Errorf("mempool public config id %q does not match loaded setup %q", remote.PublicConfigID, n.publicConfigID)
+		}
+		if want := n.cfg.Provider.ExpectedPublicConfigID; want != "" && remote.PublicConfigID != want {
+			return InclusionList{}, fmt.Errorf("mempool public config id %q does not match expected %q", remote.PublicConfigID, want)
+		}
+		if want := n.cfg.Provider.ExpectedPlaintextMasterID; want != "" && remote.PlaintextMasterCorpusID != want {
+			return InclusionList{}, fmt.Errorf("mempool plaintext master corpus id %q does not match expected %q", remote.PlaintextMasterCorpusID, want)
+		}
+		if want := n.cfg.Provider.ExpectedEncryptedCorpusID; want != "" && remote.EncryptedCorpusID != want {
+			return InclusionList{}, fmt.Errorf("mempool encrypted corpus id %q does not match expected %q", remote.EncryptedCorpusID, want)
+		}
+		if proposalLimit > 0 {
+			if want := n.cfg.Provider.ExpectedEncryptedPrefixSetIDs[strconv.Itoa(proposalLimit)]; want != "" && remote.EncryptedPrefixSetID != want {
+				return InclusionList{}, fmt.Errorf("mempool encrypted prefix id %q does not match expected %q", remote.EncryptedPrefixSetID, want)
+			}
+		}
 	}
 	items := make([]EncryptedPlaceholder, 0, len(remote.Items))
 	for _, in := range remote.Items {
@@ -131,6 +190,15 @@ func (n *Node) fetchMempoolInclusionListContext(ctx context.Context) (InclusionL
 			Nonce:                 in.Nonce,
 			Kind:                  in.Kind,
 		})
+	}
+	if remote.SchemaVersion != "" && remote.ReturnedCount != len(items) {
+		return InclusionList{}, fmt.Errorf("mempool returned count %d does not match decoded items %d", remote.ReturnedCount, len(items))
+	}
+	if proposalLimit > 0 && len(items) > proposalLimit {
+		return InclusionList{}, fmt.Errorf("mempool returned %d items above proposal limit %d", len(items), proposalLimit)
+	}
+	if n.cfg.Provider.RequireExactCount && proposalLimit > 0 && len(items) != proposalLimit {
+		return InclusionList{}, fmt.Errorf("mempool returned %d items, require exact proposal limit %d", len(items), proposalLimit)
 	}
 	list := InclusionList{Slot: n.id, OperatorID: n.self.ID, Items: items}
 	list.Hash = inclusion.HashInclusionList(list)

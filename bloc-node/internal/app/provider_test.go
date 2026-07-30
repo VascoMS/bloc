@@ -43,6 +43,101 @@ func TestMempoolProviderConsumesEncryptedPayloadHex(t *testing.T) {
 	}
 }
 
+func TestMempoolProviderRequestsLimitAndValidatesProvenance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("slot"); got != "9" {
+			t.Fatalf("slot query = %q, want 9", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "1" {
+			t.Fatalf("limit query = %q, want 1", got)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"schema_version":"bloc-encrypted-corpus-v1",
+			"ciphertext_wire_version":"bte-tx-v2",
+			"public_config_id":"public",
+			"plaintext_master_corpus_id":"plaintext",
+			"encrypted_corpus_id":"encrypted",
+			"encrypted_prefix_set_id":"prefix-1",
+			"slot":9,
+			"requested_count":1,
+			"available_count":8,
+			"returned_count":1,
+			"items":[{"hash":"0xplaceholder","kind":"placeholder","encrypted_payload_hex":"0x010203","gas":21000,"effective_fee_per_gas_wei":"10","from":"0xabc","nonce":1}]
+		}`))
+	}))
+	defer server.Close()
+
+	node := newMempoolProviderTestNode(server.URL, time.Second)
+	node.proposalLimit = 1
+	node.publicConfigID = "public"
+	node.cfg.Provider.ExpectedPublicConfigID = "public"
+	node.cfg.Provider.ExpectedPlaintextMasterID = "plaintext"
+	node.cfg.Provider.ExpectedEncryptedCorpusID = "encrypted"
+	node.cfg.Provider.ExpectedEncryptedPrefixSetIDs = map[string]string{"1": "prefix-1"}
+	node.cfg.Provider.RequireExactCount = true
+
+	list, err := node.fetchMempoolInclusionList()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(list.Items))
+	}
+}
+
+func TestMempoolProviderRejectsMismatchedCorpusIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"schema_version":"bloc-encrypted-corpus-v1",
+			"ciphertext_wire_version":"bte-tx-v2",
+			"public_config_id":"wrong",
+			"slot":9,
+			"requested_count":1,
+			"available_count":1,
+			"returned_count":1,
+			"items":[{"kind":"placeholder","encrypted_payload_hex":"0x01","gas":21000}]
+		}`))
+	}))
+	defer server.Close()
+	node := newMempoolProviderTestNode(server.URL, time.Second)
+	node.proposalLimit = 1
+	node.publicConfigID = "public"
+	node.cfg.Provider.ExpectedPublicConfigID = "public"
+
+	_, err := node.fetchMempoolInclusionList()
+	if err == nil || !strings.Contains(err.Error(), "public config id") {
+		t.Fatalf("identity error = %v", err)
+	}
+}
+
+func TestMempoolProviderRejectsPublicConfigDifferentFromLoadedSetup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"schema_version":"bloc-encrypted-corpus-v1",
+			"ciphertext_wire_version":"bte-tx-v2",
+			"public_config_id":"configured-but-not-loaded",
+			"slot":9,
+			"requested_count":1,
+			"available_count":1,
+			"returned_count":1,
+			"items":[{"kind":"placeholder","encrypted_payload_hex":"0x01","gas":21000}]
+		}`))
+	}))
+	defer server.Close()
+	node := newMempoolProviderTestNode(server.URL, time.Second)
+	node.proposalLimit = 1
+	node.publicConfigID = "derived-from-loaded-setup"
+	node.cfg.Provider.ExpectedPublicConfigID = "configured-but-not-loaded"
+
+	_, err := node.fetchMempoolInclusionList()
+	if err == nil || !strings.Contains(err.Error(), "loaded setup") {
+		t.Fatalf("loaded setup identity error = %v", err)
+	}
+}
+
 func TestMempoolProviderRejectsMalformedEncryptedPayloadHex(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")

@@ -92,9 +92,14 @@ type NodeSecretConfig struct {
 
 // ProviderConfig selects where a node gets its local inclusion-list proposal.
 type ProviderConfig struct {
-	Mode             string `json:"mode,omitempty"`
-	MempoolURL       string `json:"mempool_url,omitempty"`
-	MempoolTimeoutMS int64  `json:"mempool_timeout_ms,omitempty"`
+	Mode                          string            `json:"mode,omitempty"`
+	MempoolURL                    string            `json:"mempool_url,omitempty"`
+	MempoolTimeoutMS              int64             `json:"mempool_timeout_ms,omitempty"`
+	ExpectedPublicConfigID        string            `json:"expected_public_config_id,omitempty"`
+	ExpectedPlaintextMasterID     string            `json:"expected_plaintext_master_corpus_id,omitempty"`
+	ExpectedEncryptedCorpusID     string            `json:"expected_encrypted_corpus_id,omitempty"`
+	ExpectedEncryptedPrefixSetIDs map[string]string `json:"expected_encrypted_prefix_set_ids,omitempty"`
+	RequireExactCount             bool              `json:"require_exact_count,omitempty"`
 }
 
 // NetworkConfig records the node-to-node transport schema. libp2p is the only
@@ -189,6 +194,7 @@ type slotState struct {
 	inputMu             sync.Mutex
 	acsMu               sync.Mutex
 	id                  uint64
+	proposalLimit       int
 	phase               slotPhase
 	slot                *hbbft.SlotACS
 	startOnce           sync.Once
@@ -231,6 +237,7 @@ type Node struct {
 	suite            curves.Suite
 	transport        Transport
 	mempoolClient    *http.Client
+	publicConfigID   string
 	faults           FaultConfig
 
 	lifecycleMu    sync.RWMutex

@@ -61,6 +61,24 @@ func TestPrepareSlotRequiresCompletedIncreasingSlot(t *testing.T) {
 	}
 }
 
+func TestPrepareSlotRetainsProposalLimitInFreshState(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.mu.Lock()
+	n.phase = slotCompleted
+	n.result = &Result{Slot: 1}
+	n.mu.Unlock()
+
+	if err := n.prepareSlotWithLimit(2, 32); err != nil {
+		t.Fatalf("prepare slot with limit: %v", err)
+	}
+	if n.id != 2 || n.proposalLimit != 32 {
+		t.Fatalf("fresh slot id/limit = %d/%d, want 2/32", n.id, n.proposalLimit)
+	}
+	if err := n.prepareSlotWithLimit(3, n.cfg.BMax+1); err == nil {
+		t.Fatal("proposal limit above BMax accepted")
+	}
+}
+
 func TestPrepareSlotAcceptsTerminalFailureAndResetsIt(t *testing.T) {
 	n := lifecycleTestNode(t)
 	n.markSlotFailed("decode")

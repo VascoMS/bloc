@@ -168,11 +168,15 @@ func GenerateEncryptedCorpus(options EncryptedCorpusOptions) (*EncryptedCorpusMa
 	if err != nil {
 		return nil, err
 	}
+	publicID, err := be.PublicConfigID(clusterConfig.BMax, clusterConfig.CRSSHA256, cluster.PK.Point)
+	if err != nil {
+		return nil, fmt.Errorf("derive public config id: %w", err)
+	}
 
 	manifest := &EncryptedCorpusManifest{
 		SchemaVersion:           encryptedCorpusSchemaVersion,
 		CiphertextWireVersion:   be.LibraryVersion,
-		PublicConfigID:          publicConfigID(clusterConfig),
+		PublicConfigID:          publicID,
 		PlaintextMasterCorpusID: plaintextSetID(targets),
 		PlaintextPrefixSetIDs:   map[string]string{},
 		EncryptedPrefixSetIDs:   map[string]string{},
@@ -394,17 +398,6 @@ func validateEncryptedCorpusManifest(manifest *EncryptedCorpusManifest) error {
 		}
 	}
 	return nil
-}
-
-func publicConfigID(cluster replayCluster) string {
-	pk, _ := hex.DecodeString(strings.TrimPrefix(cluster.PublicKeyHex, "0x"))
-	h := sha256.New()
-	writeHashField(h, []byte("bloc-bte-public-config-v1"))
-	writeHashField(h, []byte("BLS12-381-kilic"))
-	_ = binary.Write(h, binary.BigEndian, uint64(cluster.BMax))
-	writeHashField(h, []byte(strings.ToLower(strings.TrimSpace(cluster.CRSSHA256))))
-	writeHashField(h, pk)
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func plaintextSetID(targets []parsedTargetTx) string {

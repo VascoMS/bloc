@@ -280,6 +280,13 @@ func (n *Node) prepareSlotWithLimit(slotID uint64, proposalLimit int) error {
 	}
 	n.lifecycleMu.Lock()
 	defer n.lifecycleMu.Unlock()
+	n.mu.Lock()
+	if slotID == n.id && n.phase == slotPrepared && n.proposalLimit == 0 && proposalLimit > 0 {
+		n.proposalLimit = proposalLimit
+		n.mu.Unlock()
+		return nil
+	}
+	n.mu.Unlock()
 	if slotID <= n.lastSlot {
 		return fmt.Errorf("slot %d must be greater than previous slot %d", slotID, n.lastSlot)
 	}

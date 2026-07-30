@@ -37,6 +37,7 @@ type remoteEvalOptions struct {
 	Deadline            time.Duration
 	ImageTag            string
 	GitCommit           string
+	FinalCampaign       bool
 }
 
 type remoteEvalConfig struct {
@@ -48,6 +49,7 @@ type remoteEvalConfig struct {
 	Network     string            `json:"network,omitempty"`
 	Deployment  map[string]string `json:"deployment,omitempty"`
 	InitialSlot uint64            `json:"initial_slot,omitempty"`
+	Corpus      corpusProvenance  `json:"corpus,omitempty"`
 }
 
 type remoteEvalNode struct {
@@ -85,6 +87,16 @@ func evalRemote(args []string) error {
 	}
 	if err := validateRemoteEvidenceScenario(cfg, options.BatchSize); err != nil {
 		return err
+	}
+	if options.FinalCampaign {
+		if err := validateFinalCampaignTxSource(options.TxSource, options.MempoolURL); err != nil {
+			return err
+		}
+	}
+	if options.TxSource == "mock-encrypted-corpus" {
+		if err := validateCorpusProvenance(cfg.Corpus, cfg.BMax, options.BatchSize); err != nil {
+			return err
+		}
 	}
 	if cfg.Network == "" {
 		cfg.Network = "libp2p"
@@ -139,6 +151,10 @@ func evalRemote(args []string) error {
 		ImageTag:            options.ImageTag,
 		GitCommit:           options.GitCommit,
 	}
+	if options.TxSource == "mock-encrypted-corpus" {
+		identity := corpusIdentityForCount(cfg.Corpus, options.BatchSize)
+		manifest.CorpusByScenario = map[string]runCorpusIdentity{scenario.ID: identity}
+	}
 	if err := writeJSONFile(filepath.Join(options.OutDir, "manifest.json"), manifest); err != nil {
 		return err
 	}
@@ -162,7 +178,7 @@ func evalRemote(args []string) error {
 			if err != nil {
 				return err
 			}
-			prepare := !(slotID == options.FirstSlot && options.FirstSlot == initialSlot)
+			prepare := true
 			run, runErr := runRemoteSlot(client, options.OutDir, runID, cfg, scenario, phase.name, iteration, orderIndex, slotID, corpus, options, prepare)
 			run.ScheduleSeed = options.Seed
 			run.PlannedScenarioRuns = options.PlannedScenarioRuns
@@ -249,8 +265,8 @@ func parseRemoteEvalOptions(args []string) (remoteEvalOptions, error) {
 	fs.IntVar(&options.BatchSize, "batch-size", 8, "transactions per measured slot")
 	fs.IntVar(&options.TxSize, "tx-size", 256, "minimum signed Ethereum transaction byte size")
 	fs.Uint64Var(&options.TxGas, "tx-gas", 21000, "minimum gas limit used in generated transactions")
-	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic or mock-placeholder")
-	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL to record for tx-source=mock-placeholder")
+	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic, mock-placeholder, or mock-encrypted-corpus")
+	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for a mock source")
 	fs.Uint64Var(&options.FeeStart, "fee-start-wei", 1000, "first generated effective fee per gas")
 	fs.Uint64Var(&options.FeeStep, "fee-step-wei", 1, "generated fee increment")
 	fs.IntVar(&options.Warmups, "warmups", 0, "warmup remote slots")
@@ -263,6 +279,7 @@ func parseRemoteEvalOptions(args []string) (remoteEvalOptions, error) {
 	fs.DurationVar(&options.Deadline, "deadline", 12*time.Second, "successful consistent timing deadline")
 	fs.StringVar(&options.ImageTag, "image-tag", "", "deployment image tag to record in manifest")
 	fs.StringVar(&options.GitCommit, "git-commit", "", "git commit to record in manifest")
+	fs.BoolVar(&options.FinalCampaign, "final-campaign", false, "require the immutable encrypted-corpus final-campaign contract")
 	if err := fs.Parse(args); err != nil {
 		return remoteEvalOptions{}, err
 	}
@@ -292,6 +309,11 @@ func parseRemoteEvalOptions(args []string) (remoteEvalOptions, error) {
 	}
 	if err := validateTxSource(options.TxSource, options.MempoolURL); err != nil {
 		return remoteEvalOptions{}, err
+	}
+	if options.FinalCampaign {
+		if err := validateFinalCampaignTxSource(options.TxSource, options.MempoolURL); err != nil {
+			return remoteEvalOptions{}, err
+		}
 	}
 	return options, nil
 }
@@ -349,11 +371,15 @@ func waitForRemoteHTTP(client *http.Client, nodes []remoteEvalNode, timeout time
 }
 
 func runRemoteSlot(client *http.Client, outDir, runID string, cfg remoteEvalConfig, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options remoteEvalOptions, prepare bool) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
+	if options.TxSource == "mock-encrypted-corpus" {
+		identity := corpusIdentityForCount(cfg.Corpus, scenario.BatchSize)
+		run.Corpus = &identity
+	}
 	prepareStarted := time.Now()
 	if prepare {
 		if err := parallelNodes(len(cfg.Nodes), func(index int) error {
-			return postJSON(client, cfg.Nodes[index].URL+"/slot/prepare", prepareSlotRequest{Slot: slotID})
+			return postJSON(client, cfg.Nodes[index].URL+"/slot/prepare", prepareRequestForScenario(slotID, scenario))
 		}); err != nil {
 			run.PrepareUS = time.Since(prepareStarted).Microseconds()
 			run.FinishedAt = time.Now()
@@ -363,7 +389,7 @@ func runRemoteSlot(client *http.Client, outDir, runID string, cfg remoteEvalConf
 	run.PrepareUS = time.Since(prepareStarted).Microseconds()
 
 	submitStarted := time.Now()
-	if options.TxSource != "mock-placeholder" {
+	if !usesMempoolSource(options.TxSource) {
 		byNode := make(map[int][]SubmitTxRequest)
 		for _, item := range corpus {
 			byNode[item.nodeID] = append(byNode[item.nodeID], item.request)
@@ -398,16 +424,34 @@ func runRemoteSlot(client *http.Client, outDir, runID string, cfg remoteEvalConf
 	run.FinishedAt = time.Now()
 	run.HarnessWallUS = time.Since(harnessStarted).Microseconds()
 	run.Results = results
+	run.ReceivedTxCount = receivedTxCount(results)
 	run.StartSkewUS = resultStartSkewUS(results)
 	run.CriticalNodeID = criticalNodeID(results)
 	run.Consistent = resultsConsistent(results)
 	run.Success = err == nil && run.Consistent
+	if err == nil && options.TxSource == "mock-encrypted-corpus" && run.ReceivedTxCount != scenario.BatchSize {
+		err = fmt.Errorf("received %d selected ciphertexts, expected exact corpus prefix %d", run.ReceivedTxCount, scenario.BatchSize)
+		run.Success = false
+	}
 	writeRemoteRunArtifacts(outDir, run, cfg.Nodes)
 	if err != nil {
 		captureRemoteStatuses(client, outDir, runID, slotID, cfg.Nodes)
 		return run, err
 	}
 	return run, nil
+}
+
+func receivedTxCount(results []Result) int {
+	if len(results) == 0 {
+		return 0
+	}
+	count := results[0].Metrics.SelectedCiphertexts
+	for _, result := range results[1:] {
+		if result.Metrics.SelectedCiphertexts != count {
+			return -1
+		}
+	}
+	return count
 }
 
 func writeRemoteRunArtifacts(outDir string, run EvalRun, nodes []remoteEvalNode) {

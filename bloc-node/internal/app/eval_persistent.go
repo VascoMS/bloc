@@ -49,11 +49,15 @@ type evalSubmission struct {
 }
 
 func runPersistentSuite(self, outDir string, options suiteOptions, scenarios []evalScenario, record func(EvalRun) error) ([]EvalRun, []clusterMeasurement, error) {
-	configBase, err := os.MkdirTemp("", "bloc-eval-suite-config-*")
-	if err != nil {
-		return nil, nil, err
+	configBase := options.ConfigBase
+	if configBase == "" {
+		var err error
+		configBase, err = os.MkdirTemp("", "bloc-eval-suite-config-*")
+		if err != nil {
+			return nil, nil, err
+		}
+		defer os.RemoveAll(configBase)
 	}
-	defer os.RemoveAll(configBase)
 	groups := make(map[int][]evalScenario)
 	var nodeCounts []int
 	for _, scenario := range scenarios {
@@ -236,7 +240,7 @@ func buildSubmissionCorpusForSource(scenario evalScenario, options suiteOptions)
 	switch options.TxSource {
 	case "", "synthetic":
 		return buildSubmissionCorpus(scenario, options)
-	case "mock-placeholder":
+	case "mock-placeholder", "mock-encrypted-corpus":
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported tx-source %q", options.TxSource)
@@ -253,8 +257,13 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 		return nil, measurement, err
 	}
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if options.TxSource == "mock-encrypted-corpus" {
+			err = fmt.Errorf("immutable encrypted corpus run requires existing config %s", configPath)
+			measurement.Error = err.Error()
+			return nil, measurement, err
+		}
 		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--out", configPath}
-		if options.TxSource == "mock-placeholder" {
+		if usesMempoolSource(options.TxSource) {
 			args = append(args, "--provider", "mempool-http", "--mempool-url", options.MempoolURL)
 		}
 		if out, genErr := exec.Command(self, args...).CombinedOutput(); genErr != nil {
@@ -265,6 +274,12 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 	} else if err != nil {
 		measurement.Error = err.Error()
 		return nil, measurement, err
+	}
+	if options.TxSource == "mock-encrypted-corpus" {
+		if err := validatePersistentCorpusConfig(configPath, scenario, options.CorpusByNodes[scenario.Nodes]); err != nil {
+			measurement.Error = err.Error()
+			return nil, measurement, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -310,19 +325,44 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 	return cluster, measurement, nil
 }
 
-func (c *persistentCluster) runSlot(outDir, runID string, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options suiteOptions) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
-	prepareStarted := time.Now()
-	if slotID != c.currentSlot {
-		if err := parallelNodes(c.nodes, func(id int) error {
-			return postJSON(c.client, fmt.Sprintf("http://127.0.0.1:%d/slot/prepare", c.basePort+1000+id), prepareSlotRequest{Slot: slotID})
-		}); err != nil {
-			run.PrepareUS = time.Since(prepareStarted).Microseconds()
-			run.FinishedAt = time.Now()
-			return run, fmt.Errorf("prepare slot %d: %w", slotID, err)
-		}
-		c.currentSlot = slotID
+func validatePersistentCorpusConfig(path string, scenario evalScenario, provenance corpusProvenance) error {
+	cfg, err := readConfig(path)
+	if err != nil {
+		return fmt.Errorf("read immutable corpus cluster config: %w", err)
 	}
+	if cfg.N != scenario.Nodes || cfg.Threshold != scenario.Threshold || cfg.BMax != provenance.BMax {
+		return fmt.Errorf("cluster config n/t/BMax %d/%d/%d does not match scenario and corpus %d/%d/%d", cfg.N, cfg.Threshold, cfg.BMax, scenario.Nodes, scenario.Threshold, provenance.BMax)
+	}
+	provider := cfg.Provider
+	if !provider.RequireExactCount ||
+		provider.ExpectedPublicConfigID != provenance.PublicConfigID ||
+		provider.ExpectedPlaintextMasterID != provenance.PlaintextMasterCorpusID ||
+		provider.ExpectedEncryptedCorpusID != provenance.EncryptedCorpusID {
+		return fmt.Errorf("cluster config provider does not match immutable corpus identities")
+	}
+	for size, want := range provenance.EncryptedPrefixSetIDs {
+		if provider.ExpectedEncryptedPrefixSetIDs[size] != want {
+			return fmt.Errorf("cluster config encrypted prefix %s does not match immutable corpus", size)
+		}
+	}
+	return nil
+}
+
+func (c *persistentCluster) runSlot(outDir, runID string, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options suiteOptions) (EvalRun, error) {
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
+	if options.TxSource == "mock-encrypted-corpus" {
+		identity := corpusIdentityForCount(options.CorpusByNodes[scenario.Nodes], scenario.BatchSize)
+		run.Corpus = &identity
+	}
+	prepareStarted := time.Now()
+	if err := parallelNodes(c.nodes, func(id int) error {
+		return postJSON(c.client, fmt.Sprintf("http://127.0.0.1:%d/slot/prepare", c.basePort+1000+id), prepareRequestForScenario(slotID, scenario))
+	}); err != nil {
+		run.PrepareUS = time.Since(prepareStarted).Microseconds()
+		run.FinishedAt = time.Now()
+		return run, fmt.Errorf("prepare slot %d: %w", slotID, err)
+	}
+	c.currentSlot = slotID
 	run.PrepareUS = time.Since(prepareStarted).Microseconds()
 
 	submitStarted := time.Now()
@@ -355,16 +395,25 @@ func (c *persistentCluster) runSlot(outDir, runID string, scenario evalScenario,
 	run.FinishedAt = time.Now()
 	run.HarnessWallUS = time.Since(harnessStarted).Microseconds()
 	run.Results = results
+	run.ReceivedTxCount = receivedTxCount(results)
 	run.StartSkewUS = resultStartSkewUS(results)
 	run.CriticalNodeID = criticalNodeID(results)
 	run.Consistent = resultsConsistent(results)
 	run.Success = err == nil && run.Consistent
+	if err == nil && options.TxSource == "mock-encrypted-corpus" && run.ReceivedTxCount != scenario.BatchSize {
+		err = fmt.Errorf("received %d selected ciphertexts, expected exact corpus prefix %d", run.ReceivedTxCount, scenario.BatchSize)
+		run.Success = false
+	}
 	c.writeRunArtifacts(outDir, run)
 	if err != nil {
 		c.captureStatuses(outDir, runID, slotID)
 		return run, err
 	}
 	return run, nil
+}
+
+func prepareRequestForScenario(slotID uint64, scenario evalScenario) prepareSlotRequest {
+	return prepareSlotRequest{Slot: slotID, ProposalLimit: scenario.BatchSize}
 }
 
 func parallelNodes(nodes int, fn func(int) error) error {

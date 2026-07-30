@@ -250,7 +250,27 @@ func TestValidateTxSource(t *testing.T) {
 	if err := validateTxSource("mock-placeholder", "http://127.0.0.1:8080"); err != nil {
 		t.Fatalf("mock-placeholder rejected: %v", err)
 	}
+	if err := validateTxSource("mock-encrypted-corpus", "http://127.0.0.1:8080"); err != nil {
+		t.Fatalf("mock-encrypted-corpus rejected: %v", err)
+	}
 	if err := validateTxSource("mock-placeholder", ""); err == nil {
 		t.Fatalf("mock-placeholder without mempool url accepted")
+	}
+	if err := validateFinalCampaignTxSource("synthetic", ""); err == nil {
+		t.Fatal("final campaign accepted synthetic source")
+	}
+	if err := validateFinalCampaignTxSource("mock-placeholder", "http://127.0.0.1:8080"); err == nil {
+		t.Fatal("final campaign accepted development placeholder source")
+	}
+	if err := validateFinalCampaignTxSource("mock-encrypted-corpus", "http://127.0.0.1:8080"); err != nil {
+		t.Fatalf("final campaign rejected static encrypted corpus: %v", err)
+	}
+}
+
+func TestEvaluatorPrepareRequestUsesExactScenarioSize(t *testing.T) {
+	scenario := evalScenario{BatchSize: 128}
+	request := prepareRequestForScenario(42, scenario)
+	if request.Slot != 42 || request.ProposalLimit != 128 {
+		t.Fatalf("prepare request = %+v, want slot 42 and proposal limit 128", request)
 	}
 }

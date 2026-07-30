@@ -28,40 +28,41 @@ type evalScenario struct {
 }
 
 type suiteManifest struct {
-	SchemaVersion       string            `json:"schema_version"`
-	ExperimentID        string            `json:"experiment_id"`
-	Profile             string            `json:"profile,omitempty"`
-	Status              string            `json:"status"`
-	Valid               bool              `json:"valid"`
-	InvalidReason       string            `json:"invalid_reason,omitempty"`
-	StartedAt           time.Time         `json:"started_at"`
-	FinishedAt          time.Time         `json:"finished_at,omitempty"`
-	Command             []string          `json:"command"`
-	Seed                int64             `json:"seed"`
-	Warmups             int               `json:"warmups"`
-	Repetitions         int               `json:"repetitions"`
-	RepetitionBlocks    int               `json:"repetition_blocks"`
-	PlannedRuns         int               `json:"planned_runs"`
-	PlannedScenarioRuns map[string]int    `json:"planned_scenario_runs"`
-	BMax                int               `json:"bmax"`
-	TxSize              int               `json:"tx_size"`
-	TxGas               uint64            `json:"tx_gas"`
-	TxSource            string            `json:"tx_source"`
-	TxSourceMeta        map[string]any    `json:"tx_source_metadata,omitempty"`
-	FeeStartWei         uint64            `json:"fee_start_wei"`
-	FeeStepWei          uint64            `json:"fee_step_wei"`
-	Timeout             string            `json:"timeout"`
-	Deadline            string            `json:"deadline"`
-	Scenarios           []evalScenario    `json:"scenarios"`
-	RunOrder            []string          `json:"run_order"`
-	ExecutionMode       string            `json:"execution_mode"`
-	Schedule            string            `json:"schedule"`
-	ClusterStartups     int               `json:"cluster_startups"`
-	RecoveryRuns        int               `json:"recovery_runs"`
-	Deployment          map[string]string `json:"deployment,omitempty"`
-	RemoteEndpoints     []remoteEvalNode  `json:"remote_endpoints,omitempty"`
-	ImageTag            string            `json:"image_tag,omitempty"`
-	GitCommit           string            `json:"git_commit,omitempty"`
+	SchemaVersion       string                       `json:"schema_version"`
+	ExperimentID        string                       `json:"experiment_id"`
+	Profile             string                       `json:"profile,omitempty"`
+	Status              string                       `json:"status"`
+	Valid               bool                         `json:"valid"`
+	InvalidReason       string                       `json:"invalid_reason,omitempty"`
+	StartedAt           time.Time                    `json:"started_at"`
+	FinishedAt          time.Time                    `json:"finished_at,omitempty"`
+	Command             []string                     `json:"command"`
+	Seed                int64                        `json:"seed"`
+	Warmups             int                          `json:"warmups"`
+	Repetitions         int                          `json:"repetitions"`
+	RepetitionBlocks    int                          `json:"repetition_blocks"`
+	PlannedRuns         int                          `json:"planned_runs"`
+	PlannedScenarioRuns map[string]int               `json:"planned_scenario_runs"`
+	BMax                int                          `json:"bmax"`
+	TxSize              int                          `json:"tx_size"`
+	TxGas               uint64                       `json:"tx_gas"`
+	TxSource            string                       `json:"tx_source"`
+	TxSourceMeta        map[string]any               `json:"tx_source_metadata,omitempty"`
+	CorpusByScenario    map[string]runCorpusIdentity `json:"corpus_by_scenario,omitempty"`
+	FeeStartWei         uint64                       `json:"fee_start_wei"`
+	FeeStepWei          uint64                       `json:"fee_step_wei"`
+	Timeout             string                       `json:"timeout"`
+	Deadline            string                       `json:"deadline"`
+	Scenarios           []evalScenario               `json:"scenarios"`
+	RunOrder            []string                     `json:"run_order"`
+	ExecutionMode       string                       `json:"execution_mode"`
+	Schedule            string                       `json:"schedule"`
+	ClusterStartups     int                          `json:"cluster_startups"`
+	RecoveryRuns        int                          `json:"recovery_runs"`
+	Deployment          map[string]string            `json:"deployment,omitempty"`
+	RemoteEndpoints     []remoteEvalNode             `json:"remote_endpoints,omitempty"`
+	ImageTag            string                       `json:"image_tag,omitempty"`
+	GitCommit           string                       `json:"git_commit,omitempty"`
 }
 
 type suiteOptions struct {
@@ -73,6 +74,10 @@ type suiteOptions struct {
 	TxGas            uint64
 	TxSource         string
 	MempoolURL       string
+	ConfigBase       string
+	CorpusManifests  string
+	CorpusByNodes    map[int]corpusProvenance
+	FinalCampaign    bool
 	FeeStart         uint64
 	FeeStep          uint64
 	Warmups          int
@@ -165,6 +170,11 @@ func evalSuite(args []string) error {
 	if err := validateTxSource(options.TxSource, options.MempoolURL); err != nil {
 		return err
 	}
+	if options.FinalCampaign {
+		if err := validateFinalCampaignTxSource(options.TxSource, options.MempoolURL); err != nil {
+			return err
+		}
+	}
 	nodeCounts, err := parseIntList(options.NodeCountsRaw)
 	if err != nil {
 		return fmt.Errorf("node-counts: %w", err)
@@ -176,6 +186,11 @@ func evalSuite(args []string) error {
 	scenarios, err := buildScenarios(nodeCounts, batchSizes, options.BMax)
 	if err != nil {
 		return err
+	}
+	if options.TxSource == "mock-encrypted-corpus" {
+		if err := loadSuiteCorpusProvenance(&options, scenarios); err != nil {
+			return err
+		}
 	}
 	plannedRuns := len(scenarios) * (options.Warmups + options.Repetitions)
 	plannedScenarioRuns := make(map[string]int, len(scenarios))
@@ -215,6 +230,7 @@ func evalSuite(args []string) error {
 		TxGas:               options.TxGas,
 		TxSource:            options.TxSource,
 		TxSourceMeta:        txSourceManifestMeta(options.TxSource, options.MempoolURL),
+		CorpusByScenario:    suiteCorpusIdentities(options, scenarios),
 		FeeStartWei:         options.FeeStart,
 		FeeStepWei:          options.FeeStep,
 		Timeout:             options.Timeout.String(),
@@ -329,6 +345,48 @@ func evalSuite(args []string) error {
 	return nil
 }
 
+func loadSuiteCorpusProvenance(options *suiteOptions, scenarios []evalScenario) error {
+	if strings.TrimSpace(options.ConfigBase) == "" {
+		return fmt.Errorf("tx-source=mock-encrypted-corpus requires --config-base")
+	}
+	paths, err := parseCorpusManifestPaths(options.CorpusManifests)
+	if err != nil {
+		return err
+	}
+	options.CorpusByNodes = make(map[int]corpusProvenance)
+	for _, scenario := range scenarios {
+		if _, loaded := options.CorpusByNodes[scenario.Nodes]; loaded {
+			continue
+		}
+		path := paths[scenario.Nodes]
+		if path == "" {
+			return fmt.Errorf("missing encrypted corpus manifest for n=%d", scenario.Nodes)
+		}
+		provenance, err := readCorpusProvenance(path)
+		if err != nil {
+			return fmt.Errorf("load encrypted corpus for n=%d: %w", scenario.Nodes, err)
+		}
+		options.CorpusByNodes[scenario.Nodes] = provenance
+	}
+	for _, scenario := range scenarios {
+		if err := validateCorpusProvenance(options.CorpusByNodes[scenario.Nodes], options.BMax, scenario.BatchSize); err != nil {
+			return fmt.Errorf("%s: %w", scenario.ID, err)
+		}
+	}
+	return nil
+}
+
+func suiteCorpusIdentities(options suiteOptions, scenarios []evalScenario) map[string]runCorpusIdentity {
+	if options.TxSource != "mock-encrypted-corpus" {
+		return nil
+	}
+	identities := make(map[string]runCorpusIdentity, len(scenarios))
+	for _, scenario := range scenarios {
+		identities[scenario.ID] = corpusIdentityForCount(options.CorpusByNodes[scenario.Nodes], scenario.BatchSize)
+	}
+	return identities
+}
+
 func suiteCollectionComplete(plannedRuns int, runs []EvalRun) bool {
 	retained := 0
 	for _, run := range runs {
@@ -348,8 +406,11 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.IntVar(&options.BMax, "bmax", 128, "BTE maximum batch size")
 	fs.IntVar(&options.TxSize, "tx-size", 256, "minimum signed Ethereum transaction byte size")
 	fs.Uint64Var(&options.TxGas, "tx-gas", 21000, "minimum gas limit used in generated transactions")
-	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic or mock-placeholder")
-	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for tx-source=mock-placeholder")
+	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic, mock-placeholder, or mock-encrypted-corpus")
+	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for a mock source")
+	fs.StringVar(&options.ConfigBase, "config-base", "", "existing per-node-count config root for immutable encrypted corpus runs")
+	fs.StringVar(&options.CorpusManifests, "encrypted-corpus-manifests", "", "comma-separated node-count=artifact path entries")
+	fs.BoolVar(&options.FinalCampaign, "final-campaign", false, "require the immutable encrypted-corpus final-campaign contract")
 	fs.Uint64Var(&options.FeeStart, "fee-start-wei", 1000, "first generated effective fee per gas")
 	fs.Uint64Var(&options.FeeStep, "fee-step-wei", 1, "generated fee increment")
 	fs.IntVar(&options.Warmups, "warmups", 5, "warmup runs per scenario")

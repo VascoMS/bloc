@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -519,6 +520,37 @@ func TestScenarioSummaryExcludesWarmupsAndFailures(t *testing.T) {
 	metric := summary.Metrics["total_slot_us"]
 	if metric.Count != 2 || metric.P50 != 15 || metric.Max != 20 {
 		t.Fatalf("unexpected total summary: %+v", metric)
+	}
+}
+
+func TestFinalCampaignRejectsSyntheticBeforeExecution(t *testing.T) {
+	_, err := parseRemoteEvalOptions([]string{"--final-campaign", "--tx-source", "synthetic"})
+	if err == nil || !strings.Contains(err.Error(), "mock-encrypted-corpus") {
+		t.Fatalf("final campaign source error = %v", err)
+	}
+}
+
+func TestCorpusProvenanceSelectsExactPrefixIdentity(t *testing.T) {
+	provenance := corpusProvenance{
+		SchemaVersion:           "bloc-encrypted-corpus-v1",
+		CiphertextWireVersion:   "bte-tx-v2",
+		PublicConfigID:          "public",
+		PlaintextMasterCorpusID: "master",
+		PlaintextPrefixSetIDs:   map[string]string{"32": "plain-32"},
+		EncryptedCorpusID:       "encrypted",
+		EncryptedPrefixSetIDs:   map[string]string{"32": "cipher-32"},
+		BMax:                    128,
+		AvailableCount:          128,
+	}
+	if err := validateCorpusProvenance(provenance, 128, 32); err != nil {
+		t.Fatalf("valid provenance rejected: %v", err)
+	}
+	identity := corpusIdentityForCount(provenance, 32)
+	if identity.RequestedCount != 32 || identity.PlaintextPrefixID != "plain-32" || identity.EncryptedPrefixID != "cipher-32" || identity.PublicConfigID != "public" {
+		t.Fatalf("unexpected run identity: %+v", identity)
+	}
+	if err := validateCorpusProvenance(provenance, 128, 8); err == nil {
+		t.Fatal("missing prefix identity accepted")
 	}
 }
 

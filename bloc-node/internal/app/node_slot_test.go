@@ -79,6 +79,19 @@ func TestPrepareSlotRetainsProposalLimitInFreshState(t *testing.T) {
 	}
 }
 
+func TestPrepareSlotSetsInitialProposalLimitOnce(t *testing.T) {
+	n := lifecycleTestNode(t)
+	if err := n.prepareSlotWithLimit(1, 32); err != nil {
+		t.Fatalf("set initial proposal limit: %v", err)
+	}
+	if n.proposalLimit != 32 {
+		t.Fatalf("initial proposal limit = %d, want 32", n.proposalLimit)
+	}
+	if err := n.prepareSlotWithLimit(1, 8); err == nil {
+		t.Fatal("reconfigured an already bounded slot")
+	}
+}
+
 func TestPrepareSlotAcceptsTerminalFailureAndResetsIt(t *testing.T) {
 	n := lifecycleTestNode(t)
 	n.markSlotFailed("decode")

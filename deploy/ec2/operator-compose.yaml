@@ -1,7 +1,16 @@
 services:
-  bloc-node:
-    image: ${BLOC_IMAGE:-bloc-node:local}
+  mempool-il:
+    image: ${MEMPOOL_IMAGE:?set MEMPOOL_IMAGE to an immutable digest}
     restart: unless-stopped
+    command: ["-source", "encrypted-corpus", "-encrypted-corpus", "/corpus/encrypted-corpus.json", "-listen", ":8080", "-max-items", "512"]
+    volumes:
+      - /etc/bloc/encrypted-corpus.json:/corpus/encrypted-corpus.json:ro
+
+  bloc-node:
+    image: ${BLOC_IMAGE:?set BLOC_IMAGE to an immutable digest}
+    restart: unless-stopped
+    depends_on:
+      - mempool-il
     environment:
       NODE_ID: ${NODE_ID:?set NODE_ID for this EC2 operator}
     command: ["run", "--config", "/config/cluster.json", "--secrets", "/run/secrets/operator.json"]

@@ -1,54 +1,37 @@
-services:
-  bloc-config:
-    build:
-      context: ../..
-      dockerfile: bloc-node/Dockerfile
-    image: bloc-node:local
-    user: "0:0"
-    command:
-      - gen-config
-      - --nodes
-      - "4"
-      - --threshold
-      - "3"
-      - --bmax
-      - "128"
-      - --slot
-      - "1"
-      - --address-mode
-      - container
-      - --base-http-port
-      - "8000"
-      - --base-p2p-port
-      - "9000"
-      - --cluster-id
-      - bloc-compose
-      - --out
-      - /config/cluster.json
-      - --secret-path-template
-      - /operator-secrets/{id}/operator.json
-      - --secret-uid
-      - "10001"
-      - --secret-gid
-      - "10001"
-    volumes:
-      - bloc-config:/config
-      - bloc-secret-0:/operator-secrets/0
-      - bloc-secret-1:/operator-secrets/1
-      - bloc-secret-2:/operator-secrets/2
-      - bloc-secret-3:/operator-secrets/3
+x-bloc-node: &bloc-node
+  image: ${BLOC_IMAGE:?set BLOC_IMAGE to an immutable bloc-node digest}
+  restart: unless-stopped
+  command: ["run", "--config", "/config/cluster.json", "--secrets", "/run/secrets/operator.json"]
+  volumes:
+    - ${BLOC_CLUSTER_CONFIG:?set BLOC_CLUSTER_CONFIG}:/config/cluster.json:ro
+    - ${BLOC_CLUSTER_CRS:?set BLOC_CLUSTER_CRS}:/config/cluster.crs:ro
 
-  bloc-node-0: &bloc-node
-    image: bloc-node:local
-    depends_on:
-      bloc-config:
-        condition: service_completed_successfully
+services:
+  mempool-il:
+    image: ${MEMPOOL_IMAGE:?set MEMPOOL_IMAGE to an immutable mempool-il digest}
+    restart: unless-stopped
+    command:
+      - -source
+      - encrypted-corpus
+      - -encrypted-corpus
+      - /corpus/encrypted-corpus.json
+      - -listen
+      - :8080
+      - -max-items
+      - "512"
+    volumes:
+      - ${BLOC_ENCRYPTED_CORPUS:?set BLOC_ENCRYPTED_CORPUS}:/corpus/encrypted-corpus.json:ro
+    ports:
+      - "18080:8080"
+
+  bloc-node-0:
+    <<: *bloc-node
     environment:
       NODE_ID: "0"
-    command: ["run", "--config", "/config/cluster.json", "--secrets", "/secrets/operator.json"]
     volumes:
-      - bloc-config:/config:ro
-      - bloc-secret-0:/secrets:ro
+      - ${BLOC_CLUSTER_CONFIG:?set BLOC_CLUSTER_CONFIG}:/config/cluster.json:ro
+      - ${BLOC_CLUSTER_CRS:?set BLOC_CLUSTER_CRS}:/config/cluster.crs:ro
+      - ${BLOC_SECRET_0:?set BLOC_SECRET_0}:/run/secrets/operator.json:ro
     ports:
       - "18000:8000"
 
@@ -57,8 +40,9 @@ services:
     environment:
       NODE_ID: "1"
     volumes:
-      - bloc-config:/config:ro
-      - bloc-secret-1:/secrets:ro
+      - ${BLOC_CLUSTER_CONFIG:?set BLOC_CLUSTER_CONFIG}:/config/cluster.json:ro
+      - ${BLOC_CLUSTER_CRS:?set BLOC_CLUSTER_CRS}:/config/cluster.crs:ro
+      - ${BLOC_SECRET_1:?set BLOC_SECRET_1}:/run/secrets/operator.json:ro
     ports:
       - "18001:8001"
 
@@ -67,8 +51,9 @@ services:
     environment:
       NODE_ID: "2"
     volumes:
-      - bloc-config:/config:ro
-      - bloc-secret-2:/secrets:ro
+      - ${BLOC_CLUSTER_CONFIG:?set BLOC_CLUSTER_CONFIG}:/config/cluster.json:ro
+      - ${BLOC_CLUSTER_CRS:?set BLOC_CLUSTER_CRS}:/config/cluster.crs:ro
+      - ${BLOC_SECRET_2:?set BLOC_SECRET_2}:/run/secrets/operator.json:ro
     ports:
       - "18002:8002"
 
@@ -77,8 +62,9 @@ services:
     environment:
       NODE_ID: "3"
     volumes:
-      - bloc-config:/config:ro
-      - bloc-secret-3:/secrets:ro
+      - ${BLOC_CLUSTER_CONFIG:?set BLOC_CLUSTER_CONFIG}:/config/cluster.json:ro
+      - ${BLOC_CLUSTER_CRS:?set BLOC_CLUSTER_CRS}:/config/cluster.crs:ro
+      - ${BLOC_SECRET_3:?set BLOC_SECRET_3}:/run/secrets/operator.json:ro
     ports:
       - "18003:8003"
 
@@ -110,37 +96,3 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "13000:3000"
-
-  mempool-il:
-    build:
-      context: ../..
-      dockerfile: mempool-il/Dockerfile
-    image: mempool-il:local
-    depends_on:
-      bloc-config:
-        condition: service_completed_successfully
-    command:
-      - -source
-      - replay-placeholder
-      - -cluster-config
-      - /config/cluster.json
-      - -corpus
-      - /corpus/mock-targets.jsonl
-      - -replay-slot
-      - "1"
-      - -listen
-      - :8080
-      - -max-items
-      - "128"
-    volumes:
-      - bloc-config:/config:ro
-      - ./corpus:/corpus:ro
-    ports:
-      - "18080:8080"
-
-volumes:
-  bloc-config:
-  bloc-secret-0:
-  bloc-secret-1:
-  bloc-secret-2:
-  bloc-secret-3:

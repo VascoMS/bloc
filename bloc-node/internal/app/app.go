@@ -25,6 +25,10 @@ func Run(args []string) {
 		if err := genEC2Config(args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "bind-encrypted-corpus":
+		if err := bindEncryptedCorpus(args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "run":
 		if err := runNode(args[2:]); err != nil {
 			log.Fatal(err)
@@ -59,6 +63,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `usage:
   bloc-node gen-config --nodes 4 --threshold 3 --bmax 128 --out cluster.json
   bloc-node gen-ec2-config --inventory deploy/ec2/inventory.json --cluster-out cluster.ec2.json --remote-eval-out remote-eval.ec2.json
+  bloc-node bind-encrypted-corpus --config cluster.json --corpus encrypted-corpus.json --mempool-url http://mempool-il:8080
   bloc-node run --config cluster.json --secrets secrets/operator-0.json --id 0 --slot 1 --start-after 3s
   bloc-node submit --url http://127.0.0.1:8000 --tx 0x010203
   bloc-node eval-local --nodes 4 --batch-sizes 8,32 --tx-size 256 --out-dir results

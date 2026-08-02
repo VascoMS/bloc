@@ -97,3 +97,24 @@ if find "$fixture" -path '*/artifacts/*' -type f \( -name '*secret*' -o -name 'o
 fi
 
 echo "final campaign lifecycle tests passed"
+
+if [[ "${1:-}" == same-az ]]; then
+  [[ -f "$repo_root/deploy/ec2/final-topology-same-az.sh" ]] || { echo "same-AZ adapter is missing" >&2; exit 1; }
+  source "$repo_root/deploy/ec2/final-topology-same-az.sh"
+  adapter_root="$fixture/same-az-adapter"
+  mkdir -p "$adapter_root/bundle"
+  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=4 FINAL_EXPERIMENT_ID=adapter-test
+  FINAL_BUNDLE_ROOT="$adapter_root/bundle"
+  FINAL_ADMIN_CIDR=127.0.0.1/32 FINAL_AWS_PROFILE=default
+  FINAL_BLOC_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:$(printf 'a%.0s' {1..64})"
+  FINAL_MEMPOOL_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:$(printf 'b%.0s' {1..64})"
+  final_same_az_prepare_files "$adapter_root" 4 || exit 1
+  tfvars="$adapter_root/generated-public/terraform/campaign.auto.tfvars"
+  grep -Fq 'availability_zone = "us-east-1a"' "$tfvars"
+  grep -Fq 'operator_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'controller_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'cpu_credits = "unlimited"' "$tfvars"
+  grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/bloc-node' "$tfvars"
+  grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"
+  echo "same-AZ adapter contract tests passed"
+fi

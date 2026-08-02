@@ -221,6 +221,18 @@ resource "aws_instance" "controller" {
   iam_instance_profile        = local.iam_instance_profile_name
   user_data                   = file("${path.module}/user-data.sh")
 
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
+  credit_specification { cpu_credits = var.cpu_credits }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
+
   tags = {
     Name = "${var.name_prefix}-controller"
     Role = "bloc-controller"
@@ -242,6 +254,18 @@ resource "aws_instance" "operator" {
   vpc_security_group_ids      = [aws_security_group.sidecar.id]
   iam_instance_profile        = local.iam_instance_profile_name
   user_data                   = file("${path.module}/user-data.sh")
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
+  credit_specification { cpu_credits = var.cpu_credits }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
 
   tags = {
     Name    = "${var.name_prefix}-operator-${count.index}"

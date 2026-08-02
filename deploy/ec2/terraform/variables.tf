@@ -50,6 +50,16 @@ variable "controller_instance_type" {
   default = "t3.small"
 }
 
+variable "cpu_credits" {
+  type    = string
+  default = "unlimited"
+
+  validation {
+    condition     = contains(["standard", "unlimited"], var.cpu_credits)
+    error_message = "cpu_credits must be standard or unlimited."
+  }
+}
+
 variable "key_name" {
   type        = string
   description = "Existing EC2 key pair name for SSH access."

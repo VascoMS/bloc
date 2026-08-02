@@ -112,6 +112,19 @@ final_scp() {
   scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$source" "ubuntu@$host:$destination"
 }
 
+final_wait_host_ready() {
+  local key="$1" host="$2" attempt=1
+  while [[ "$attempt" -le 60 ]]; do
+    if final_ssh "$key" "$host" 'cloud-init status --wait >/dev/null && docker version >/dev/null && docker compose version >/dev/null'; then
+      return 0
+    fi
+    sleep 10
+    attempt=$((attempt + 1))
+  done
+  echo "host readiness failed: $host" >&2
+  return 1
+}
+
 final_materialize_public() {
   local artifact_root="$1" topology
   [[ "$FINAL_TOPOLOGY" == same-az ]] && topology=T0-same-az || topology=T2-three-region
@@ -127,25 +140,27 @@ final_materialize_public() {
 
 final_stage_hosts() {
   local artifact_root="$1" corpus_hash node id host key secret
-  corpus_hash="$(jq -er '.file_sha256["encrypted-corpus.json"]' "$FINAL_BUNDLE_ROOT/bundle-manifest.json")"
+  corpus_hash="$(jq -er '.file_sha256["encrypted-corpus.json"]' "$FINAL_BUNDLE_ROOT/bundle-manifest.json")" || return 1
   while IFS= read -r node; do
     id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
     secret="$FINAL_BUNDLE_ROOT/secrets/operator-$id.json"
-    final_ssh "$key" "$host" 'sudo mkdir -p /etc/bloc /opt/bloc/ec2 && sudo chown ubuntu:ubuntu /etc/bloc /opt/bloc/ec2'
-    final_scp "$key" "$artifact_root/generated-public/cluster.json" "$host" /etc/bloc/cluster.json
-    final_scp "$key" "$artifact_root/generated-public/cluster.crs" "$host" /etc/bloc/cluster.crs
-    final_scp "$key" "$FINAL_BUNDLE_ROOT/encrypted-corpus.json" "$host" /etc/bloc/encrypted-corpus.json
-    final_scp "$key" "$secret" "$host" /etc/bloc/operator.json
-    final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/operator-compose.yaml" "$host" /etc/bloc/operator-compose.yaml
-    final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/sample-container-resources.sh" "$host" /opt/bloc/ec2/sample-container-resources.sh
-    final_ssh "$key" "$host" "chmod 600 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'"
+    final_wait_host_ready "$key" "$host" || return 1
+    final_ssh "$key" "$host" 'sudo mkdir -p /etc/bloc /opt/bloc/ec2 && sudo chown ubuntu:ubuntu /etc/bloc /opt/bloc/ec2' || return 1
+    final_scp "$key" "$artifact_root/generated-public/cluster.json" "$host" /etc/bloc/cluster.json || return 1
+    final_scp "$key" "$artifact_root/generated-public/cluster.crs" "$host" /etc/bloc/cluster.crs || return 1
+    final_scp "$key" "$FINAL_BUNDLE_ROOT/encrypted-corpus.json" "$host" /etc/bloc/encrypted-corpus.json || return 1
+    final_scp "$key" "$secret" "$host" /etc/bloc/operator.json || return 1
+    final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/operator-compose.yaml" "$host" /etc/bloc/operator-compose.yaml || return 1
+    final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/sample-container-resources.sh" "$host" /opt/bloc/ec2/sample-container-resources.sh || return 1
+    final_ssh "$key" "$host" "chmod 600 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'" || return 1
   done < <(jq -c '.nodes | sort_by(.id)[]' "$artifact_root/inventory.json")
 
   local controller controller_host controller_key
   controller="$(jq -c .controller "$artifact_root/inventory.json")"; controller_host="$(jq -r .public_ip <<<"$controller")"
   controller_key="$(final_topology_key_for_host "$controller")"
-  final_ssh "$controller_key" "$controller_host" 'mkdir -p /opt/bloc/ec2/results'
-  final_scp "$controller_key" "$artifact_root/generated-public/remote-eval.json" "$controller_host" /opt/bloc/ec2/remote-eval.json
+  final_wait_host_ready "$controller_key" "$controller_host" || return 1
+  final_ssh "$controller_key" "$controller_host" 'sudo mkdir -p /opt/bloc/ec2/results && sudo chown -R ubuntu:ubuntu /opt/bloc/ec2' || return 1
+  final_scp "$controller_key" "$artifact_root/generated-public/remote-eval.json" "$controller_host" /opt/bloc/ec2/remote-eval.json || return 1
 }
 
 final_pull_one_image() {

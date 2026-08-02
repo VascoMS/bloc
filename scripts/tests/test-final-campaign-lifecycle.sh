@@ -17,6 +17,35 @@ if final_assert_cleanup_empty "$nonempty_cleanup"; then
   exit 1
 fi
 
+stage_root="$fixture/stage"
+mkdir -p "$stage_root/bundle/secrets" "$stage_root/generated-public"
+printf '%s\n' '{"file_sha256":{"encrypted-corpus.json":"corpus-hash"}}' >"$stage_root/bundle/bundle-manifest.json"
+printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$stage_root/inventory.json"
+stage_log="$stage_root/stage.log"
+FINAL_BUNDLE_ROOT="$stage_root/bundle"
+FINAL_REPO_ROOT="$repo_root"
+final_topology_key_for_host() { printf 'test-key.pem\n'; }
+final_ssh() { printf 'ssh|%s|%s\n' "$2" "$3" >>"$stage_log"; }
+final_scp() {
+  printf 'scp|%s|%s\n' "$3" "$4" >>"$stage_log"
+  [[ "${FINAL_STAGE_FAIL_COPY:-0}" -eq 0 ]]
+}
+sleep() { :; }
+
+FINAL_STAGE_FAIL_COPY=0
+final_stage_hosts "$stage_root"
+[[ "$(grep -c 'cloud-init status --wait' "$stage_log")" -eq 2 ]] || { echo "staging did not wait for every host" >&2; exit 1; }
+grep -Fq 'sudo mkdir -p /opt/bloc/ec2/results' "$stage_log" || { echo "controller staging did not create its directory with sudo" >&2; exit 1; }
+
+: >"$stage_log"
+FINAL_STAGE_FAIL_COPY=1
+if final_stage_hosts "$stage_root"; then
+  echo "staging ignored a failed copy" >&2
+  exit 1
+fi
+[[ "$(grep -c '^scp|' "$stage_log")" -eq 1 ]] || { echo "staging continued after a failed copy" >&2; exit 1; }
+unset -f final_topology_key_for_host final_ssh final_scp sleep
+
 make_fixture() {
   local root="$1"
   mkdir -p "$root/bundle/secrets"

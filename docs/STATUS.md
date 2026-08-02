@@ -83,16 +83,22 @@ release-candidate configuration contract are defined in
   repositories by digest and inspected as `linux/amd64` with their expected
   non-root users and entrypoints. Final bundle verification and every primary
   `--validate-only` permutation passed. The isolated chart environment passes
-  37/37 tests, and the automated split race
-  gate passes the complete normal application suite plus focused BTE, mempool,
+  37/37 tests, and the automated split race gate passes the complete normal
+  application suite plus focused BTE, mempool,
   and concurrency-relevant application races. Earlier 10- and 30-minute
   package-wide race attempts exhausted their process time while actively parsing
   BMax-128 CRS material and reported no race. A clean detached execution
   worktree remains anchored at the frozen SHA while task documentation advances.
   Regional `t3.small` offerings and Standard On-Demand quotas satisfy the
-  documented 16/4/4 vCPU requirement. The remaining gate is separate explicit
-  authorization for the n4 same-AZ readiness pilot; no EC2 resource has been
-  created for this replacement campaign.
+  documented 16/4/4 vCPU requirement. The authorized n4 same-AZ pilot attempt
+  `issue-15-same-az-n4-pilot-20260802T144509Z` was rejected before instance
+  creation because IAM user `bloc` lacked `iam:CreateRole` for the generated
+  `issue-15-*` role. Its seven partial network resources and temporary key were
+  removed; direct authenticated EC2 checks and Terraform state are empty. The
+  deployer contract must reconcile the repository's `bloc-ec2-*` IAM namespace,
+  inline pull-policy scope, and cleanup's global read-only `iam:ListRoles` and
+  `iam:ListInstanceProfiles` calls before a retry. The rejected artifact remains
+  invalid and contains no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -118,15 +124,17 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. After separate live authorization, run issue `#15`'s n4 same-AZ readiness
-   pilot from the detached frozen-source worktree.
-2. If the pilot and authenticated cleanup pass, collect the separate same-AZ
+1. Resolve and independently verify the deployer IAM/naming contract without
+   changing the frozen protocol source, image digests, bundles, or corpus.
+2. Rerun issue `#15`'s n4 same-AZ readiness pilot from the detached
+   frozen-source worktree; require accepted artifacts and authenticated cleanup.
+3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
-3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
-4. Do not combine measurements from different source, image, corpus,
+5. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

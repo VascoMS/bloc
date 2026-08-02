@@ -9,6 +9,8 @@ scripts=(
   bloc-node/scripts/run-merge-plan-campaign.sh deploy/ec2/run-a1-pilot.sh
   deploy/ec2/rerun-a1-pilot-existing.sh deploy/ec2/run-m3-same-az.sh
   deploy/ec2/run-m3-cross-az.sh deploy/ec2/run-m3-three-region.sh
+  deploy/ec2/run-final-campaign.sh deploy/ec2/run-same-az-campaign.sh
+  deploy/ec2/run-three-region-campaign.sh scripts/lib/final-campaign-contract.sh
   deploy/ec2/run-merge-plan-attribution.sh deploy/ec2/sample-container-resources.sh
 )
 for script in "${scripts[@]}"; do bash -n "$script"; done
@@ -17,10 +19,7 @@ PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/bloc-runner-pycache" python3 -m unittest sc
 
 grep -Fqx '!mempool-il/' .dockerignore || { echo "Docker build context excludes the mempool-il module" >&2; exit 1; }
 grep -Fqx '!mempool-il/**' .dockerignore || { echo "Docker build context excludes mempool-il source files" >&2; exit 1; }
-grep -Fq -- '--secret-path-template' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not generate operator secrets" >&2; exit 1; }
-grep -Fq -- '/operator-secrets/{id}/operator.json' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder secret path does not match mounted operator volumes" >&2; exit 1; }
-grep -Fq -- '--secret-uid' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not set the operator secret UID" >&2; exit 1; }
-grep -Fq -- '--secret-gid' deploy/docker-compose/compose.mock-placeholder.yaml || { echo "mock-placeholder config does not set the operator secret GID" >&2; exit 1; }
+bash scripts/tests/test-final-campaign-contract.sh
 
 bash bloc-node/scripts/run-acs-safety-campaign.sh --validate-only
 grep -Fq '"sbc/hbbft/rbc.go":$r' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC implementation" >&2; exit 1; }

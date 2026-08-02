@@ -143,8 +143,20 @@ release-candidate configuration contract are defined in
   unreadable by the frozen image's runtime identity `10001:10001`. No
   measurement began. Terraform destroyed all 15 resources, the EC2 and local
   temporary keys were deleted, authenticated resource queries are empty, and
-  Terraform state contains no resources. All attempts remain invalid and
-  contain no metric observation.
+  Terraform state contains no resources. The approved secret correction now
+  retains mode `0600` and assigns only `operator.json` to `10001:10001`; its
+  red/green and topology regressions pass. Retry `bloc-ec2-i15-sa-n4-p6` was
+  interrupted during host readiness by the local execution channel's
+  five-minute boundary before the ownership correction was exercised; its
+  authenticated cleanup and state are empty. Persistent-session retry
+  `bloc-ec2-i15-sa-n4-p7` passed provisioning, materialization, staging, secret
+  ownership (`10001:10001 0600`), exact image verification, and startup. Both
+  containers remained running, but the health gate cannot pass: Compose keeps
+  mempool port 8080 internal while the gate probes host
+  `127.0.0.1:8080`. No measurement began. The five instances and every exact
+  p7 network/IAM/key resource were manually removed after the interrupted
+  wrapper cleanup; authenticated queries, Terraform state, and local key checks
+  are empty. All attempts remain invalid and contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -170,13 +182,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-deployment invalidation decision to assign the private
-   operator secret to runtime identity `10001:10001` while retaining mode
-   `0600`; do not change the frozen protocol images, bundles, corpus contents,
-   source identity, or secret contents.
-2. Add the focused ownership regression, apply that single staging correction,
-   and rerun issue `#15`'s n4 same-AZ readiness pilot; require accepted artifacts
-   and authenticated cleanup.
+1. Obtain the frozen-deployment invalidation decision to bind mempool port 8080
+   to host loopback only (`127.0.0.1:8080:8080`), matching the existing health
+   gate without exposing it through the VPC or changing the internal protocol
+   path; do not change protocol images, bundles, corpus, source, or schema.
+2. Add the focused Compose regression, apply that single deployment correction,
+   and rerun issue `#15`'s n4 same-AZ readiness pilot in a persistent terminal;
+   require accepted artifacts and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

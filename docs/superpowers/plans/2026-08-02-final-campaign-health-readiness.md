@@ -119,10 +119,16 @@ Expected: failure because staging sets the private mode but not the frozen runti
 
 After checksum-verified staging, assign only `/etc/bloc/operator.json` to UID/GID `10001:10001` and retain mode `0600`. Do not change its contents or any frozen protocol identity.
 
-- [ ] **Step 4: Verify, commit, and overlay**
+- [x] **Step 4: Verify, commit, and overlay**
 
 Run the lifecycle test normally and with `same-az` and `three-region`, run `git diff --check`, commit the task files, and copy the exact lifecycle/test overlay into the detached frozen worktree.
 
 - [ ] **Step 5: Validate and retry**
 
 Pass the p6 `--validate-only` command, then execute the authorized n4 same-AZ readiness pilot. Accept it only if the readiness measurements, artifacts, and authenticated teardown all pass.
+
+P6 was interrupted by the local execution channel before reaching the changed
+boundary. Persistent-session p7 proved the ownership correction but exposed a
+separate mismatch: the health gate probes host loopback port 8080 while Compose
+keeps that port internal. Step 5 remains incomplete pending an explicit frozen
+deployment invalidation decision.

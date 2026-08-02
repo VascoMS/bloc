@@ -47,14 +47,15 @@ type ec2Inventory struct {
 }
 
 type ec2InventoryHost struct {
-	ID         int    `json:"id"`
-	Label      string `json:"label,omitempty"`
-	PrivateIP  string `json:"private_ip,omitempty"`
-	PrivateDNS string `json:"private_dns,omitempty"`
-	PublicIP   string `json:"public_ip,omitempty"`
-	PublicDNS  string `json:"public_dns,omitempty"`
-	Region     string `json:"region,omitempty"`
-	Zone       string `json:"zone,omitempty"`
+	ID           int    `json:"id"`
+	Label        string `json:"label,omitempty"`
+	PrivateIP    string `json:"private_ip,omitempty"`
+	PrivateDNS   string `json:"private_dns,omitempty"`
+	PublicIP     string `json:"public_ip,omitempty"`
+	PublicDNS    string `json:"public_dns,omitempty"`
+	Region       string `json:"region,omitempty"`
+	Zone         string `json:"zone,omitempty"`
+	InstanceType string `json:"instance_type,omitempty"`
 }
 
 func genEC2Config(args []string) error {

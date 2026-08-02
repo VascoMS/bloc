@@ -154,7 +154,7 @@ final_stage_hosts() {
     final_scp "$key" "$secret" "$host" /etc/bloc/operator.json || return 1
     final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/operator-compose.yaml" "$host" /etc/bloc/operator-compose.yaml || return 1
     final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/sample-container-resources.sh" "$host" /opt/bloc/ec2/sample-container-resources.sh || return 1
-    final_ssh "$key" "$host" "chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encrypted-corpus.json && chmod 600 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'" || return 1
+    final_ssh "$key" "$host" "chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encrypted-corpus.json && chmod 600 /etc/bloc/operator.json && sudo chown 10001:10001 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'" || return 1
   done < <(jq -c '.nodes | sort_by(.id)[]' "$artifact_root/inventory.json")
 
   local controller controller_host controller_key

@@ -92,3 +92,37 @@ Run the lifecycle test normally and with `same-az` and `three-region`, then run 
 - [ ] **Step 5: Commit, overlay, and retry**
 
 Run `git diff --check`, commit only the approved deployment/tooling files, apply their exact overlay to the detached frozen execution worktree, pass `p5 --validate-only`, and run the separately authorized n4 same-AZ readiness pilot without changing frozen protocol identities.
+
+### Task 3: Private Operator Secret Runtime Ownership
+
+**Files:**
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+- Modify: `scripts/lib/final-campaign-lifecycle.sh`
+- Modify: `docs/STATUS.md`
+- Modify: `docs/CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: the staged `/etc/bloc/operator.json` and frozen image runtime identity `10001:10001`.
+- Produces: a runtime-readable private operator secret that remains mode `0600`.
+
+- [x] **Step 1: Write a failing staging regression**
+
+Exercise staging through the existing SSH fake and require the private operator secret to be owned by `10001:10001` while remaining mode `0600`. Keep public file ownership and modes unchanged.
+
+- [x] **Step 2: Run the focused test and verify RED**
+
+Run: `bash scripts/tests/test-final-campaign-lifecycle.sh`
+
+Expected: failure because staging sets the private mode but not the frozen runtime ownership.
+
+- [x] **Step 3: Implement the single staging correction**
+
+After checksum-verified staging, assign only `/etc/bloc/operator.json` to UID/GID `10001:10001` and retain mode `0600`. Do not change its contents or any frozen protocol identity.
+
+- [ ] **Step 4: Verify, commit, and overlay**
+
+Run the lifecycle test normally and with `same-az` and `three-region`, run `git diff --check`, commit the task files, and copy the exact lifecycle/test overlay into the detached frozen worktree.
+
+- [ ] **Step 5: Validate and retry**
+
+Pass the p6 `--validate-only` command, then execute the authorized n4 same-AZ readiness pilot. Accept it only if the readiness measurements, artifacts, and authenticated teardown all pass.

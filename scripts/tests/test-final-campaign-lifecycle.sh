@@ -50,6 +50,10 @@ grep -Fq 'chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encry
   exit 1
 }
 grep -Fq 'chmod 600 /etc/bloc/operator.json' "$stage_log" || { echo "staging did not keep the operator secret private" >&2; exit 1; }
+grep -Fq 'sudo chown 10001:10001 /etc/bloc/operator.json' "$stage_log" || {
+  echo "staging did not assign the operator secret to the frozen runtime identity" >&2
+  exit 1
+}
 
 : >"$stage_log"
 FINAL_STAGE_FAIL_COPY=1

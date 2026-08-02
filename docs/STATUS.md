@@ -95,10 +95,12 @@ release-candidate configuration contract are defined in
   creation because IAM user `bloc` lacked `iam:CreateRole` for the generated
   `issue-15-*` role. Its seven partial network resources and temporary key were
   removed; direct authenticated EC2 checks and Terraform state are empty. The
-  deployer contract must reconcile the repository's `bloc-ec2-*` IAM namespace,
-  inline pull-policy scope, and cleanup's global read-only `iam:ListRoles` and
-  `iam:ListInstanceProfiles` calls before a retry. The rejected artifact remains
-  invalid and contains no metric observation.
+  repository deployer policy now aligns role creation and inline pull-policy
+  management under the `bloc-ec2-*` namespace and permits cleanup's global
+  read-only `iam:ListRoles` and `iam:ListInstanceProfiles` calls. That policy
+  still must be applied to the AWS deployer identity and independently verified
+  before a retry. The rejected artifact remains invalid and contains no metric
+  observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -124,8 +126,9 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Resolve and independently verify the deployer IAM/naming contract without
-   changing the frozen protocol source, image digests, bundles, or corpus.
+1. Apply and independently verify the updated deployer IAM policy while retaining
+   the `bloc-ec2-*` naming contract and without changing the frozen protocol
+   source, image digests, bundles, or corpus.
 2. Rerun issue `#15`'s n4 same-AZ readiness pilot from the detached
    frozen-source worktree; require accepted artifacts and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ

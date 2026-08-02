@@ -91,14 +91,14 @@
       ]
     },
     {
-      "Sid": "InlineECRPullPolicyForThreeRegionRole",
+      "Sid": "InlineECRPullPolicyForBlocEc2Role",
       "Effect": "Allow",
       "Action": [
         "iam:PutRolePolicy",
         "iam:GetRolePolicy",
         "iam:DeleteRolePolicy"
       ],
-      "Resource": "arn:aws:iam::632783683536:role/bloc-ec2-3r-*"
+      "Resource": "arn:aws:iam::632783683536:role/bloc-ec2-*"
     },
     {
       "Sid": "AttachOnlyECRReadOnlyToBlocEc2Role",
@@ -124,6 +124,15 @@
           "iam:PassedToService": "ec2.amazonaws.com"
         }
       }
+    },
+    {
+      "Sid": "ListIamObjectsForAuthenticatedCleanup",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListRoles",
+        "iam:ListInstanceProfiles"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "ExplicitlyDenyExpensiveOrOutOfScopeServices",

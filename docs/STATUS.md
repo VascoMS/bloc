@@ -3,7 +3,7 @@
 - Last reviewed: `2026-08-02`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
+- Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
 
 ## Current Prototype State
 
@@ -22,7 +22,7 @@ bounded mempool HTTP requests, non-contaminating host resource sampling and
 validation, p99-capable Type-7/order-statistic reporting, balanced seeded
 long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
 500-transaction balanced client corpus with one plaintext/encrypted measurement
-per target, a separate 100-transaction representative full-protocol workload,
+per target, a separate nested 512-target representative protocol corpus,
 Prometheus metrics, local evaluators, and VM/EC2 remote evaluation.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
@@ -67,22 +67,32 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Replacement campaign freeze:** the epochless hybrid-ciphertext wire,
+- **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
   n4/n7 identity generation, primary corpus binding, frozen-bundle verification,
   topology materialization, pull-only ECR access, immutable staging, health
   gates, separate latency/resource phases, failure recovery, and authenticated
   cleanup are implemented locally on issue #15's task branch. Real local n4/n7
-  BMax-128 identities and 128-entry encrypted corpora passed temporary-manifest
-  bundle verification and every primary `--validate-only` permutation. The
-  isolated chart environment passes 37/37 tests, and the automated split race
+  BMax-128 identities and 128-entry encrypted corpora are bound by final
+  manifests to source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, BLOC image
+  `sha256:a58d8ef4ef5a674ce89341538798b47a422ffdc66d72637d8b3f4351282a2eec`,
+  and mempool image
+  `sha256:3c0c147a92d66c89293f9bda89967bded2ae22795bd37de09fa466ca4dbe38aa`.
+  Both images were pulled back from immutable, scan-on-push private ECR
+  repositories by digest and inspected as `linux/amd64` with their expected
+  non-root users and entrypoints. Final bundle verification and every primary
+  `--validate-only` permutation passed. The isolated chart environment passes
+  37/37 tests, and the automated split race
   gate passes the complete normal application suite plus focused BTE, mempool,
   and concurrency-relevant application races. Earlier 10- and 30-minute
   package-wide race attempts exhausted their process time while actively parsing
-  BMax-128 CRS material and reported no race. The replacement source, two
-  inspected private-ECR image digests, final n4/n7 manifests, and complete
-  replacement validation evidence are not frozen yet.
+  BMax-128 CRS material and reported no race. A clean detached execution
+  worktree remains anchored at the frozen SHA while task documentation advances.
+  Regional `t3.small` offerings and Standard On-Demand quotas satisfy the
+  documented 16/4/4 vCPU requirement. The remaining gate is separate explicit
+  authorization for the n4 same-AZ readiness pilot; no EC2 resource has been
+  created for this replacement campaign.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -108,13 +118,12 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Freeze one clean replacement source, publish and inspect two linux/amd64
-   private-ECR image digests, write the final n4/n7 bundle manifests, and rerun
-   validation against only those identities.
-2. After the replacement freeze and affected preflight pass, run issue `#15` as
-   the first M5 thesis-performance campaign.
-3. Run issue `#16` only after issue #15 is accepted, using matched manifests
-   and configurations.
+1. After separate live authorization, run issue `#15`'s n4 same-AZ readiness
+   pilot from the detached frozen-source worktree.
+2. If the pilot and authenticated cleanup pass, collect the separate same-AZ
+   n4/n7 latency and resource phases using the frozen manifests.
+3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+   manifests and configurations.
 4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
 5. Track granular work in the [BLOC Thesis Prototype GitHub
@@ -124,14 +133,17 @@ release-candidate configuration contract are defined in
 
 ## Last Known Good Baseline
 
-- Date: `2026-07-26`
-- Source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
-- Image: `bloc-node@sha256:ee99ceb095e241fb75af930e5b2c0674ba2fa32f63abba754882aa5611f7b754`
-- Release-candidate validation:
-  `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/`
-- Local safety evidence:
+- Date: `2026-08-02`
+- Source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
+- BLOC image:
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:a58d8ef4ef5a674ce89341538798b47a422ffdc66d72637d8b3f4351282a2eec`
+- Mempool image:
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:3c0c147a92d66c89293f9bda89967bded2ae22795bd37de09fa466ca4dbe38aa`
+- Replacement-candidate validation:
+  `results/local/final-campaign-readiness-cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f/validation/`
+- Historical M4 local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
-- Accepted distributed-campaign preflight:
+- Historical M4 accepted distributed-campaign preflight:
   `results/local/distributed-preflight-2bc8efc/`
 - Linux RBC/ACS/BBA race evidence:
   `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/logs/hbbft-linux-amd64-race.log`

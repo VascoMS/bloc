@@ -494,12 +494,16 @@ DVT/SSV signing, and block publication are not part of any measured interval.
 
 ### Shared Final-Campaign Contract
 
-No replacement source or image is frozen yet. Before a live command is
-authorized, validation must prove `bloc-cluster-v3`, `bte-tx-v2`, the two
-per-cluster BMax-128 corpus artifacts, digest-addressed node and mempool images,
-and a clean source commit. Latency collection and dedicated resource sampling
-are separate phases. The primary same-AZ control is `us-east-1a` on
-`t3.small`; n=10 and batch 512 remain a later 30-observation extension pilot.
+The replacement campaign is frozen at clean source
+`cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, BLOC image
+`632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:a58d8ef4ef5a674ce89341538798b47a422ffdc66d72637d8b3f4351282a2eec`,
+and mempool image
+`632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:3c0c147a92d66c89293f9bda89967bded2ae22795bd37de09fa466ca4dbe38aa`.
+Final n4/n7 manifests bind `bloc-cluster-v3`, `bte-tx-v2`, and the two
+per-cluster BMax-128 corpus artifacts to those identities. Latency collection
+and dedicated resource sampling are separate phases. The primary same-AZ
+control is `us-east-1a` on `t3.small`; n=10 and batch 512 remain a later
+30-observation extension pilot.
 
 The implemented workflow generates a network-independent BMax-128 identity,
 CRS, and private operator files for each node count, encrypts the committed

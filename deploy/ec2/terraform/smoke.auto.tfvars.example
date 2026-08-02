@@ -1,8 +1,10 @@
 node_count               = 4
 operator_instance_type   = "t3.micro"
 controller_instance_type = "t3.small"
-create_ecr_repository    = true
-ecr_repository_name      = "bloc-node"
+ecr_repository_arns = [
+  "arn:aws:ecr:us-east-1:123456789012:repository/bloc-node",
+  "arn:aws:ecr:us-east-1:123456789012:repository/mempool-il",
+]
 
 # Fill these in locally in smoke.auto.tfvars. Do not commit that file.
 key_name    = "replace-with-existing-ec2-key-pair"

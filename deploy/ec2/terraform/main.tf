@@ -89,20 +89,6 @@ locals {
   iam_instance_profile_name = var.create_iam_instance_profile ? aws_iam_instance_profile.ec2_ecr_readonly[0].name : null
 }
 
-resource "aws_ecr_repository" "bloc_node" {
-  count        = var.create_ecr_repository ? 1 : 0
-  name         = var.ecr_repository_name
-  force_delete = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    Name = var.ecr_repository_name
-  }
-}
-
 data "aws_iam_policy_document" "ec2_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -120,10 +106,29 @@ resource "aws_iam_role" "ec2_ecr_readonly" {
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
-resource "aws_iam_role_policy_attachment" "ec2_ecr_readonly" {
-  count      = var.create_iam_instance_profile ? 1 : 0
-  role       = aws_iam_role.ec2_ecr_readonly[0].name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+data "aws_iam_policy_document" "ec2_ecr_pull" {
+  statement {
+    sid       = "ECRAuthorization"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "CampaignRepositoryPull"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+    resources = var.ecr_repository_arns
+  }
+}
+
+resource "aws_iam_role_policy" "ec2_ecr_pull" {
+  count  = var.create_iam_instance_profile ? 1 : 0
+  name   = "campaign-repository-pull"
+  role   = aws_iam_role.ec2_ecr_readonly[0].id
+  policy = data.aws_iam_policy_document.ec2_ecr_pull.json
 }
 
 resource "aws_iam_instance_profile" "ec2_ecr_readonly" {

@@ -34,8 +34,3 @@ output "inventory" {
     ]
   }
 }
-
-output "ecr_repository_url" {
-  value       = var.create_ecr_repository ? aws_ecr_repository.bloc_node[0].repository_url : ""
-  description = "ECR repository URL for the bloc-node image when Terraform creates the repository."
-}

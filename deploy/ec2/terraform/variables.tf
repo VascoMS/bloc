@@ -18,19 +18,21 @@ variable "name_prefix" {
   default = "bloc-ec2"
 }
 
-variable "create_ecr_repository" {
-  type    = bool
-  default = true
-}
-
 variable "create_iam_instance_profile" {
   type    = bool
   default = true
 }
 
-variable "ecr_repository_name" {
-  type    = string
-  default = "bloc-node"
+variable "ecr_repository_arns" {
+  type        = list(string)
+  description = "The pre-existing us-east-1 bloc-node and mempool-il ECR repository ARNs."
+
+  validation {
+    condition = length(var.ecr_repository_arns) == 2 && alltrue([
+      for arn in var.ecr_repository_arns : can(regex("^arn:aws:ecr:us-east-1:[0-9]{12}:repository/[a-z0-9][a-z0-9._/-]*$", arn))
+    ])
+    error_message = "ecr_repository_arns must contain exactly two us-east-1 private ECR repository ARNs."
+  }
 }
 
 variable "node_count" {

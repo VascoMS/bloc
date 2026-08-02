@@ -63,10 +63,6 @@ output "inventory" {
   }
 }
 
-output "ecr_repository_url" {
-  value = aws_ecr_repository.bloc_node.repository_url
-}
-
 output "peering_connection_ids" {
   value = {
     primary_secondary  = aws_vpc_peering_connection.primary_secondary.id

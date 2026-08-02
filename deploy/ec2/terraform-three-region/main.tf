@@ -244,13 +244,6 @@ resource "aws_route" "tertiary_to_secondary" {
   depends_on                = [aws_vpc_peering_connection_accepter.secondary_tertiary]
 }
 
-resource "aws_ecr_repository" "bloc_node" {
-  name         = var.ecr_repository_name
-  force_delete = true
-  image_scanning_configuration { scan_on_push = true }
-  tags = { Name = var.ecr_repository_name }
-}
-
 data "aws_iam_policy_document" "ec2_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -278,12 +271,9 @@ data "aws_iam_policy_document" "ec2_ecr_pull" {
     actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:BatchGetImage",
-      "ecr:BatchImportUpstreamImage",
-      "ecr:CreateRepository",
       "ecr:GetDownloadUrlForLayer",
-      "ecr:TagResource",
     ]
-    resources = [aws_ecr_repository.bloc_node.arn]
+    resources = var.ecr_repository_arns
   }
 }
 

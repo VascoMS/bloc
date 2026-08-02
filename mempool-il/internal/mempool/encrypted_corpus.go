@@ -220,8 +220,10 @@ func GenerateEncryptedCorpus(options EncryptedCorpusOptions) (*EncryptedCorpusMa
 		Candidates:              make([]EncryptedCorpusCandidate, 0, options.Limit),
 	}
 	for _, prefix := range protocolWorkloadPrefixes {
-		manifest.PlaintextPrefixSetIDs[strconv.Itoa(prefix.Size)] = plaintextSetID(targets[:prefix.Size])
-		manifest.ClassCounts[strconv.Itoa(prefix.Size)] = stringClassCounts(prefix.Counts)
+		if prefix.Size <= options.Limit {
+			manifest.PlaintextPrefixSetIDs[strconv.Itoa(prefix.Size)] = plaintextSetID(targets[:prefix.Size])
+			manifest.ClassCounts[strconv.Itoa(prefix.Size)] = stringClassCounts(prefix.Counts)
+		}
 	}
 
 	ciphertexts := make([]be.Ciphertext, 0, options.Limit)

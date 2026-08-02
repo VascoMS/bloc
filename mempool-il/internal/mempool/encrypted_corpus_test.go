@@ -70,7 +70,7 @@ func TestGenerateEncryptedCorpusPublishesVerifiedArtifactAtomically(t *testing.T
 }
 
 func TestGenerateEncryptedCorpusFromCampaignIdentity(t *testing.T) {
-	_, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	_, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 128, 4, 3)
 	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
 	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
 
@@ -78,14 +78,24 @@ func TestGenerateEncryptedCorpusFromCampaignIdentity(t *testing.T) {
 		PlaintextPath:        plaintextPath,
 		CampaignIdentityPath: identityPath,
 		SecretPaths:          secretPaths,
-		Limit:                8,
+		Limit:                128,
 		OutputPath:           outputPath,
 	})
 	if err != nil {
 		t.Fatalf("generate encrypted corpus from campaign identity: %v", err)
 	}
-	if manifest.BMax != 8 || manifest.AvailableCount != 8 {
+	if manifest.BMax != 128 || manifest.AvailableCount != 128 {
 		t.Fatalf("unexpected artifact bounds: %+v", manifest)
+	}
+	for _, prefixes := range []map[string]string{manifest.PlaintextPrefixSetIDs, manifest.EncryptedPrefixSetIDs} {
+		if len(prefixes) != 3 || prefixes["8"] == "" || prefixes["32"] == "" || prefixes["128"] == "" {
+			t.Fatalf("primary prefixes = %+v, want exactly 8/32/128", prefixes)
+		}
+	}
+	for i, candidate := range manifest.Candidates {
+		if candidate.TargetTxHash == "" || candidate.Transaction.TargetTxHash != candidate.TargetTxHash {
+			t.Fatalf("candidate %d target identity mismatch", i)
+		}
 	}
 }
 
@@ -136,6 +146,8 @@ func TestGenerateEncryptedCorpusRejectsInvalidCampaignIdentity(t *testing.T) {
 		{name: "version", mutate: func(value map[string]any) { value["version"] = "bloc-campaign-identity-v0" }, want: "version"},
 		{name: "threshold", mutate: func(value map[string]any) { value["threshold"] = float64(5) }, want: "threshold"},
 		{name: "crs hash", mutate: func(value map[string]any) { value["crs_sha256"] = strings.Repeat("0", 64) }, want: "hash mismatch"},
+		{name: "public key", mutate: func(value map[string]any) { value["public_key_hex"] = "not-hex" }, want: "encoding/hex"},
+		{name: "cluster id", mutate: func(value map[string]any) { value["cluster_id"] = "other-cluster" }, want: "does not match cluster"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			copyValue := make(map[string]any, len(identity))
@@ -162,6 +174,20 @@ func TestGenerateEncryptedCorpusRejectsInvalidCampaignIdentity(t *testing.T) {
 				t.Fatalf("identity error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestGenerateEncryptedCorpusRejectsInsufficientCampaignShares(t *testing.T) {
+	_, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	_, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
+		PlaintextPath:        filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl"),
+		CampaignIdentityPath: identityPath,
+		SecretPaths:          secretPaths[:2],
+		Limit:                8,
+		OutputPath:           filepath.Join(t.TempDir(), "encrypted-corpus.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "need threshold 3") {
+		t.Fatalf("insufficient-share error = %v", err)
 	}
 }
 

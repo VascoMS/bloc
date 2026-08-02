@@ -122,7 +122,19 @@ release-candidate configuration contract are defined in
   the required Compose image variables, so the retained logs contain an
   interpolation error instead of container output. Terraform destroyed all 15
   resources and the key; authenticated cleanup and Terraform state are empty.
-  All attempts remain invalid and contain no metric observation.
+  The approved correction now performs 60 ten-second readiness attempts and
+  supplies both immutable image variables during log recovery; its focused and
+  topology regressions pass. Retry `bloc-ec2-i15-sa-n4-p4` passed provisioning,
+  materialization, staging, digest verification, and Compose startup, then the
+  new gate exposed restart loops rather than slow initialization. The frozen
+  config requires `/config/cluster.crs`, but `operator-compose.yaml` mounts the
+  CRS at `/config/cluster.ec2.crs`. The encrypted corpus is staged with mode
+  `0600`, so the non-root mempool image receives `permission denied` on
+  `/corpus/encrypted-corpus.json`. The unrecoverable attempt was interrupted to
+  avoid extended SSH retries; Terraform destroyed all 15 resources, the EC2 and
+  local temporary keys were deleted, direct authenticated EC2/IAM queries are
+  empty, and Terraform state contains no resources. All attempts remain invalid
+  and contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -148,12 +160,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-tooling invalidation decision for a bounded post-start
-   health retry and Compose-log recovery with the required image variables; do
-   not change the frozen protocol images, bundles, corpus, or source identity.
-2. Apply and validate that minimal tooling correction, then rerun issue `#15`'s
-   n4 same-AZ readiness pilot with a short experiment ID; require accepted
-   artifacts and authenticated cleanup.
+1. Obtain the frozen-deployment invalidation decision to mount the CRS at the
+   path required by `cluster.json` and stage public config/corpus files readable
+   by the non-root images; do not change the frozen protocol images, bundles,
+   corpus contents, or source identity.
+2. Add focused Compose/staging regressions for those two boundaries, apply the
+   minimal deployment correction, and rerun issue `#15`'s n4 same-AZ readiness
+   pilot; require accepted artifacts and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

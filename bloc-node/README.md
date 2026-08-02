@@ -213,6 +213,44 @@ short smoke command.
 Use `--execution-mode isolated` when validating process startup and teardown on
 every sample. Custom suites remain isolated unless persistent mode is requested.
 
+## Frozen Campaign Bundles
+
+Generate one network-independent public identity, CRS, and private secret set
+per final node count before topology provisioning:
+
+```sh
+go run ./cmd/bloc-node gen-campaign-identity \
+  --cluster-id final-campaign-n4 --nodes 4 --threshold 3 --bmax 128 \
+  --max-decrypted-txs 128 \
+  --identity-out <private-bundle>/cluster-identity.json \
+  --crs-out <private-bundle>/cluster.crs \
+  --secrets-dir <private-bundle>/secrets
+```
+
+After `mempool-il encrypt-corpus` writes and self-checks
+`encrypted-corpus.json`, bind the clean source and the two published private-ECR
+digests:
+
+```sh
+go run ./cmd/bloc-node verify-campaign-bundle \
+  --bundle-root <private-bundle> \
+  --source-sha <40-character-source-sha> \
+  --bloc-image <account>.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:<digest> \
+  --mempool-image <account>.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:<digest> \
+  --write-manifest
+
+go run ./cmd/bloc-node verify-campaign-bundle \
+  --bundle-root <private-bundle> \
+  --source-sha <40-character-source-sha> \
+  --bloc-image <same-bloc-reference> --mempool-image <same-mempool-reference>
+```
+
+The first command refuses to overwrite outputs. The verifier checks the public
+identity, CRS, every operator secret, immutable corpus and prefix identities,
+file hashes, source, and image references; the second invocation proves the
+written manifest without modifying it. Never copy bundle secrets into public
+campaign artifacts.
+
 ## Container and Remote Evaluation
 
 Build the sidecar image from the repository root:

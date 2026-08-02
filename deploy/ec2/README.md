@@ -49,22 +49,39 @@ Generated configuration separates:
 
 Never commit secret files or include them in experiment artifacts.
 
-The issue #15 replacement runner is currently validation-only:
+The issue #15 final runner validates or executes one topology, phase, and node
+count at a time. Validation never sources the live adapter and therefore cannot
+invoke AWS, Terraform lifecycle commands, Docker, SSH, SCP, or rsync:
 
 ```sh
 bash deploy/ec2/run-same-az-campaign.sh \
-  --source-sha <replacement-sha> \
-  --bloc-image bloc-node@sha256:<digest> \
-  --mempool-image mempool-il@sha256:<digest> \
-  --n4-config <path> --n4-corpus <path> \
-  --n7-config <path> --n7-corpus <path> \
+  --phase readiness-pilot \
+  --bundle-root <private-n4-bundle> --node-count 4 \
+  --source-sha <replacement-source-sha> \
+  --bloc-image <account>.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:<digest> \
+  --mempool-image <account>.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:<digest> \
+  --experiment-id issue-15-same-az-n4-pilot \
+  --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
   --validate-only
 ```
 
-It enforces the primary same-AZ matrix and config/corpus identities without
-contacting AWS. Its live path intentionally remains disabled until immutable
-two-image/corpus distribution, artifact recovery, failure retention, and
-authenticated cleanup are implemented and validated.
+Replace only `--validate-only` with `--execute-live` after separate authorization.
+`run-three-region-campaign.sh` has the same interface. The same-AZ adapter fixes
+all `t3.small` hosts in `us-east-1a`; the three-region adapter keeps the
+controller in `us-east-1` and maps operator `id % 3` to `us-east-1`,
+`eu-west-1`, and `eu-central-1` through three peerings and six routes.
+
+Both adapters use two pre-existing private ECR repositories in `us-east-1`.
+Instances receive repository-scoped pull access only. They pull and inspect the
+exact digest and `linux/amd64` architecture before services start; the runner
+never builds, tags, pushes, or substitutes an image. Each operator receives the
+same encrypted corpus and only its own mode-0600 secret.
+
+The fixed phases are `readiness-pilot` (n4 only: 1 warmup, 3 attempts, sampler
+off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and
+`resource` (0 warmups, 1,000 attempts, 10 blocks, sampler on). All use batches
+8/32/128, seed 20260621, and the 12-second boundary. The extension phase remains
+rejected until a later n10/batch-512 30-observation decision.
 
 ## Manual Deployment Recipe
 
@@ -276,9 +293,15 @@ resource-name constraints merely to bypass a failed preflight.
 ## Cleanup Contract
 
 Every real run must retain evidence that all scoped instances, volumes, VPCs,
-peerings, ECR repositories, temporary keys, IAM roles, and instance profiles are
-absent after teardown. Successful results without authenticated cleanup are not
-accepted evidence.
+peerings, campaign-created ECR repositories, temporary keys, IAM roles, and
+instance profiles are absent after teardown. Successful results without
+authenticated cleanup are not accepted evidence.
+
+For the final campaign runner, the two shared ECR repositories are pre-existing
+inputs and are never teardown targets; cleanup instead proves the exact regional
+compute/network/key/IAM resources and Terraform state are empty. Historical
+runners that created an experiment-scoped repository must still prove that
+repository was removed.
 
 Use preserve-on-failure only for a bounded active debugging window. The
 three-region runner never preserves resources. Inter-region transfer and T3

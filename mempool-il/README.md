@@ -100,21 +100,25 @@ go run ./cmd/service \
   -encrypted-corpus ./encrypted-corpus.json
 ```
 
-Generate the artifact offline after cluster configuration and before startup:
+Generate the artifact offline from the network-independent campaign identity
+and provide at least threshold matching secrets for the generator's local
+self-decryption check:
 
 ```sh
 go run ./cmd/encrypt-corpus \
-  -plaintext ../deploy/docker-compose/corpus/mock-targets.jsonl \
-  -cluster-config ../bloc-node/cluster.json \
-  -secrets ../bloc-node/secrets/operator-0.json,../bloc-node/secrets/operator-1.json,../bloc-node/secrets/operator-2.json \
+  -plaintext-corpus ../deploy/docker-compose/corpus/mock-targets.jsonl \
+  -campaign-identity <private-bundle>/cluster-identity.json \
+  -operator-secret <private-bundle>/secrets/operator-0.json \
+  -operator-secret <private-bundle>/secrets/operator-1.json \
+  -operator-secret <private-bundle>/secrets/operator-2.json \
   -limit 128 \
-  -out ./encrypted-corpus.json
+  -out <private-bundle>/encrypted-corpus.json
 ```
 
 `GET /inclusion-list?slot=<slot>&limit=<count>` returns the exact immutable
 prefix and its public/plaintext/encrypted identities. It never returns raw
-target bytes. Use `bloc-node bind-encrypted-corpus` to bind the matching public
-and remote-evaluator configs before node startup.
+target bytes. The final campaign bundle verifier binds these identities before
+topology-specific public node and evaluator configuration is materialized.
 
 ## Client-Overhead Corpus And Report
 

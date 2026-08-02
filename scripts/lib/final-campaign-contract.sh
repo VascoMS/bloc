@@ -46,7 +46,7 @@ final_parse_campaign_args() {
 }
 
 final_validate_ecr_image() {
-  [[ "$1" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$ ]]
+  [[ "$1" =~ ^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$ ]]
 }
 
 final_validate_campaign_contract() {

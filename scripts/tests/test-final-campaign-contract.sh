@@ -11,6 +11,11 @@ trap 'rm -rf "$fixture"' EXIT
 source_sha="$(git -C "$repo_root" rev-parse HEAD)"
 bloc_image="123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 mempool_image="123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+source "$repo_root/scripts/lib/final-campaign-contract.sh"
+if final_validate_ecr_image "${bloc_image/us-east-1/eu-west-1}"; then
+  echo "final image validator accepted a non-us-east-1 registry" >&2
+  exit 1
+fi
 mkdir -p "$fixture/n4" "$fixture/n7" "$fixture/fake-bin"
 printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":4,"threshold":3,"bmax":128}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n4/bundle-manifest.json"
@@ -62,6 +67,7 @@ grep -Fq 'topology=three-region' "$fixture/stdout"
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/$source_sha/0000000000000000000000000000000000000000}" --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/$bloc_image/$mempool_image}" --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 --source-sha "$source_sha" --bloc-image bloc-node:latest --mempool-image "$mempool_image" --experiment-id invalid --admin-cidr 127.0.0.1/32 --aws-profile default --validate-only
+expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/us-east-1/eu-west-1}" --validate-only
 expect_failure "$runner" --topology same-az --phase readiness-pilot --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 10 "${common_args[@]}" --validate-only
 expect_failure "$runner" --topology same-az --phase extension-pilot --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only

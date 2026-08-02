@@ -454,3 +454,27 @@ Use this file for major architecture, protocol, and workflow decisions.
   tracked by issue #22.
 - Related files: `bte/btd-impl-main/be`, `mempool-il/internal/mempool`,
   `bloc-node/internal/app`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md`
+
+## 0024. Use one frozen-bundle lifecycle for both final VM topologies
+
+- Date: 2026-08-02
+- Status: Accepted
+- Context: The replacement same-AZ and three-region campaigns needed identical
+  cryptographic/workload provenance and phase semantics without restoring the
+  historical runners' runtime key generation, synthetic transactions, or image
+  build/push behavior.
+- Decision: Both topologies use one fixed final-campaign runner and lifecycle.
+  Topology adapters own only Terraform inputs, regional SSH keys, inventory
+  validation, destroy, and authenticated absence checks. Bundles bind one clean
+  source, two private-ECR digests, one n4 or n7 identity, and its immutable
+  encrypted corpus. Latency and resource phases are separate. Validation-only
+  execution cannot load lifecycle tools.
+- Rationale: This makes same-AZ and three-region evidence comparable while
+  keeping distribution and cleanup differences explicit and testable.
+- Consequences: Images must already exist by digest in the shared us-east-1
+  repositories; instances have pull-only access. Every live phase destroys its
+  infrastructure after recovery, and incomplete cleanup invalidates evidence.
+  AWS execution and image publication remain separately authorized.
+- Related files: `deploy/ec2/run-final-campaign.sh`,
+  `deploy/ec2/final-topology-*.sh`, `scripts/lib/final-campaign-lifecycle.sh`,
+  `docs/VALIDATION.md`

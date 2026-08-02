@@ -487,6 +487,25 @@ and a clean source commit. Latency collection and dedicated resource sampling
 are separate phases. The primary same-AZ control is `us-east-1a` on
 `t3.small`; n=10 and batch 512 remain a later 30-observation extension pilot.
 
+The implemented workflow generates a network-independent BMax-128 identity,
+CRS, and private operator files for each node count, encrypts the committed
+512-row master corpus offline, and writes a bundle manifest only after checking
+every identity, secret, corpus prefix, file checksum, source SHA, and image
+reference. Final manifests accept only full private-ECR digest references; a
+tag, local-only digest, mismatched source, or cross-bundle identity fails closed.
+Topology materialization derives public node and evaluator configuration from
+that verified bundle and the Terraform inventory without regenerating keys or
+ciphertexts.
+
+`run-same-az-campaign.sh` and `run-three-region-campaign.sh` expose the same
+fixed phase contract. `--validate-only` stops before loading any live topology
+code. `--execute-live` performs prepare/apply, public materialization, checksum
+verified staging, digest/architecture inspection, health gates, measurement,
+artifact recovery, destroy, and authenticated absence checks. Cleanup evidence
+must cover instances, volumes, VPCs, subnets, security groups, route tables,
+key pairs, peering connections, IAM role/profile objects, and empty Terraform
+state in every topology region. Cleanup failure invalidates the phase.
+
 The primary honest-path matrix is:
 
 | Dimension | Values |

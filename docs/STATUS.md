@@ -71,14 +71,19 @@ release-candidate configuration contract are defined in
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
   n4/n7 identity generation, primary corpus binding, frozen-bundle verification,
-  and topology materialization are now implemented locally on issue #15's task
-  branch. The replacement source, two private-ECR image digests, real n4/n7
-  bundles, and complete replacement validation evidence are not frozen yet.
-- **Live-run plumbing:** live AWS execution remains blocked until the shared
-  final-campaign runner, pull-only ECR IAM, encrypted-corpus and secret staging,
-  health gates, separate latency/resource execution, failure retention,
-  artifact recovery, and authenticated cleanup are implemented and pass the
-  side-effect-free runner contract without a synthetic fallback.
+  topology materialization, pull-only ECR access, immutable staging, health
+  gates, separate latency/resource phases, failure recovery, and authenticated
+  cleanup are implemented locally on issue #15's task branch. Real local n4/n7
+  BMax-128 identities and 128-entry encrypted corpora passed temporary-manifest
+  bundle verification and every primary `--validate-only` permutation. The
+  replacement source, two inspected private-ECR image digests, final n4/n7
+  manifests, and complete replacement validation evidence are not frozen yet.
+- **Replacement preflight completion:** ordinary tests, BTE/mempool focused
+  races, campaign contracts, both Terraform validations, Compose resolution,
+  and real-bundle validation pass. This workstation lacks the chart-test Python
+  dependencies, and `go test -race ./internal/app` reached Go's 10-minute
+  timeout while actively performing BTE pairing verification without reporting
+  a race. These checks must pass in the final release-candidate environment.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -104,12 +109,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Complete and locally validate the shared final-campaign lifecycle,
-   pull-only ECR infrastructure contract, failure retention, artifact recovery,
-   and authenticated cleanup for both matched topologies.
-2. Freeze one clean replacement source, two private-ECR image digests, and the
-   n4/n7 campaign bundles; then rerun the affected local distributed-campaign
-   preflight against only those identities.
+1. Run the remaining chart suite and extended bloc-node race suite in a prepared
+   release-candidate environment.
+2. Freeze one clean replacement source, publish and inspect two linux/amd64
+   private-ECR image digests, write the final n4/n7 bundle manifests, and rerun
+   validation against only those identities.
 3. After the replacement freeze and affected preflight pass, run issue `#15` as
    the first M5 thesis-performance campaign.
 4. Run issue `#16` only after issue #15 is accepted, using matched manifests

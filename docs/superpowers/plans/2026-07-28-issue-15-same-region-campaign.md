@@ -46,7 +46,11 @@ pilot/continuation decision.
 
 Exit gate: `run-same-az-campaign.sh --validate-only` passes against real frozen
 identities and artifacts, and the live path has authenticated cleanup. Current
-state: blocked on image distribution/live cleanup and replacement freeze.
+state: lifecycle, shared pull-only ECR distribution, recovery, and cleanup are
+implemented; local n4/n7 crypto/corpus fixtures and all primary validate-only
+permutations pass. Remaining gates are the final source freeze, two published
+and inspected linux/amd64 image digests, final manifests, chart-test dependencies,
+the extended bloc-node race check, account capacity, and live authorization.
 
 ## Checkpoint 2: Primary n=4 Pilot/Readiness
 
@@ -103,9 +107,21 @@ cd mempool-il && go test ./...
 cd bloc-node && go test ./...
 cd sbc/hbbft && go test ./...
 docker compose -f deploy/docker-compose/compose.yaml config
-bash deploy/ec2/run-same-az-campaign.sh <frozen arguments> --validate-only
-bash deploy/ec2/run-final-campaign.sh <frozen arguments> --validate-only
+bash deploy/ec2/run-same-az-campaign.sh \
+  --phase readiness-pilot --bundle-root <private-n4-bundle> --node-count 4 \
+  --source-sha <replacement-sha> --bloc-image <private-ecr-bloc@digest> \
+  --mempool-image <private-ecr-mempool@digest> \
+  --experiment-id issue-15-same-az-n4-pilot \
+  --admin-cidr 127.0.0.1/32 --aws-profile <profile> --validate-only
+bash deploy/ec2/run-three-region-campaign.sh \
+  --phase readiness-pilot --bundle-root <private-n4-bundle> --node-count 4 \
+  --source-sha <replacement-sha> --bloc-image <same-private-ecr-bloc@digest> \
+  --mempool-image <same-private-ecr-mempool@digest> \
+  --experiment-id issue-15-three-region-n4-pilot \
+  --admin-cidr 127.0.0.1/32 --aws-profile <profile> --validate-only
 ```
 
-No live command is recommended until Checkpoint 1's remaining distribution,
-cleanup, freeze, quota, duration, and cost gates are closed.
+After Checkpoint 1 closes and the user separately authorizes AWS execution, the
+first live command is the same-AZ n4 readiness command above with the real
+controller `/32` and `--execute-live` replacing `--validate-only`. No latency,
+resource, n7, or three-region continuation is implied by that authorization.

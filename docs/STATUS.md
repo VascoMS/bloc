@@ -104,10 +104,14 @@ release-candidate configuration contract are defined in
   64-character limit; Terraform applied no resources and the temporary key was
   deleted. Authenticated cleanup output is fully empty, but the frozen same-AZ
   adapter's final jq assertion mis-groups the empty-array expression and rejects
-  that valid document. Both attempts remain invalid and contain no metric
-  observation. A shorter experiment ID is sufficient for the name limit, but
-  the cleanup assertion requires an explicit frozen-tooling invalidation decision
-  before another live retry.
+  that valid document. The approved minimal tooling correction now rejects IDs
+  longer than 47 characters and correctly accepts empty cleanup for both final
+  topologies. Short-ID retry `bloc-ec2-i15-sa-n4-p1` created the expected 15
+  resources but failed during staging before measurement because the controller
+  setup created `/opt/bloc/ec2` without elevated permissions; an operator's CRS
+  transfer also reset while cloud-init was still completing. Terraform destroyed
+  all 15 resources and the key, and authenticated cleanup plus Terraform state
+  are empty. All three attempts remain invalid and contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -133,12 +137,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide whether to authorize a deployment-tooling-only correction to the
-   frozen same-AZ cleanup assertion while retaining the protocol images, bundles,
-   corpus, and `bloc-ec2-*` naming contract.
-2. After that decision, rerun issue `#15`'s n4 same-AZ readiness pilot with an
-   experiment ID of at most 47 characters; require accepted artifacts and
-   authenticated cleanup.
+1. Correct the controller directory ownership and wait for cloud-init before
+   fail-fast host staging, without changing the frozen protocol images, bundles,
+   or corpus.
+2. Rerun issue `#15`'s n4 same-AZ readiness pilot with the short experiment ID;
+   require accepted artifacts and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

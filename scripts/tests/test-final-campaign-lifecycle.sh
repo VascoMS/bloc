@@ -118,3 +118,56 @@ if [[ "${1:-}" == same-az ]]; then
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"
   echo "same-AZ adapter contract tests passed"
 fi
+
+if [[ "${1:-}" == three-region ]]; then
+  adapter="$repo_root/deploy/ec2/final-topology-three-region.sh"
+  [[ -f "$adapter" ]] || { echo "three-region adapter is missing" >&2; exit 1; }
+  source "$adapter"
+  adapter_root="$fixture/three-region-adapter"
+  mkdir -p "$adapter_root/bundle"
+  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=7 FINAL_EXPERIMENT_ID=adapter-test
+  FINAL_BUNDLE_ROOT="$adapter_root/bundle"
+  FINAL_ADMIN_CIDR=127.0.0.1/32 FINAL_AWS_PROFILE=default
+  FINAL_BLOC_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:$(printf 'a%.0s' {1..64})"
+  FINAL_MEMPOOL_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:$(printf 'b%.0s' {1..64})"
+  final_three_region_prepare_files "$adapter_root" 7 || exit 1
+  tfvars="$adapter_root/generated-public/terraform/campaign.auto.tfvars"
+  grep -Fq 'primary_region = "us-east-1"' "$tfvars"
+  grep -Fq 'secondary_region = "eu-west-1"' "$tfvars"
+  grep -Fq 'tertiary_region = "eu-central-1"' "$tfvars"
+  grep -Fq 'primary_availability_zone = "us-east-1a"' "$tfvars"
+  grep -Fq 'secondary_availability_zone = "eu-west-1a"' "$tfvars"
+  grep -Fq 'tertiary_availability_zone = "eu-central-1a"' "$tfvars"
+  grep -Fq 'operator_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'controller_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'cpu_credits = "unlimited"' "$tfvars"
+  grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/bloc-node' "$tfvars"
+  grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"
+  [[ "$(grep -c '^resource "aws_vpc_peering_connection"' "$repo_root/deploy/ec2/terraform-three-region/main.tf")" -eq 3 ]]
+  [[ "$(grep -c '^resource "aws_route"' "$repo_root/deploy/ec2/terraform-three-region/main.tf")" -eq 6 ]]
+
+  inventory="$adapter_root/inventory.json"
+  jq -n '{controller:{instance_type:"t3.small",region:"us-east-1",zone:"us-east-1a"},nodes:[range(0;7)|{id:.,instance_type:"t3.small",region:(["us-east-1","eu-west-1","eu-central-1"][.%3]),zone:"test-zone"}]}' >"$inventory"
+  final_three_region_validate_inventory "$inventory" 7
+  jq '.nodes[1].region="us-east-1"' "$inventory" >"$inventory.invalid"
+  if final_three_region_validate_inventory "$inventory.invalid" 7; then
+    echo "three-region inventory validator accepted invalid id-to-region placement" >&2
+    exit 1
+  fi
+  [[ "$(final_topology_key_for_host '{"region":"us-east-1"}')" == "$FINAL_THREE_REGION_PRIMARY_KEY_PATH" ]]
+  [[ "$(final_topology_key_for_host '{"region":"eu-west-1"}')" == "$FINAL_THREE_REGION_SECONDARY_KEY_PATH" ]]
+  [[ "$(final_topology_key_for_host '{"region":"eu-central-1"}')" == "$FINAL_THREE_REGION_TERTIARY_KEY_PATH" ]]
+
+  final_three_region_query_array() {
+    local query="$1"
+    shift
+    if [[ "$query" == 'Reservations[].Instances[].InstanceId' && " $* " == *' --region eu-west-1 '* ]]; then
+      printf '["i-eu-west-leftover"]\n'
+    else
+      printf '[]\n'
+    fi
+  }
+  cleanup_record="$(final_three_region_region_cleanup eu-west-1 "$FINAL_THREE_REGION_SECONDARY_KEY_NAME")"
+  jq -e '.query_succeeded == true and .instances == ["i-eu-west-leftover"] and .vpcs == [] and .peering_connections == []' <<<"$cleanup_record" >/dev/null
+  echo "three-region adapter contract tests passed"
+fi

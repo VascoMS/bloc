@@ -67,7 +67,7 @@ final_same_az_query_array() {
 final_topology_verify_absent() {
   local artifact_root="$1" work ok=true
   work="$artifact_root/generated-public/terraform"
-  local instances volumes vpcs subnets groups routes keys roles profiles state
+  local instances volumes vpcs subnets groups routes keys peerings roles profiles state
   instances="$(final_same_az_query_array 'Reservations[].Instances[].InstanceId' ec2 describe-instances --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=tag:Name,Values=$FINAL_EXPERIMENT_ID-*" "Name=instance-state-name,Values=pending,running,stopping,stopped")" || ok=false
   volumes="$(final_same_az_query_array 'Volumes[].VolumeId' ec2 describe-volumes --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=tag:Name,Values=$FINAL_EXPERIMENT_ID-*")" || ok=false
   vpcs="$(final_same_az_query_array 'Vpcs[].VpcId' ec2 describe-vpcs --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=tag:Name,Values=$FINAL_EXPERIMENT_ID-*")" || ok=false
@@ -75,14 +75,15 @@ final_topology_verify_absent() {
   groups="$(final_same_az_query_array 'SecurityGroups[].GroupId' ec2 describe-security-groups --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=group-name,Values=$FINAL_EXPERIMENT_ID-*")" || ok=false
   routes="$(final_same_az_query_array 'RouteTables[].RouteTableId' ec2 describe-route-tables --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=tag:Name,Values=$FINAL_EXPERIMENT_ID-*")" || ok=false
   keys="$(final_same_az_query_array 'KeyPairs[].KeyName' ec2 describe-key-pairs --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=key-name,Values=$FINAL_SAME_AZ_KEY_NAME")" || ok=false
+  peerings="$(final_same_az_query_array 'VpcPeeringConnections[?Status.Code!=`deleted`].VpcPeeringConnectionId' ec2 describe-vpc-peering-connections --profile "$FINAL_AWS_PROFILE" --region us-east-1 --filters "Name=tag:Name,Values=$FINAL_EXPERIMENT_ID-*")" || ok=false
   roles="$(final_same_az_query_array "Roles[?RoleName=='$FINAL_EXPERIMENT_ID-ec2-ecr-readonly'].RoleName" iam list-roles --profile "$FINAL_AWS_PROFILE")" || ok=false
   profiles="$(final_same_az_query_array "InstanceProfiles[?InstanceProfileName=='$FINAL_EXPERIMENT_ID-ec2-ecr-readonly'].InstanceProfileName" iam list-instance-profiles --profile "$FINAL_AWS_PROFILE")" || ok=false
   state="$(terraform -chdir="$work" state list 2>/dev/null | jq -R -s 'split("\n")|map(select(length>0))')" || ok=false
   jq -n --argjson query_succeeded "$ok" --argjson instances "${instances:-[]}" --argjson volumes "${volumes:-[]}" \
     --argjson vpcs "${vpcs:-[]}" --argjson subnets "${subnets:-[]}" --argjson security_groups "${groups:-[]}" \
-    --argjson route_tables "${routes:-[]}" --argjson key_pairs "${keys:-[]}" --argjson roles "${roles:-[]}" \
+    --argjson route_tables "${routes:-[]}" --argjson key_pairs "${keys:-[]}" --argjson peering_connections "${peerings:-[]}" --argjson roles "${roles:-[]}" \
     --argjson instance_profiles "${profiles:-[]}" --argjson terraform_state "${state:-[]}" \
-    '{regions:{"us-east-1":{query_succeeded:$query_succeeded,instances:$instances,volumes:$volumes,vpcs:$vpcs,subnets:$subnets,security_groups:$security_groups,route_tables:$route_tables,key_pairs:$key_pairs}},iam:{query_succeeded:$query_succeeded,roles:$roles,instance_profiles:$instance_profiles},terraform_state:$terraform_state}' \
+    '{regions:{"us-east-1":{query_succeeded:$query_succeeded,instances:$instances,volumes:$volumes,vpcs:$vpcs,subnets:$subnets,security_groups:$security_groups,route_tables:$route_tables,key_pairs:$key_pairs,peering_connections:$peering_connections}},iam:{query_succeeded:$query_succeeded,roles:$roles,instance_profiles:$instance_profiles},terraform_state:$terraform_state}' \
     >"$artifact_root/cleanup-topology.json"
   FINAL_CLEANUP_REGIONS=us-east-1; export FINAL_CLEANUP_REGIONS
   [[ "$ok" == true ]] && jq -e '[.regions[][]|select(type=="array")|length] + [.iam.roles|length,.iam.instance_profiles|length,.terraform_state|length] | add == 0' "$artifact_root/cleanup-topology.json" >/dev/null

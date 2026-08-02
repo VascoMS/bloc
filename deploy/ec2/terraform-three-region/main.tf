@@ -436,7 +436,10 @@ resource "aws_instance" "controller" {
   }
 
   credit_specification { cpu_credits = var.cpu_credits }
-  root_block_device { encrypted = true }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
   tags        = { Name = "${var.name_prefix}-controller", Role = "bloc-controller" }
   volume_tags = { Name = "${var.name_prefix}-controller-volume", Role = "bloc-controller" }
 }
@@ -460,7 +463,10 @@ resource "aws_instance" "primary_operator" {
   }
 
   credit_specification { cpu_credits = var.cpu_credits }
-  root_block_device { encrypted = true }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
   tags        = { Name = "${var.name_prefix}-operator-${each.value}", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
   volume_tags = { Name = "${var.name_prefix}-operator-${each.value}-volume", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
 }
@@ -485,7 +491,10 @@ resource "aws_instance" "secondary_operator" {
   }
 
   credit_specification { cpu_credits = var.cpu_credits }
-  root_block_device { encrypted = true }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
   tags        = { Name = "${var.name_prefix}-operator-${each.value}", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
   volume_tags = { Name = "${var.name_prefix}-operator-${each.value}-volume", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
 }
@@ -510,7 +519,10 @@ resource "aws_instance" "tertiary_operator" {
   }
 
   credit_specification { cpu_credits = var.cpu_credits }
-  root_block_device { encrypted = true }
+  root_block_device {
+    encrypted             = true
+    delete_on_termination = true
+  }
   tags        = { Name = "${var.name_prefix}-operator-${each.value}", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
   volume_tags = { Name = "${var.name_prefix}-operator-${each.value}-volume", Role = "bloc-operator", NodeID = tostring(each.value), Cluster = var.name_prefix }
 }

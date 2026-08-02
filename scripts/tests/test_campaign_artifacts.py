@@ -446,11 +446,18 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         artifacts.write_json(path, {"regions": {"us-east-1": {
             "query_succeeded": True, "instances": [], "volumes": [], "vpcs": [],
             "subnets": [], "security_groups": [], "route_tables": [], "key_pairs": [],
+            "peering_connections": [],
         }}, "iam": {"query_succeeded": True, "roles": [], "instance_profiles": []}, "terraform_state": []})
         artifacts.assert_final_cleanup(path, ["us-east-1"])
         payload = json.loads(path.read_text()); payload["regions"]["us-east-1"]["volumes"] = ["vol-1"]
         artifacts.write_json(path, payload)
         with self.assertRaisesRegex(ValueError, "volumes"):
+            artifacts.assert_final_cleanup(path, ["us-east-1"])
+
+        payload["regions"]["us-east-1"]["volumes"] = []
+        payload["regions"]["us-east-1"].pop("peering_connections")
+        artifacts.write_json(path, payload)
+        with self.assertRaisesRegex(ValueError, "peering_connections"):
             artifacts.assert_final_cleanup(path, ["us-east-1"])
 
 

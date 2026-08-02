@@ -624,7 +624,10 @@ def assert_final_cleanup(path: Path, expected_regions: list[str]) -> None:
     regions = payload.get("regions")
     if not isinstance(regions, dict) or set(regions) != set(expected_regions):
         raise ValueError(f"{path}: cleanup regions are incomplete")
-    categories = ("instances", "volumes", "vpcs", "subnets", "security_groups", "route_tables", "key_pairs")
+    categories = (
+        "instances", "volumes", "vpcs", "subnets", "security_groups",
+        "route_tables", "key_pairs", "peering_connections",
+    )
     for region in expected_regions:
         record = regions[region]
         if record.get("query_succeeded") is not True:

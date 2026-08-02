@@ -11,6 +11,7 @@ scripts=(
   deploy/ec2/run-m3-cross-az.sh deploy/ec2/run-m3-three-region.sh
   deploy/ec2/run-final-campaign.sh deploy/ec2/run-same-az-campaign.sh
   deploy/ec2/run-three-region-campaign.sh scripts/lib/final-campaign-contract.sh
+  scripts/lib/final-campaign-lifecycle.sh
   deploy/ec2/run-merge-plan-attribution.sh deploy/ec2/sample-container-resources.sh
 )
 for script in "${scripts[@]}"; do bash -n "$script"; done

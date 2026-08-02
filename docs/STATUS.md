@@ -111,7 +111,18 @@ release-candidate configuration contract are defined in
   setup created `/opt/bloc/ec2` without elevated permissions; an operator's CRS
   transfer also reset while cloud-init was still completing. Terraform destroyed
   all 15 resources and the key, and authenticated cleanup plus Terraform state
-  are empty. All three attempts remain invalid and contain no metric observation.
+  are empty. The approved staging correction then added a bounded host-readiness
+  gate, fail-fast transfers, and controller ownership. Retry
+  `bloc-ec2-i15-sa-n4-p2` stopped before apply on a transient Terraform provider
+  download failure and left no AWS resources. Retry `bloc-ec2-i15-sa-n4-p3`
+  reused the exact locked provider, created the expected 15 resources, and passed
+  materialization, staging, immutable-image verification, and service startup.
+  Its health gate checked each node only once immediately after startup and
+  failed before the BMax-128 services became ready. Failure recovery also omitted
+  the required Compose image variables, so the retained logs contain an
+  interpolation error instead of container output. Terraform destroyed all 15
+  resources and the key; authenticated cleanup and Terraform state are empty.
+  All attempts remain invalid and contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -137,11 +148,12 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Correct the controller directory ownership and wait for cloud-init before
-   fail-fast host staging, without changing the frozen protocol images, bundles,
-   or corpus.
-2. Rerun issue `#15`'s n4 same-AZ readiness pilot with the short experiment ID;
-   require accepted artifacts and authenticated cleanup.
+1. Obtain the frozen-tooling invalidation decision for a bounded post-start
+   health retry and Compose-log recovery with the required image variables; do
+   not change the frozen protocol images, bundles, corpus, or source identity.
+2. Apply and validate that minimal tooling correction, then rerun issue `#15`'s
+   n4 same-AZ readiness pilot with a short experiment ID; require accepted
+   artifacts and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

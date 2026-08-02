@@ -15,7 +15,7 @@ import (
 )
 
 func TestGenerateEncryptedCorpusPublishesVerifiedArtifactAtomically(t *testing.T) {
-	clusterPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	clusterPath, _, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
 	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
 	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
 
@@ -69,8 +69,104 @@ func TestGenerateEncryptedCorpusPublishesVerifiedArtifactAtomically(t *testing.T
 	}
 }
 
+func TestGenerateEncryptedCorpusFromCampaignIdentity(t *testing.T) {
+	_, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
+
+	manifest, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
+		PlaintextPath:        plaintextPath,
+		CampaignIdentityPath: identityPath,
+		SecretPaths:          secretPaths,
+		Limit:                8,
+		OutputPath:           outputPath,
+	})
+	if err != nil {
+		t.Fatalf("generate encrypted corpus from campaign identity: %v", err)
+	}
+	if manifest.BMax != 8 || manifest.AvailableCount != 8 {
+		t.Fatalf("unexpected artifact bounds: %+v", manifest)
+	}
+}
+
+func TestGenerateEncryptedCorpusRequiresExactlyOnePublicConfiguration(t *testing.T) {
+	clusterPath, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	for _, test := range []struct {
+		name         string
+		clusterPath  string
+		identityPath string
+	}{
+		{name: "neither"},
+		{name: "both", clusterPath: clusterPath, identityPath: identityPath},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
+				PlaintextPath:        plaintextPath,
+				ClusterConfigPath:    test.clusterPath,
+				CampaignIdentityPath: test.identityPath,
+				SecretPaths:          secretPaths,
+				Limit:                8,
+				OutputPath:           filepath.Join(t.TempDir(), "encrypted-corpus.json"),
+			})
+			if err == nil || !strings.Contains(err.Error(), "exactly one") {
+				t.Fatalf("configuration error = %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateEncryptedCorpusRejectsInvalidCampaignIdentity(t *testing.T) {
+	_, identityPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity map[string]any
+	if err := json.Unmarshal(data, &identity); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{name: "version", mutate: func(value map[string]any) { value["version"] = "bloc-campaign-identity-v0" }, want: "version"},
+		{name: "threshold", mutate: func(value map[string]any) { value["threshold"] = float64(5) }, want: "threshold"},
+		{name: "crs hash", mutate: func(value map[string]any) { value["crs_sha256"] = strings.Repeat("0", 64) }, want: "hash mismatch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			copyValue := make(map[string]any, len(identity))
+			for key, value := range identity {
+				copyValue[key] = value
+			}
+			test.mutate(copyValue)
+			mutated, err := json.Marshal(copyValue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutatedPath := filepath.Join(filepath.Dir(identityPath), strings.ReplaceAll(test.name, " ", "-")+".json")
+			if err := os.WriteFile(mutatedPath, mutated, 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err = GenerateEncryptedCorpus(EncryptedCorpusOptions{
+				PlaintextPath:        plaintextPath,
+				CampaignIdentityPath: mutatedPath,
+				SecretPaths:          secretPaths,
+				Limit:                8,
+				OutputPath:           filepath.Join(t.TempDir(), "encrypted-corpus.json"),
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("identity error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadEncryptedCorpusRejectsMutation(t *testing.T) {
-	clusterPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	clusterPath, _, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
 	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
 	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
 	if _, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
@@ -106,7 +202,7 @@ func TestLoadEncryptedCorpusRejectsMutation(t *testing.T) {
 }
 
 func TestEncryptedCorpusSourceReturnsImmutablePrefixesAcrossSlots(t *testing.T) {
-	clusterPath, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
+	clusterPath, _, secretPaths := writeEncryptedCorpusTestCluster(t, 8, 4, 3)
 	plaintextPath := filepath.Join("..", "..", "..", "deploy", "docker-compose", "corpus", "mock-targets.jsonl")
 	outputPath := filepath.Join(t.TempDir(), "encrypted-corpus.json")
 	if _, err := GenerateEncryptedCorpus(EncryptedCorpusOptions{
@@ -155,7 +251,7 @@ func TestEncryptedCorpusSourceReturnsImmutablePrefixesAcrossSlots(t *testing.T) 
 	}
 }
 
-func writeEncryptedCorpusTestCluster(t *testing.T, bmax, n, threshold int) (string, []string) {
+func writeEncryptedCorpusTestCluster(t *testing.T, bmax, n, threshold int) (string, string, []string) {
 	t.Helper()
 	dir := t.TempDir()
 	suite := curves.NewSuite(kilic.NewBLS12381Suite())
@@ -186,6 +282,28 @@ func writeEncryptedCorpusTestCluster(t *testing.T, bmax, n, threshold int) (stri
 	if err := os.WriteFile(clusterPath, clusterBytes, 0644); err != nil {
 		t.Fatal(err)
 	}
+	operators := make([]map[string]any, n)
+	for i := range operators {
+		operators[i] = map[string]any{"id": i, "p2p_peer_id": "fixture-peer-" + string(rune('0'+i))}
+	}
+	identity := map[string]any{
+		"version": "bloc-campaign-identity-v1", "cluster_id": "encrypted-corpus-test",
+		"bmax": bmax, "n": n, "threshold": threshold,
+		"crs_file": "cluster.crs", "crs_sha256": hashHex(crs),
+		"public_key_hex": hex.EncodeToString(pkBytes),
+		"blockspace":     map[string]any{"max_decrypted_txs": bmax, "default_tx_gas": 21000},
+		"limits": map[string]any{
+			"max_proposal_bytes":                 8388608,
+			"max_envelope_bytes":                 16777216,
+			"max_combine_attempts_per_sub_batch": 256,
+		},
+		"operators": operators,
+	}
+	identityBytes, _ := json.Marshal(identity)
+	identityPath := filepath.Join(dir, "campaign-identity.json")
+	if err := os.WriteFile(identityPath, identityBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
 	secretPaths := make([]string, len(shares))
 	for i, secret := range shares {
 		scalar, marshalErr := secret.V.MarshalBinary()
@@ -202,5 +320,5 @@ func writeEncryptedCorpusTestCluster(t *testing.T, bmax, n, threshold int) (stri
 			t.Fatal(err)
 		}
 	}
-	return clusterPath, secretPaths
+	return clusterPath, identityPath, secretPaths
 }

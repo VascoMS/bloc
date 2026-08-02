@@ -27,17 +27,19 @@ func main() {
 	var secretPaths repeatedStringFlag
 	plaintextPath := flag.String("plaintext-corpus", "", "canonical 512-entry plaintext corpus")
 	clusterPath := flag.String("cluster-config", "", "bloc-cluster-v3 public configuration")
+	campaignIdentityPath := flag.String("campaign-identity", "", "network-independent bloc-campaign-identity-v1 public configuration")
 	limit := flag.Int("limit", 0, "number of ordered corpus entries to encrypt")
 	outputPath := flag.String("out", "", "new encrypted-corpus artifact path")
 	flag.Var(&secretPaths, "operator-secret", "operator secret used only for generator self-check (repeat at least threshold times)")
 	flag.Parse()
 
 	manifest, err := mempool.GenerateEncryptedCorpus(mempool.EncryptedCorpusOptions{
-		PlaintextPath:     *plaintextPath,
-		ClusterConfigPath: *clusterPath,
-		SecretPaths:       secretPaths,
-		Limit:             *limit,
-		OutputPath:        *outputPath,
+		PlaintextPath:        *plaintextPath,
+		ClusterConfigPath:    *clusterPath,
+		CampaignIdentityPath: *campaignIdentityPath,
+		SecretPaths:          secretPaths,
+		Limit:                *limit,
+		OutputPath:           *outputPath,
 	})
 	if err != nil {
 		log.Fatal(err)

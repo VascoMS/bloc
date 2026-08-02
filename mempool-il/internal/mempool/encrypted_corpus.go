@@ -27,11 +27,43 @@ const (
 )
 
 type EncryptedCorpusOptions struct {
-	PlaintextPath     string
-	ClusterConfigPath string
-	SecretPaths       []string
-	Limit             int
-	OutputPath        string
+	PlaintextPath        string
+	ClusterConfigPath    string
+	CampaignIdentityPath string
+	SecretPaths          []string
+	Limit                int
+	OutputPath           string
+}
+
+type corpusCampaignIdentity struct {
+	Version      string                   `json:"version"`
+	ClusterID    string                   `json:"cluster_id"`
+	N            int                      `json:"n"`
+	Threshold    int                      `json:"threshold"`
+	BMax         int                      `json:"bmax"`
+	CRSFile      string                   `json:"crs_file"`
+	CRSSHA256    string                   `json:"crs_sha256"`
+	PublicKeyHex string                   `json:"public_key_hex"`
+	Blockspace   corpusCampaignBlockspace `json:"blockspace"`
+	Limits       corpusCampaignLimits     `json:"limits"`
+	Operators    []corpusCampaignOperator `json:"operators"`
+}
+
+type corpusCampaignBlockspace struct {
+	MaxDecryptedGas uint64 `json:"max_decrypted_gas"`
+	MaxDecryptedTxs int    `json:"max_decrypted_txs"`
+	DefaultTxGas    uint64 `json:"default_tx_gas"`
+}
+
+type corpusCampaignLimits struct {
+	MaxProposalBytes              int `json:"max_proposal_bytes"`
+	MaxEnvelopeBytes              int `json:"max_envelope_bytes"`
+	MaxCombineAttemptsPerSubBatch int `json:"max_combine_attempts_per_sub_batch"`
+}
+
+type corpusCampaignOperator struct {
+	ID        uint64 `json:"id"`
+	P2PPeerID string `json:"p2p_peer_id"`
 }
 
 type EncryptedCorpusManifest struct {
@@ -150,7 +182,7 @@ func GenerateEncryptedCorpus(options EncryptedCorpusOptions) (*EncryptedCorpusMa
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	clusterConfig, err := readReplayCluster(options.ClusterConfigPath)
+	clusterConfig, err := readEncryptedCorpusPublicConfig(options)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +269,82 @@ func GenerateEncryptedCorpus(options EncryptedCorpusOptions) (*EncryptedCorpusMa
 		return nil, err
 	}
 	return manifest, nil
+}
+
+func readEncryptedCorpusPublicConfig(options EncryptedCorpusOptions) (replayCluster, error) {
+	hasClusterConfig := strings.TrimSpace(options.ClusterConfigPath) != ""
+	hasCampaignIdentity := strings.TrimSpace(options.CampaignIdentityPath) != ""
+	if hasClusterConfig == hasCampaignIdentity {
+		return replayCluster{}, fmt.Errorf("exactly one of cluster config or campaign identity is required")
+	}
+	if hasClusterConfig {
+		return readReplayCluster(options.ClusterConfigPath)
+	}
+	return readCorpusCampaignIdentity(options.CampaignIdentityPath)
+}
+
+func readCorpusCampaignIdentity(path string) (replayCluster, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return replayCluster{}, err
+	}
+	var identity corpusCampaignIdentity
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&identity); err != nil {
+		return replayCluster{}, fmt.Errorf("decode campaign identity: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return replayCluster{}, fmt.Errorf("trailing campaign identity JSON value")
+		}
+		return replayCluster{}, err
+	}
+	if identity.Version != "bloc-campaign-identity-v1" {
+		return replayCluster{}, fmt.Errorf("unsupported campaign identity version %q", identity.Version)
+	}
+	if strings.TrimSpace(identity.ClusterID) == "" || identity.N < 4 || identity.Threshold < 1 || identity.Threshold > identity.N || identity.BMax < 1 {
+		return replayCluster{}, fmt.Errorf("invalid campaign identity threshold or parameters")
+	}
+	if strings.TrimSpace(identity.CRSFile) == "" || filepath.IsAbs(identity.CRSFile) || strings.TrimSpace(identity.CRSSHA256) == "" || strings.TrimSpace(identity.PublicKeyHex) == "" {
+		return replayCluster{}, fmt.Errorf("campaign identity requires relative CRS and public key fields")
+	}
+	if identity.Blockspace.MaxDecryptedTxs < 1 || identity.Blockspace.MaxDecryptedTxs > identity.BMax || identity.Blockspace.DefaultTxGas == 0 {
+		return replayCluster{}, fmt.Errorf("invalid campaign identity blockspace")
+	}
+	if identity.Limits.MaxProposalBytes < 1 || identity.Limits.MaxEnvelopeBytes < identity.Limits.MaxProposalBytes || identity.Limits.MaxCombineAttemptsPerSubBatch < 1 {
+		return replayCluster{}, fmt.Errorf("invalid campaign identity resource limits")
+	}
+	if len(identity.Operators) != identity.N {
+		return replayCluster{}, fmt.Errorf("campaign identity has %d operators, want %d", len(identity.Operators), identity.N)
+	}
+	seenPeers := map[string]bool{}
+	for index, operator := range identity.Operators {
+		if operator.ID != uint64(index) || strings.TrimSpace(operator.P2PPeerID) == "" || seenPeers[operator.P2PPeerID] {
+			return replayCluster{}, fmt.Errorf("invalid campaign operator identity at position %d", index)
+		}
+		seenPeers[operator.P2PPeerID] = true
+	}
+	crsPath := filepath.Join(filepath.Dir(path), identity.CRSFile)
+	crs, err := os.ReadFile(crsPath)
+	if err != nil {
+		return replayCluster{}, fmt.Errorf("read campaign CRS: %w", err)
+	}
+	if got := hashHex(crs); !strings.EqualFold(got, strings.TrimSpace(identity.CRSSHA256)) {
+		return replayCluster{}, fmt.Errorf("campaign CRS hash mismatch: got %s, expected %s", got, identity.CRSSHA256)
+	}
+	return replayCluster{
+		Version:      "bloc-cluster-v3",
+		ClusterID:    identity.ClusterID,
+		BMax:         identity.BMax,
+		N:            identity.N,
+		Threshold:    identity.Threshold,
+		CRSFile:      identity.CRSFile,
+		CRSSHA256:    identity.CRSSHA256,
+		PublicKeyHex: identity.PublicKeyHex,
+		CRSBytes:     crs,
+	}, nil
 }
 
 func LoadEncryptedCorpus(path string) (*EncryptedCorpusManifest, error) {

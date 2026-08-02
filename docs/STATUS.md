@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-07-29`
+- Last reviewed: `2026-08-02`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `2bc8efc9269798a7f7ab58021f8b9bda1012ae5d`
@@ -67,19 +67,18 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Replacement campaign candidate:** the explicit invalidation decision was
-  made on 2026-07-29. Issue #15 now requires an epochless hybrid-ciphertext
-  wire, immutable cluster-specific encrypted corpora served through the
-  `mock-encrypted-corpus` path, per-slot provider limits, replacement node and
-  mempool image digests, and a rerun of every affected local validation and
-  distributed-campaign preflight. No final campaign may start or combine
-  observations until that replacement contract is implemented, validated, and
-  frozen.
-- **Live-run plumbing:** local refactor validation and a fail-closed
-  `--validate-only` primary contract now exist. Live AWS execution remains
-  blocked until immutable node/mempool image distribution, per-cluster corpus
-  staging, failure retention, and authenticated cleanup are implemented and
-  validated without a synthetic fallback.
+- **Replacement campaign freeze:** the epochless hybrid-ciphertext wire,
+  deterministic 512-target master corpus, immutable cluster-specific encrypted
+  prefixes, and exact-count provider path are implemented. Network-independent
+  n4/n7 identity generation, primary corpus binding, frozen-bundle verification,
+  and topology materialization are now implemented locally on issue #15's task
+  branch. The replacement source, two private-ECR image digests, real n4/n7
+  bundles, and complete replacement validation evidence are not frozen yet.
+- **Live-run plumbing:** live AWS execution remains blocked until the shared
+  final-campaign runner, pull-only ECR IAM, encrypted-corpus and secret staging,
+  health gates, separate latency/resource execution, failure retention,
+  artifact recovery, and authenticated cleanup are implemented and pass the
+  side-effect-free runner contract without a synthetic fallback.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -105,11 +104,12 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Implement and validate the approved epochless hybrid-ciphertext and static
-   encrypted-corpus design, then freeze replacement source, node/mempool
-   images, corpus identities, configuration, and schema.
-2. Rerun the affected local distributed-campaign preflight against only that
-   replacement contract.
+1. Complete and locally validate the shared final-campaign lifecycle,
+   pull-only ECR infrastructure contract, failure retention, artifact recovery,
+   and authenticated cleanup for both matched topologies.
+2. Freeze one clean replacement source, two private-ECR image digests, and the
+   n4/n7 campaign bundles; then rerun the affected local distributed-campaign
+   preflight against only those identities.
 3. After the replacement freeze and affected preflight pass, run issue `#15` as
    the first M5 thesis-performance campaign.
 4. Run issue `#16` only after issue #15 is accepted, using matched manifests

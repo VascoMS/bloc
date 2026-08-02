@@ -46,6 +46,61 @@ fi
 [[ "$(grep -c '^scp|' "$stage_log")" -eq 1 ]] || { echo "staging continued after a failed copy" >&2; exit 1; }
 unset -f final_topology_key_for_host final_ssh final_scp sleep
 
+health_root="$fixture/health"
+mkdir -p "$health_root"
+printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$health_root/inventory.json"
+health_attempts=0
+health_sleeps=0
+health_always_fail=0
+final_topology_key_for_host() { printf 'test-key.pem\n'; }
+final_ssh() {
+  health_attempts=$((health_attempts + 1))
+  if [[ "$health_always_fail" -eq 1 ]]; then
+    return 1
+  fi
+  [[ "$health_attempts" -ge 3 ]]
+}
+sleep() { health_sleeps=$((health_sleeps + 1)); }
+
+final_health_gate "$health_root" || { echo "health gate did not retry until readiness" >&2; exit 1; }
+[[ "$health_attempts" -eq 3 && "$health_sleeps" -eq 2 ]] || {
+  echo "health gate used an unexpected retry schedule" >&2
+  exit 1
+}
+
+health_attempts=0
+health_sleeps=0
+health_always_fail=1
+if final_health_gate "$health_root" 2>/dev/null; then
+  echo "health gate accepted a node that never became ready" >&2
+  exit 1
+fi
+[[ "$health_attempts" -eq 60 && "$health_sleeps" -eq 59 ]] || {
+  echo "health gate did not stop at the bounded attempt limit" >&2
+  exit 1
+}
+unset -f final_topology_key_for_host final_ssh sleep
+
+recovery_root="$fixture/recovery"
+mkdir -p "$recovery_root"
+printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$recovery_root/inventory.json"
+recovery_log="$recovery_root/recovery.log"
+FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+final_topology_key_for_host() { printf 'test-key.pem\n'; }
+final_ssh() { printf '%s\n' "$3" >>"$recovery_log"; }
+rsync() { return 0; }
+
+run_recovery() {
+  local artifact_root="$1"
+  final_recover_artifacts "$artifact_root"
+}
+run_recovery "$recovery_root"
+grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery omitted BLOC_IMAGE" >&2; exit 1; }
+grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
+grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
+unset -f final_topology_key_for_host final_ssh rsync run_recovery
+
 make_fixture() {
   local root="$1"
   mkdir -p "$root/bundle/secrets"

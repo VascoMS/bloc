@@ -193,8 +193,21 @@ final_health_gate() {
   local artifact_root="$1" node host key
   while IFS= read -r node; do
     host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" "curl -fsS http://127.0.0.1:8000/healthz >/dev/null && curl -fsS http://127.0.0.1:8000/metrics >/dev/null && curl -fsS http://127.0.0.1:8080/healthz >/dev/null && test \"\$(curl -fsS 'http://127.0.0.1:8080/inclusion-list?slot=1&limit=8' | jq -r .returned_count)\" = 8"
+    final_wait_node_healthy "$key" "$host" || return 1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
+}
+
+final_wait_node_healthy() {
+  local key="$1" host="$2" attempt=1
+  while [[ "$attempt" -le 60 ]]; do
+    if final_ssh "$key" "$host" "curl -fsS http://127.0.0.1:8000/healthz >/dev/null && curl -fsS http://127.0.0.1:8000/metrics >/dev/null && curl -fsS http://127.0.0.1:8080/healthz >/dev/null && test \"\$(curl -fsS 'http://127.0.0.1:8080/inclusion-list?slot=1&limit=8' | jq -r .returned_count)\" = 8"; then
+      return 0
+    fi
+    [[ "$attempt" -eq 60 ]] || sleep 10
+    attempt=$((attempt + 1))
+  done
+  echo "node health readiness failed: $host" >&2
+  return 1
 }
 
 final_sampler_start() {
@@ -238,7 +251,7 @@ final_recover_artifacts() {
   while IFS= read -r host_json; do
     id="$(jq -r .id <<<"$host_json")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
     mkdir -p "$artifact_root/logs/node-$id"
-    final_ssh "$key" "$host" 'cd /etc/bloc && docker compose -f operator-compose.yaml logs --no-color' >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
+    final_ssh "$key" "$host" "cd /etc/bloc && BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml logs --no-color" >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
     rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/resources/" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || true
   done < <(jq -c '.nodes[]' "$inventory")
 }

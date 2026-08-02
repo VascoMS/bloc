@@ -57,3 +57,38 @@ Expected: all lifecycle and adapter contract tests pass.
 - [ ] **Step 5: Validate and commit**
 
 Run `git diff --check`, apply the identical lifecycle/test overlay to the detached frozen execution worktree, run the frozen `--validate-only` path, update canonical status, and commit only task files. Do not push.
+
+### Task 2: Container-Readable Final Campaign Inputs
+
+**Files:**
+- Modify: `deploy/ec2/operator-compose.yaml`
+- Modify: `scripts/lib/final-campaign-lifecycle.sh`
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+- Modify: `docs/STATUS.md`
+- Modify: `docs/CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: the materialized `cluster.json` value `crs_file: cluster.crs`, staged public files under `/etc/bloc`, and `final_ssh`.
+- Produces: readable public bind mounts, a mode-0600 operator secret, and SSH calls with bounded connection establishment.
+
+- [ ] **Step 1: Write failing deployment-boundary regressions**
+
+Resolve the real Compose file and require a read-only `/config/cluster.crs` mount. Exercise staging through the existing SSH fake and require mode `0644` for `cluster.json`, `cluster.crs`, and `encrypted-corpus.json` while retaining mode `0600` for `operator.json`. Exercise `final_ssh` through an `ssh` fake and require `ConnectTimeout=10`, one connection attempt, and bounded server-alive settings.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run: `bash scripts/tests/test-final-campaign-lifecycle.sh`
+
+Expected: failure because the canonical CRS target, explicit public modes, and SSH bounds are absent.
+
+- [ ] **Step 3: Implement the minimal compatible correction**
+
+Retain the legacy `/config/cluster.ec2.crs` bind target and add `/config/cluster.crs` for final configs. Set the three public inputs to `0644` after checksum-verified staging, retain the operator secret at `0600`, and add `ConnectTimeout=10`, `ConnectionAttempts=1`, `ServerAliveInterval=10`, and `ServerAliveCountMax=2` to `final_ssh`.
+
+- [ ] **Step 4: Run focused and topology regressions**
+
+Run the lifecycle test normally and with `same-az` and `three-region`, then run `docker compose config --format json` with immutable placeholder images and verify both CRS targets are read-only.
+
+- [ ] **Step 5: Commit, overlay, and retry**
+
+Run `git diff --check`, commit only the approved deployment/tooling files, apply their exact overlay to the detached frozen execution worktree, pass `p5 --validate-only`, and run the separately authorized n4 same-AZ readiness pilot without changing frozen protocol identities.

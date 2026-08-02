@@ -133,8 +133,18 @@ release-candidate configuration contract are defined in
   `/corpus/encrypted-corpus.json`. The unrecoverable attempt was interrupted to
   avoid extended SSH retries; Terraform destroyed all 15 resources, the EC2 and
   local temporary keys were deleted, direct authenticated EC2/IAM queries are
-  empty, and Terraform state contains no resources. All attempts remain invalid
-  and contain no metric observation.
+  empty, and Terraform state contains no resources. The approved correction now
+  exposes the canonical CRS mount read-only, stages public config/corpus inputs
+  with mode `0644`, and bounds SSH connection attempts. Retry
+  `bloc-ec2-i15-sa-n4-p5` passed provisioning, materialization, staging, exact
+  digest verification, and Compose startup. Its mempool became healthy, proving
+  the public-input correction, while BLOC restarted because the mode-`0600`
+  `/run/secrets/operator.json` remained owned by the host `ubuntu` user and is
+  unreadable by the frozen image's runtime identity `10001:10001`. No
+  measurement began. Terraform destroyed all 15 resources, the EC2 and local
+  temporary keys were deleted, authenticated resource queries are empty, and
+  Terraform state contains no resources. All attempts remain invalid and
+  contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -160,13 +170,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-deployment invalidation decision to mount the CRS at the
-   path required by `cluster.json` and stage public config/corpus files readable
-   by the non-root images; do not change the frozen protocol images, bundles,
-   corpus contents, or source identity.
-2. Add focused Compose/staging regressions for those two boundaries, apply the
-   minimal deployment correction, and rerun issue `#15`'s n4 same-AZ readiness
-   pilot; require accepted artifacts and authenticated cleanup.
+1. Obtain the frozen-deployment invalidation decision to assign the private
+   operator secret to runtime identity `10001:10001` while retaining mode
+   `0600`; do not change the frozen protocol images, bundles, corpus contents,
+   source identity, or secret contents.
+2. Add the focused ownership regression, apply that single staging correction,
+   and rerun issue `#15`'s n4 same-AZ readiness pilot; require accepted artifacts
+   and authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

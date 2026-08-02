@@ -104,7 +104,9 @@ final_run_campaign_lifecycle() {
 
 final_ssh() {
   local key="$1" host="$2"; shift 2
-  ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@$host" "$@"
+  ssh -n -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+    "ubuntu@$host" "$@"
 }
 
 final_scp() {
@@ -152,7 +154,7 @@ final_stage_hosts() {
     final_scp "$key" "$secret" "$host" /etc/bloc/operator.json || return 1
     final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/operator-compose.yaml" "$host" /etc/bloc/operator-compose.yaml || return 1
     final_scp "$key" "$FINAL_REPO_ROOT/deploy/ec2/sample-container-resources.sh" "$host" /opt/bloc/ec2/sample-container-resources.sh || return 1
-    final_ssh "$key" "$host" "chmod 600 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'" || return 1
+    final_ssh "$key" "$host" "chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encrypted-corpus.json && chmod 600 /etc/bloc/operator.json && chmod 700 /opt/bloc/ec2/sample-container-resources.sh && test \"\$(sha256sum /etc/bloc/encrypted-corpus.json | awk '{print \$1}')\" = '$corpus_hash'" || return 1
   done < <(jq -c '.nodes | sort_by(.id)[]' "$artifact_root/inventory.json")
 
   local controller controller_host controller_key

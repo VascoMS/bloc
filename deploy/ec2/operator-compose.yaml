@@ -16,6 +16,7 @@ services:
     command: ["run", "--config", "/config/cluster.json", "--secrets", "/run/secrets/operator.json"]
     volumes:
       - /etc/bloc/cluster.json:/config/cluster.json:ro
+      - /etc/bloc/cluster.crs:/config/cluster.crs:ro
       - /etc/bloc/cluster.crs:/config/cluster.ec2.crs:ro
       - /etc/bloc/operator.json:/run/secrets/operator.json:ro
     ports:

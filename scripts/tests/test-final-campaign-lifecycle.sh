@@ -7,6 +7,15 @@ source "$repo_root/scripts/lib/final-campaign-lifecycle.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/bloc-final-lifecycle.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
+ssh_log="$fixture/ssh.log"
+ssh() { printf '%s\n' "$*" >"$ssh_log"; }
+final_ssh test-key.pem 192.0.2.10 true
+grep -Fq -- '-o ConnectTimeout=10' "$ssh_log" || { echo "SSH lacks a connection timeout" >&2; exit 1; }
+grep -Fq -- '-o ConnectionAttempts=1' "$ssh_log" || { echo "SSH permits unbounded connection retries" >&2; exit 1; }
+grep -Fq -- '-o ServerAliveInterval=10' "$ssh_log" || { echo "SSH lacks a server-alive interval" >&2; exit 1; }
+grep -Fq -- '-o ServerAliveCountMax=2' "$ssh_log" || { echo "SSH lacks a bounded server-alive count" >&2; exit 1; }
+unset -f ssh
+
 empty_cleanup="$fixture/empty-cleanup.json"
 nonempty_cleanup="$fixture/nonempty-cleanup.json"
 printf '%s\n' '{"regions":{"us-east-1":{"query_succeeded":true,"instances":[],"volumes":[],"vpcs":[],"subnets":[],"security_groups":[],"route_tables":[],"key_pairs":[],"peering_connections":[]}},"iam":{"query_succeeded":true,"roles":[],"instance_profiles":[]},"terraform_state":[]}' >"$empty_cleanup"
@@ -36,6 +45,11 @@ FINAL_STAGE_FAIL_COPY=0
 final_stage_hosts "$stage_root"
 [[ "$(grep -c 'cloud-init status --wait' "$stage_log")" -eq 2 ]] || { echo "staging did not wait for every host" >&2; exit 1; }
 grep -Fq 'sudo mkdir -p /opt/bloc/ec2/results' "$stage_log" || { echo "controller staging did not create its directory with sudo" >&2; exit 1; }
+grep -Fq 'chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encrypted-corpus.json' "$stage_log" || {
+  echo "staging did not make public container inputs readable" >&2
+  exit 1
+}
+grep -Fq 'chmod 600 /etc/bloc/operator.json' "$stage_log" || { echo "staging did not keep the operator secret private" >&2; exit 1; }
 
 : >"$stage_log"
 FINAL_STAGE_FAIL_COPY=1
@@ -100,6 +114,21 @@ grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery om
 grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
 unset -f final_topology_key_for_host final_ssh rsync run_recovery
+
+compose_json="$(
+  NODE_ID=0 \
+  BLOC_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  MEMPOOL_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  docker compose -f "$repo_root/deploy/ec2/operator-compose.yaml" config --format json
+)"
+jq -e '.services["bloc-node"].volumes | any(.target == "/config/cluster.crs" and .read_only == true)' <<<"$compose_json" >/dev/null || {
+  echo "Compose does not expose the canonical CRS path read-only" >&2
+  exit 1
+}
+jq -e '.services["bloc-node"].volumes | any(.target == "/config/cluster.ec2.crs" and .read_only == true)' <<<"$compose_json" >/dev/null || {
+  echo "Compose no longer exposes the legacy EC2 CRS path" >&2
+  exit 1
+}
 
 make_fixture() {
   local root="$1"

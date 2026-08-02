@@ -76,14 +76,13 @@ release-candidate configuration contract are defined in
   cleanup are implemented locally on issue #15's task branch. Real local n4/n7
   BMax-128 identities and 128-entry encrypted corpora passed temporary-manifest
   bundle verification and every primary `--validate-only` permutation. The
-  replacement source, two inspected private-ECR image digests, final n4/n7
-  manifests, and complete replacement validation evidence are not frozen yet.
-- **Replacement preflight completion:** ordinary tests, BTE/mempool focused
-  races, campaign contracts, both Terraform validations, Compose resolution,
-  and real-bundle validation pass. This workstation lacks the chart-test Python
-  dependencies, and `go test -race ./internal/app` reached Go's 10-minute
-  timeout while actively performing BTE pairing verification without reporting
-  a race. These checks must pass in the final release-candidate environment.
+  isolated chart environment passes 37/37 tests, and the automated split race
+  gate passes the complete normal application suite plus focused BTE, mempool,
+  and concurrency-relevant application races. Earlier 10- and 30-minute
+  package-wide race attempts exhausted their process time while actively parsing
+  BMax-128 CRS material and reported no race. The replacement source, two
+  inspected private-ECR image digests, final n4/n7 manifests, and complete
+  replacement validation evidence are not frozen yet.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -109,18 +108,16 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run the remaining chart suite and extended bloc-node race suite in a prepared
-   release-candidate environment.
-2. Freeze one clean replacement source, publish and inspect two linux/amd64
+1. Freeze one clean replacement source, publish and inspect two linux/amd64
    private-ECR image digests, write the final n4/n7 bundle manifests, and rerun
    validation against only those identities.
-3. After the replacement freeze and affected preflight pass, run issue `#15` as
+2. After the replacement freeze and affected preflight pass, run issue `#15` as
    the first M5 thesis-performance campaign.
-4. Run issue `#16` only after issue #15 is accepted, using matched manifests
+3. Run issue `#16` only after issue #15 is accepted, using matched manifests
    and configurations.
-5. Do not combine measurements from different source, image, corpus,
+4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-6. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

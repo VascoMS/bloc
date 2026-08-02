@@ -119,6 +119,20 @@ cd latency-charts && python -m pytest
 Run commands from the relevant module root; the repository contains multiple Go
 modules rather than one root workspace.
 
+For final-campaign readiness, run the automated split race gate:
+
+```sh
+bash scripts/tests/run-final-campaign-race-gate.sh
+```
+
+It runs the complete `bloc-node/internal/app` suite normally, including every
+BMax-128 identity, bundle mutation, secret, and topology-materialization test;
+then races BTE directly, races mempool state/API code, and races every other
+bloc-node application test. Only eleven exact-name deterministic cryptographic
+tests are omitted from the final race invocation. This test-process split avoids
+repeating CPU-bound CRS parsing under instrumentation and does not bypass or
+weaken bundle verification in tests or live execution.
+
 ## `bloc-node` Local Evaluation
 
 Use local evaluation for controlled protocol behavior and preflight validation:

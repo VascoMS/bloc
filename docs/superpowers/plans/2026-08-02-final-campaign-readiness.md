@@ -670,10 +670,15 @@ bash scripts/test-campaign-runners.sh
 - [ ] **Step 2: Run focused race suites**
 
 ```sh
-cd bte/btd-impl-main && go test -race ./be
-cd mempool-il && go test -race ./internal/mempool ./internal/api
-cd bloc-node && go test -race ./internal/app
+bash scripts/tests/run-final-campaign-race-gate.sh
 ```
+
+The split gate retains every deterministic BMax-128 identity, bundle, secret,
+and materialization test in the complete normal bloc-node suite, then races BTE,
+mempool, and all other bloc-node application tests. Package-wide bloc-node race
+runs reached both 10- and 30-minute process timeouts while actively parsing CRS
+and pairing material without reporting a race, so they are not the operational
+readiness command.
 
 - [ ] **Step 3: Resolve Compose without pulling**
 

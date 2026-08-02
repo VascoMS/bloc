@@ -57,6 +57,7 @@ final_validate_campaign_contract() {
   final_validate_ecr_image "$FINAL_BLOC_IMAGE" || final_die "bloc image must use a private ECR digest" || return
   final_validate_ecr_image "$FINAL_MEMPOOL_IMAGE" || final_die "mempool image must use a private ECR digest" || return
   [[ "$FINAL_EXPERIMENT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || final_die "invalid experiment id" || return
+  [[ ${#FINAL_EXPERIMENT_ID} -le 47 ]] || final_die "experiment id must be at most 47 characters" || return
   [[ "$FINAL_ADMIN_CIDR" == */* ]] || final_die "admin CIDR is required" || return
   [[ -n "$FINAL_AWS_PROFILE" ]] || final_die "AWS profile is required" || return
   [[ -f "$manifest" ]] || final_die "bundle manifest is missing" || return

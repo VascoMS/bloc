@@ -147,5 +147,5 @@ final_topology_verify_absent() {
     >"$artifact_root/cleanup-topology.json"
   FINAL_CLEANUP_REGIONS=us-east-1,eu-west-1,eu-central-1
   export FINAL_CLEANUP_REGIONS
-  [[ "$ok" == true ]] && jq -e '[.regions[][]|select(type=="array")|length] + [.iam.roles|length,.iam.instance_profiles|length,.terraform_state|length] | add == 0' "$artifact_root/cleanup-topology.json" >/dev/null
+  [[ "$ok" == true ]] && final_assert_cleanup_empty "$artifact_root/cleanup-topology.json"
 }

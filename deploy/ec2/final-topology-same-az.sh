@@ -86,5 +86,5 @@ final_topology_verify_absent() {
     '{regions:{"us-east-1":{query_succeeded:$query_succeeded,instances:$instances,volumes:$volumes,vpcs:$vpcs,subnets:$subnets,security_groups:$security_groups,route_tables:$route_tables,key_pairs:$key_pairs,peering_connections:$peering_connections}},iam:{query_succeeded:$query_succeeded,roles:$roles,instance_profiles:$instance_profiles},terraform_state:$terraform_state}' \
     >"$artifact_root/cleanup-topology.json"
   FINAL_CLEANUP_REGIONS=us-east-1; export FINAL_CLEANUP_REGIONS
-  [[ "$ok" == true ]] && jq -e '[.regions[][]|select(type=="array")|length] + [.iam.roles|length,.iam.instance_profiles|length,.terraform_state|length] | add == 0' "$artifact_root/cleanup-topology.json" >/dev/null
+  [[ "$ok" == true ]] && final_assert_cleanup_empty "$artifact_root/cleanup-topology.json"
 }

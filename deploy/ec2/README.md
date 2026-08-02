@@ -60,7 +60,7 @@ bash deploy/ec2/run-same-az-campaign.sh \
   --source-sha <replacement-source-sha> \
   --bloc-image <account>.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:<digest> \
   --mempool-image <account>.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:<digest> \
-  --experiment-id issue-15-same-az-n4-pilot \
+  --experiment-id bloc-ec2-i15-sa-n4-p1 \
   --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
   --validate-only
 ```
@@ -284,6 +284,8 @@ ECR-backed low-level experiment IDs must begin with `bloc-ec2-` because the
 project policy scopes role and instance-profile names to `bloc-ec2-*`. Canonical
 campaign wrappers keep human-facing IDs in the grammar defined by
 [docs/WORKFLOWS.md](../../docs/WORKFLOWS.md) and derive shorter AWS names.
+Final-campaign IDs are limited to 47 characters so the derived IAM role and
+instance-profile names remain within AWS's 64-character limit.
 
 Before using a new account or changed deploy policy, confirm the profile can
 create and clean up the exact scoped role/profile surface. The three-region

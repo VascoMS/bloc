@@ -5,6 +5,10 @@ final_lifecycle_event() {
   printf '{"event":"%s","status":"%s","time":"%s"}\n' "$event" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$root/lifecycle.jsonl"
 }
 
+final_assert_cleanup_empty() {
+  jq -e '([.regions[][] | select(type == "array") | length] + [(.iam.roles | length), (.iam.instance_profiles | length), (.terraform_state | length)]) | add == 0' "$1" >/dev/null
+}
+
 final_run_campaign_lifecycle() {
   local artifact_root="$1" status=0 sampler_started=0 old_ifs region
   local cleanup_args=()

@@ -7,6 +7,16 @@ source "$repo_root/scripts/lib/final-campaign-lifecycle.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/bloc-final-lifecycle.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
+empty_cleanup="$fixture/empty-cleanup.json"
+nonempty_cleanup="$fixture/nonempty-cleanup.json"
+printf '%s\n' '{"regions":{"us-east-1":{"query_succeeded":true,"instances":[],"volumes":[],"vpcs":[],"subnets":[],"security_groups":[],"route_tables":[],"key_pairs":[],"peering_connections":[]}},"iam":{"query_succeeded":true,"roles":[],"instance_profiles":[]},"terraform_state":[]}' >"$empty_cleanup"
+printf '%s\n' '{"regions":{"us-east-1":{"query_succeeded":true,"instances":["i-leftover"],"volumes":[],"vpcs":[],"subnets":[],"security_groups":[],"route_tables":[],"key_pairs":[],"peering_connections":[]}},"iam":{"query_succeeded":true,"roles":[],"instance_profiles":[]},"terraform_state":[]}' >"$nonempty_cleanup"
+final_assert_cleanup_empty "$empty_cleanup"
+if final_assert_cleanup_empty "$nonempty_cleanup"; then
+  echo "cleanup assertion accepted a retained instance" >&2
+  exit 1
+fi
+
 make_fixture() {
   local root="$1"
   mkdir -p "$root/bundle/secrets"

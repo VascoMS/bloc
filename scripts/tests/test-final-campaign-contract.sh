@@ -54,6 +54,11 @@ expect_failure() {
 
 expect_success "$runner" --topology same-az --phase readiness-pilot --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only
 grep -Fq 'warmups=1 repetitions=3 blocks=1 sampler=off batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
+max_experiment_id="$(printf 'x%.0s' {1..47})"
+too_long_experiment_id="${max_experiment_id}x"
+expect_success "$runner" --topology same-az --phase readiness-pilot --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/contract-test/$max_experiment_id}" --validate-only
+expect_failure "$runner" --topology same-az --phase readiness-pilot --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/contract-test/$too_long_experiment_id}" --validate-only
+grep -Fq 'experiment id must be at most 47 characters' "$fixture/stderr"
 expect_success "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only
 grep -Fq 'warmups=10 repetitions=1000 blocks=10 sampler=off batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
 expect_success "$runner" --topology three-region --phase resource --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --validate-only

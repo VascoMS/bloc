@@ -26,10 +26,12 @@ install_fakes() {
   FINAL_NODE_COUNT=4
   FINAL_TOPOLOGY=same-az
   FINAL_EXPERIMENT_ID=test-campaign
+  FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
   FINAL_BLOC_IMAGE=bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   FINAL_MEMPOOL_IMAGE=mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   FINAL_PHASE=latency
-  FINAL_SAMPLER=off
+  FINAL_SAMPLER=off FINAL_WARMUPS=10 FINAL_REPETITIONS=1000 FINAL_BLOCKS=10
+  FINAL_SEED=20260621 FINAL_DEADLINE=12s
   FINAL_FAIL_STAGE=""
 
   final_topology_prepare() { printf 'prepare\n' >>"$FINAL_EVENT_LOG"; }

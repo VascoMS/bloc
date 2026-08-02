@@ -368,5 +368,91 @@ class CampaignArtifactsTest(unittest.TestCase):
             self.assertIn("kill -0 \\$(cat '$pid_file') || exit 1; touch '$stop_file'", text)
 
 
+class FinalCampaignArtifactTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="bloc final artifacts ")
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def make_phase(self, phase="readiness-pilot", attempts=3):
+        root = self.root / phase
+        root.mkdir(parents=True)
+        source = "c" * 40
+        bloc = "123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:" + "a" * 64
+        mempool = "123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:" + "b" * 64
+        artifacts.write_json(root / "manifest.json", {
+            "schema_version": "bloc-final-campaign-phase-v1", "status": "complete",
+            "topology": "same-az", "phase": phase, "node_count": 4,
+            "source_sha": source, "bloc_image": bloc, "mempool_image": mempool,
+            "bundle_version": "bloc-campaign-bundle-v1", "public_config_id": "public",
+            "encrypted_corpus_id": "corpus", "batches": [8, 32, 128], "seed": 20260621,
+            "deadline": "12s", "warmups": 1 if phase == "readiness-pilot" else 10,
+            "repetitions": attempts, "blocks": 1 if phase == "readiness-pilot" else 10,
+            "sampler": "on" if phase == "resource" else "off",
+        })
+        artifacts.write_json(root / "inventory.json", {"nodes": [
+            {"id": i, "region": "us-east-1", "zone": "us-east-1a", "instance_type": "t3.small"}
+            for i in range(4)
+        ]})
+        scenario = root / "scenarios/controller/results"
+        scenario.mkdir(parents=True)
+        fields = ["run_id", "phase", "measurement_block", "planned_scenario_runs", "nodes", "batch_size",
+                  "success", "consistent", "outcome", "timed_out", "selected_ciphertexts"]
+        with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
+            for batch in (8, 32, 128):
+                for index in range(attempts):
+                    writer.writerow({"run_id": f"b{batch}-{index}", "phase": "measured", "measurement_block": "1",
+                                     "planned_scenario_runs": str(attempts), "nodes": "4", "batch_size": str(batch),
+                                     "success": "true", "consistent": "true", "outcome": "completed",
+                                     "timed_out": "false", "selected_ciphertexts": str(batch)})
+        return root
+
+    def test_final_phase_accepts_complete_pilot_and_retained_failure(self):
+        root = self.make_phase()
+        rows = artifacts.read_csv(next(root.glob("scenarios/**/run_measurements.csv")))
+        rows[0].update(success="false", consistent="false", outcome="timed_out", timed_out="true", selected_ciphertexts="0")
+        artifacts.write_csv(next(root.glob("scenarios/**/run_measurements.csv")), rows)
+        artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_phase_rejects_identity_count_and_phase_mutations(self):
+        for field, value, message in (
+            ("source_sha", "bad", "source"), ("bloc_image", "latest", "image"),
+            ("repetitions", 2, "repetitions"), ("sampler", "on", "sampler"),
+        ):
+            with self.subTest(field=field):
+                root = self.make_phase() if not (self.root / "readiness-pilot").exists() else self.root / "readiness-pilot"
+                manifest = json.loads((root / "manifest.json").read_text())
+                original = manifest[field]; manifest[field] = value; artifacts.write_json(root / "manifest.json", manifest)
+                with self.assertRaisesRegex(ValueError, message):
+                    artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+                manifest[field] = original; artifacts.write_json(root / "manifest.json", manifest)
+
+    def test_final_phase_rejects_wrong_selected_count_and_secret_leak(self):
+        root = self.make_phase()
+        path = next(root.glob("scenarios/**/run_measurements.csv")); rows = artifacts.read_csv(path)
+        rows[0]["selected_ciphertexts"] = "7"; artifacts.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "selected"):
+            artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+        rows[0]["selected_ciphertexts"] = "8"; artifacts.write_csv(path, rows)
+        (root / "operator-0.json").write_text("secret")
+        with self.assertRaisesRegex(ValueError, "secret"):
+            artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_cleanup_requires_successful_empty_categories_and_state(self):
+        path = self.root / "cleanup.json"
+        artifacts.write_json(path, {"regions": {"us-east-1": {
+            "query_succeeded": True, "instances": [], "volumes": [], "vpcs": [],
+            "subnets": [], "security_groups": [], "route_tables": [], "key_pairs": [],
+        }}, "iam": {"query_succeeded": True, "roles": [], "instance_profiles": []}, "terraform_state": []})
+        artifacts.assert_final_cleanup(path, ["us-east-1"])
+        payload = json.loads(path.read_text()); payload["regions"]["us-east-1"]["volumes"] = ["vol-1"]
+        artifacts.write_json(path, payload)
+        with self.assertRaisesRegex(ValueError, "volumes"):
+            artifacts.assert_final_cleanup(path, ["us-east-1"])
+
+
 if __name__ == "__main__":
     unittest.main()

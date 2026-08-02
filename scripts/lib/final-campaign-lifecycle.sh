@@ -6,10 +6,13 @@ final_lifecycle_event() {
 }
 
 final_run_campaign_lifecycle() {
-  local artifact_root="$1" status=0 sampler_started=0
+  local artifact_root="$1" status=0 sampler_started=0 old_ifs region
+  local cleanup_args=()
   [[ ! -e "$artifact_root" ]] || { echo "artifact root already exists: $artifact_root" >&2; return 1; }
   mkdir -p "$artifact_root/generated-public" "$artifact_root/scenarios" "$artifact_root/logs"
   : >"$artifact_root/lifecycle.jsonl"
+  jq '{version,source_sha,bloc_image,mempool_image,n,threshold,bmax,public_config_id,encrypted_corpus_id,file_sha256}' \
+    "$FINAL_BUNDLE_ROOT/bundle-manifest.json" >"$artifact_root/frozen-inputs.json"
 
   if final_topology_prepare "$artifact_root" "$FINAL_NODE_COUNT"; then
     final_lifecycle_event "$artifact_root" topology-prepare ok
@@ -71,8 +74,27 @@ final_run_campaign_lifecycle() {
   final_lifecycle_event "$artifact_root" cleanup-verification "$([[ "$status" -eq 0 ]] && echo ok || echo failed)"
   jq -n --arg status "$([[ "$status" -eq 0 ]] && echo complete || echo invalid)" \
     --arg phase "$FINAL_PHASE" --arg topology "$FINAL_TOPOLOGY" --argjson n "$FINAL_NODE_COUNT" \
-    '{schema_version:"bloc-final-campaign-phase-v1",status:$status,phase:$phase,topology:$topology,node_count:$n}' \
+    --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
+    --arg deadline "$FINAL_DEADLINE" --arg sampler "$FINAL_SAMPLER" --argjson warmups "$FINAL_WARMUPS" \
+    --argjson repetitions "$FINAL_REPETITIONS" --argjson blocks "$FINAL_BLOCKS" --argjson seed "$FINAL_SEED" \
+    --slurpfile bundle "$FINAL_BUNDLE_ROOT/bundle-manifest.json" \
+    '{schema_version:"bloc-final-campaign-phase-v1",status:$status,phase:$phase,topology:$topology,node_count:$n,
+      source_sha:$source,bloc_image:$bloc,mempool_image:$mempool,bundle_version:$bundle[0].version,
+      public_config_id:$bundle[0].public_config_id,encrypted_corpus_id:$bundle[0].encrypted_corpus_id,
+      batches:[8,32,128],seed:$seed,deadline:$deadline,warmups:$warmups,repetitions:$repetitions,blocks:$blocks,sampler:$sampler}' \
     >"$artifact_root/manifest.json"
+  if [[ "${FINAL_VALIDATE_ARTIFACTS:-0}" -eq 1 && "$status" -eq 0 ]]; then
+    python3 "$FINAL_REPO_ROOT/scripts/lib/campaign_artifacts.py" assert-final-phase \
+      --phase-root "$artifact_root" --expected-topology "$FINAL_TOPOLOGY" --expected-phase "$FINAL_PHASE" || status=1
+    cleanup_args=()
+    old_ifs="$IFS"; IFS=','; set -- ${FINAL_CLEANUP_REGIONS:?topology adapter must set FINAL_CLEANUP_REGIONS}; IFS="$old_ifs"
+    for region in "$@"; do cleanup_args+=(--region "$region"); done
+    python3 "$FINAL_REPO_ROOT/scripts/lib/campaign_artifacts.py" assert-final-cleanup \
+      --cleanup "$artifact_root/cleanup-topology.json" "${cleanup_args[@]}" || status=1
+    if [[ "$status" -ne 0 ]]; then
+      jq '.status="invalid"' "$artifact_root/manifest.json" >"$artifact_root/manifest.json.tmp" && mv "$artifact_root/manifest.json.tmp" "$artifact_root/manifest.json"
+    fi
+  fi
   return "$status"
 }
 

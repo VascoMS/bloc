@@ -544,6 +544,101 @@ def commands_json(records: Path) -> list[dict[str, Any]]:
     return output
 
 
+FINAL_ECR_IMAGE = re.compile(
+    r"^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$"
+)
+
+
+def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase: str) -> None:
+    manifest_path = phase_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if manifest.get("schema_version") != "bloc-final-campaign-phase-v1" or manifest.get("status") != "complete":
+        raise ValueError(f"{manifest_path}: final phase is not complete")
+    if manifest.get("topology") != expected_topology or manifest.get("phase") != expected_phase:
+        raise ValueError(f"{manifest_path}: topology or phase mismatch")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("source_sha", ""))):
+        raise ValueError(f"{manifest_path}: source identity is invalid")
+    if not FINAL_ECR_IMAGE.fullmatch(str(manifest.get("bloc_image", ""))) or not FINAL_ECR_IMAGE.fullmatch(str(manifest.get("mempool_image", ""))):
+        raise ValueError(f"{manifest_path}: image identity is invalid")
+    if manifest.get("bundle_version") != "bloc-campaign-bundle-v1" or not manifest.get("public_config_id") or not manifest.get("encrypted_corpus_id"):
+        raise ValueError(f"{manifest_path}: bundle identities are incomplete")
+    if manifest.get("batches") != [8, 32, 128] or manifest.get("seed") != 20260621 or manifest.get("deadline") != "12s":
+        raise ValueError(f"{manifest_path}: fixed schedule identity is invalid")
+    schedules = {
+        "readiness-pilot": (4, 1, 3, 1, "off"),
+        "latency": (None, 10, 1000, 10, "off"),
+        "resource": (None, 0, 1000, 10, "on"),
+    }
+    if expected_phase not in schedules:
+        raise ValueError(f"unsupported final phase {expected_phase}")
+    required_n, warmups, repetitions, blocks, sampler = schedules[expected_phase]
+    nodes = int(manifest.get("node_count", 0))
+    if nodes not in {4, 7} or (required_n is not None and nodes != required_n):
+        raise ValueError(f"{manifest_path}: node count is invalid")
+    if int(manifest.get("warmups", -1)) != warmups or int(manifest.get("repetitions", -1)) != repetitions:
+        raise ValueError(f"{manifest_path}: repetitions or warmups are invalid")
+    if int(manifest.get("blocks", -1)) != blocks or manifest.get("sampler") != sampler:
+        raise ValueError(f"{manifest_path}: blocks or sampler phase is invalid")
+
+    inventory = json.loads((phase_root / "inventory.json").read_text(encoding="utf-8-sig"))
+    placement = inventory.get("nodes", [])
+    if len(placement) != nodes or {int(node["id"]) for node in placement} != set(range(nodes)):
+        raise ValueError(f"{phase_root}: placement is incomplete")
+    for node in placement:
+        if node.get("instance_type") != "t3.small" or not node.get("region") or not node.get("zone"):
+            raise ValueError(f"{phase_root}: placement is invalid")
+        if expected_topology == "same-az" and (node["region"], node["zone"]) != ("us-east-1", "us-east-1a"):
+            raise ValueError(f"{phase_root}: same-AZ placement is invalid")
+    if expected_topology == "three-region":
+        regions = ["us-east-1", "eu-west-1", "eu-central-1"]
+        if any(node["region"] != regions[int(node["id"]) % 3] for node in placement):
+            raise ValueError(f"{phase_root}: three-region placement is invalid")
+
+    leaked = [path for path in phase_root.rglob("*") if path.is_file() and (path.name.startswith("operator-") or "secret" in path.name.lower() or "secrets" in path.parts)]
+    if leaked:
+        raise ValueError(f"{phase_root}: secret material leaked into public artifacts")
+    run_paths = list((phase_root / "scenarios").glob("**/run_measurements.csv"))
+    if not run_paths:
+        raise ValueError(f"{phase_root}: run measurements are missing")
+    rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
+    for batch in (8, 32, 128):
+        selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
+        if len(selected) != repetitions or len({row.get("run_id") for row in selected}) != repetitions:
+            raise ValueError(f"batch {batch}: expected {repetitions} retained attempts")
+        if {int(row.get("measurement_block", 0)) for row in selected} != set(range(1, blocks + 1)):
+            raise ValueError(f"batch {batch}: measurement block coverage is incomplete")
+        if any(int(row.get("planned_scenario_runs", 0)) != repetitions for row in selected):
+            raise ValueError(f"batch {batch}: planned attempt count is invalid")
+        for row in selected:
+            success = _true(row.get("success", "")) and _true(row.get("consistent", ""))
+            if success and int(row.get("selected_ciphertexts", 0)) != batch:
+                raise ValueError(f"batch {batch}: successful row selected the wrong transaction count")
+            if not success and row.get("outcome") not in {"failed", "timed_out"}:
+                raise ValueError(f"batch {batch}: failed row was not retained with a classification")
+            if row.get("outcome") == "timed_out" and not _true(row.get("timed_out", "")):
+                raise ValueError(f"batch {batch}: timeout classification is inconsistent")
+
+
+def assert_final_cleanup(path: Path, expected_regions: list[str]) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    regions = payload.get("regions")
+    if not isinstance(regions, dict) or set(regions) != set(expected_regions):
+        raise ValueError(f"{path}: cleanup regions are incomplete")
+    categories = ("instances", "volumes", "vpcs", "subnets", "security_groups", "route_tables", "key_pairs")
+    for region in expected_regions:
+        record = regions[region]
+        if record.get("query_succeeded") is not True:
+            raise ValueError(f"{path}: cleanup query failed in {region}")
+        for category in categories:
+            if category not in record or record[category] != []:
+                raise ValueError(f"{path}: {region} {category} is missing or non-empty")
+    iam = payload.get("iam", {})
+    if iam.get("query_succeeded") is not True or iam.get("roles") != [] or iam.get("instance_profiles") != []:
+        raise ValueError(f"{path}: IAM cleanup is incomplete")
+    if payload.get("terraform_state") != []:
+        raise ValueError(f"{path}: Terraform state is not empty")
+
+
 def command_main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -588,6 +683,13 @@ def command_main() -> int:
     resources.add_argument("--output", required=True, type=Path)
     resources.add_argument("--expected-node", action="append", default=[])
     resources.add_argument("--expected-configuration", action="append", default=[])
+    final_phase = sub.add_parser("assert-final-phase")
+    final_phase.add_argument("--phase-root", required=True, type=Path)
+    final_phase.add_argument("--expected-topology", required=True)
+    final_phase.add_argument("--expected-phase", required=True)
+    final_cleanup = sub.add_parser("assert-final-cleanup")
+    final_cleanup.add_argument("--cleanup", required=True, type=Path)
+    final_cleanup.add_argument("--region", action="append", required=True)
     args = parser.parse_args()
 
     if args.command == "write-json":
@@ -627,6 +729,10 @@ def command_main() -> int:
             resource_evidence_summary(args.input, set(args.expected_node), configurations),
             RESOURCE_SUMMARY_FIELDS,
         )
+    elif args.command == "assert-final-phase":
+        assert_final_phase(args.phase_root, args.expected_topology, args.expected_phase)
+    elif args.command == "assert-final-cleanup":
+        assert_final_cleanup(args.cleanup, args.region)
     return 0
 
 

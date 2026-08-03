@@ -257,7 +257,7 @@ propagation, live validator switch, recovery environment, and local-key removal.
 Do not change source, images, corpus, schema, protocol configuration, schedule,
 or metric semantics.
 
-- [ ] **Step 3: Verify, commit, overlay, and validate**
+- [x] **Step 3: Verify, commit, overlay, and validate**
 
 Run focused and topology regressions plus Terraform validation, commit the
 approved tooling change, apply the exact overlay to frozen source `cf36eb`, and
@@ -268,3 +268,45 @@ pass p10 `--validate-only`.
 Execute p10 only after explicit approval. Require all nine retained readiness
 pilot measurements, valid artifacts, usable logs, and authenticated local/cloud
 cleanup before proceeding to primary collection.
+
+P10 proved all five Task 6 corrections and retained nine valid measured attempt
+rows. Batch 8 completed 3/3; batches 32 and 128 completed 0/3 because their
+separate evaluator invocations reused slots 1-4 after batch 8 terminalized those
+slots. Mandatory validation correctly accepted the complete negative artifact,
+but the readiness pilot is not accepted for primary launch. All local/cloud
+cleanup is empty. Step 4 remains incomplete.
+
+### Task 7: Monotonic Cross-Invocation Slot Allocation
+
+**Files:**
+- Modify: `scripts/lib/final-campaign-lifecycle.sh`
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+
+**Interfaces:**
+- Consumes: warmup count, repetitions per block, and balanced batch order.
+- Produces: one monotonic, non-overlapping slot range across all evaluator
+  invocations on the persistent cluster.
+
+- [ ] **Step 1: Write a failing slot-range regression**
+
+Exercise the real measurement loop through a controlled SSH boundary. Require
+readiness invocations to begin at slots `1`, `5`, and `9`, and require the full
+primary schedule to allocate every subsequent range without overlap.
+
+- [ ] **Step 2: Apply the existing proven slot allocator**
+
+Initialize `next_slot=1`, pass it through `--first-slot`, then increment it by
+the invocation's warmups plus measured repetitions. Match the established
+`run-a1-pilot.sh` and `run-m3-three-region.sh` behavior.
+
+- [ ] **Step 3: Verify, commit, overlay, and validate**
+
+Run focused/full lifecycle and topology regressions, commit the approved tooling
+change, apply the exact overlay to frozen `cf36eb`, and pass p11
+`--validate-only`.
+
+- [ ] **Step 4: Run and validate p11**
+
+Execute p11 only after explicit approval. Require 9/9 successful, consistent
+readiness measurements, valid artifacts and logs, and authenticated local/cloud
+cleanup before primary collection.

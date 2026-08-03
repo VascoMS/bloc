@@ -179,7 +179,21 @@ release-candidate configuration contract are defined in
   and automatic cleanup left the local private key after deleting its AWS key
   pair. The exact local key was removed manually. Terraform destroyed all 15
   resources; authenticated resource queries and Terraform state are empty. All
-  attempts remain invalid and contain no metric observation.
+  attempts through p9 remain invalid and contain no metric observation. The
+  approved fail-closed correction set then passed five independent red/green
+  boundaries and was overlaid exactly onto the frozen worktree. Retry
+  `bloc-ec2-i15-sa-n4-p10` passed provisioning, staging, exact image checks,
+  startup, health, controller output, recovery, mandatory artifact validation,
+  and automatic local/cloud cleanup. It retained nine measured attempts: all
+  three batch-8 attempts completed consistently within the boundary, while all
+  six batch-32/128 attempts failed before protocol execution. Each separate
+  evaluator invocation restarted at slots 1-4, but the persistent nodes had
+  already terminalized those slots during batch 8 and correctly returned
+  `409 Conflict` (`slot N must be greater than previous slot 4`). The p10
+  artifact is complete negative readiness evidence, not an accepted readiness
+  pilot and not primary metric evidence. Terraform destroyed all 15 resources;
+  authenticated resource queries and state are empty, recovery logs are usable,
+  and the local temporary key is absent.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -205,15 +219,15 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-campaign-tooling invalidation decision for the minimal p9
-   correction set: make only the controller results directory writable by UID
-   `10001`, propagate every evaluator SSH failure, enable final artifact
-   validation for live runs, supply per-node `NODE_ID` during recovery logging,
-   and delete local temporary keys after cloud key deletion.
-2. Add focused red/green regressions for those acceptance and cleanup boundaries,
-   apply the exact tooling overlay to the detached frozen worktree, and rerun
-   issue `#15`'s n4 same-AZ readiness pilot; require real run artifacts, a valid
-   manifest, usable recovery logs, and authenticated local/cloud cleanup.
+1. Obtain the frozen-campaign-tooling invalidation decision to carry a monotonic
+   `next_slot` across every batch/block evaluator invocation, using the existing
+   proven A1/M3 pattern and leaving source, images, corpus, schema, schedule,
+   protocol configuration, and metric semantics unchanged.
+2. Add a focused regression requiring non-overlapping slot ranges across the
+   readiness and full primary schedules, apply the exact tooling overlay to the
+   detached frozen worktree, and rerun issue `#15`'s n4 same-AZ readiness pilot;
+   require all nine attempts to complete consistently plus valid artifacts and
+   authenticated cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

@@ -165,8 +165,21 @@ release-candidate configuration contract are defined in
   the unchanged health command uses it to validate `returned_count=8`. No
   measurement began. Terraform destroyed all 15 resources, the EC2 and local
   temporary keys were deleted, and authenticated resource queries plus
-  Terraform state are empty. All attempts remain invalid and contain no metric
-  observation.
+  Terraform state are empty. The approved `jq` dependency was then added to
+  both EC2 user-data variants with a real command-boundary regression and
+  overlaid exactly onto the frozen worktree. Retry
+  `bloc-ec2-i15-sa-n4-p9` passed validation, provisioning, staging, exact image
+  verification, startup, and every readiness gate, proving the `jq` correction.
+  The controller evaluator then failed all three batch invocations because the
+  frozen runtime UID `10001` cannot create the requested output below the
+  host-owned `/opt/bloc/ec2/results` bind mount. The measurement loop failed to
+  propagate those SSH errors, artifact validation was not enabled, and the
+  runner consequently wrote an incorrect `complete` manifest despite retaining
+  no run measurements. Recovery logs also omitted required Compose `NODE_ID`,
+  and automatic cleanup left the local private key after deleting its AWS key
+  pair. The exact local key was removed manually. Terraform destroyed all 15
+  resources; authenticated resource queries and Terraform state are empty. All
+  attempts remain invalid and contain no metric observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -192,14 +205,15 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-deployment invalidation decision to install `jq` explicitly
-   in both same-AZ and three-region EC2 user data, satisfying the existing
-   readiness command without changing protocol images, bundles, corpus, source,
-   schema, or the measured path.
-2. Add the focused package regression, apply that deployment-only correction to
-   the detached frozen worktree, and rerun issue `#15`'s n4 same-AZ readiness
-   pilot in a persistent terminal; require accepted artifacts and authenticated
-   cleanup.
+1. Obtain the frozen-campaign-tooling invalidation decision for the minimal p9
+   correction set: make only the controller results directory writable by UID
+   `10001`, propagate every evaluator SSH failure, enable final artifact
+   validation for live runs, supply per-node `NODE_ID` during recovery logging,
+   and delete local temporary keys after cloud key deletion.
+2. Add focused red/green regressions for those acceptance and cleanup boundaries,
+   apply the exact tooling overlay to the detached frozen worktree, and rerun
+   issue `#15`'s n4 same-AZ readiness pilot; require real run artifacts, a valid
+   manifest, usable recovery logs, and authenticated local/cloud cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

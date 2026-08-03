@@ -209,7 +209,7 @@ corpus, source, or metric path.
 Run the lifecycle test normally and with `same-az` and `three-region`, then run
 Terraform validation for both topology modules.
 
-- [ ] **Step 4: Commit, overlay, and validate**
+- [x] **Step 4: Commit, overlay, and validate**
 
 Commit the approved user-data/test/plan change, apply the exact user-data
 overlay to the detached frozen worktree, and pass p9 `--validate-only`.
@@ -219,3 +219,52 @@ overlay to the detached frozen worktree, and pass p9 `--validate-only`.
 Execute the authorized p9 n4 same-AZ readiness pilot in a persistent terminal.
 Accept it only if readiness, pilot measurements, artifact validation, and
 authenticated cleanup all pass.
+
+P9 passed every readiness gate, proving the explicit `jq` installation. It then
+failed all three controller evaluator invocations because runtime UID `10001`
+could not create output below the host-owned results bind mount. The loop did not
+propagate those failures, live artifact validation was disabled, the empty phase
+was incorrectly marked complete, recovery omitted Compose `NODE_ID`, and local
+key cleanup was incomplete. The exact local key was removed manually; all cloud
+resources, cloud keys, and Terraform state are empty. Step 5 remains incomplete.
+
+### Task 6: Controller Measurement And Acceptance Integrity
+
+**Files:**
+- Modify: `scripts/lib/final-campaign-lifecycle.sh`
+- Modify: `deploy/ec2/run-final-campaign.sh`
+- Modify: `deploy/ec2/final-topology-same-az.sh`
+- Modify: `deploy/ec2/final-topology-three-region.sh`
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+
+**Interfaces:**
+- Consumes: controller bind-mounted output, evaluator SSH status, recovered
+  Compose logs, final artifact validator, and topology-local temporary keys.
+- Produces: writable evaluator output, fail-closed measurement and acceptance,
+  usable recovery logs, and complete local/cloud key cleanup.
+
+- [ ] **Step 1: Write failing boundary regressions**
+
+Require the controller results directory to be owned by `10001:10001`, any
+evaluator SSH failure to fail measurement immediately, live execution to enable
+artifact validation, recovery to supply each operator's `NODE_ID`, and both
+topology destroy paths to remove their exact local temporary keys.
+
+- [ ] **Step 2: Implement only the five proven corrections**
+
+Change only the controller output-directory ownership, explicit evaluator error
+propagation, live validator switch, recovery environment, and local-key removal.
+Do not change source, images, corpus, schema, protocol configuration, schedule,
+or metric semantics.
+
+- [ ] **Step 3: Verify, commit, overlay, and validate**
+
+Run focused and topology regressions plus Terraform validation, commit the
+approved tooling change, apply the exact overlay to frozen source `cf36eb`, and
+pass p10 `--validate-only`.
+
+- [ ] **Step 4: Run and validate p10**
+
+Execute p10 only after explicit approval. Require all nine retained readiness
+pilot measurements, valid artifacts, usable logs, and authenticated local/cloud
+cleanup before proceeding to primary collection.

@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-02`
+- Last reviewed: `2026-08-03`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -156,7 +156,17 @@ release-candidate configuration contract are defined in
   `127.0.0.1:8080`. No measurement began. The five instances and every exact
   p7 network/IAM/key resource were manually removed after the interrupted
   wrapper cleanup; authenticated queries, Terraform state, and local key checks
-  are empty. All attempts remain invalid and contain no metric observation.
+  are empty. The approved loopback-only binding and its resolved-Compose
+  regression now pass on the task branch and were overlaid byte-for-byte onto
+  the detached frozen worktree. Retry `bloc-ec2-i15-sa-n4-p8` passed frozen
+  validation, provisioning, materialization, staging, exact image verification,
+  and Compose startup. The loopback probe reached mempool successfully, then
+  readiness failed because the operator host does not install `jq`, although
+  the unchanged health command uses it to validate `returned_count=8`. No
+  measurement began. Terraform destroyed all 15 resources, the EC2 and local
+  temporary keys were deleted, and authenticated resource queries plus
+  Terraform state are empty. All attempts remain invalid and contain no metric
+  observation.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -182,13 +192,14 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-deployment invalidation decision to bind mempool port 8080
-   to host loopback only (`127.0.0.1:8080:8080`), matching the existing health
-   gate without exposing it through the VPC or changing the internal protocol
-   path; do not change protocol images, bundles, corpus, source, or schema.
-2. Add the focused Compose regression, apply that single deployment correction,
-   and rerun issue `#15`'s n4 same-AZ readiness pilot in a persistent terminal;
-   require accepted artifacts and authenticated cleanup.
+1. Obtain the frozen-deployment invalidation decision to install `jq` explicitly
+   in both same-AZ and three-region EC2 user data, satisfying the existing
+   readiness command without changing protocol images, bundles, corpus, source,
+   schema, or the measured path.
+2. Add the focused package regression, apply that deployment-only correction to
+   the detached frozen worktree, and rerun issue `#15`'s n4 same-AZ readiness
+   pilot in a persistent terminal; require accepted artifacts and authenticated
+   cleanup.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

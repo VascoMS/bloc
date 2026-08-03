@@ -161,7 +161,7 @@ Run the lifecycle test normally and with `same-az` and `three-region`; require
 the resolved Compose port to use host IP `127.0.0.1` and reject wildcard
 publication.
 
-- [ ] **Step 4: Commit, overlay, and validate**
+- [x] **Step 4: Commit, overlay, and validate**
 
 Commit the approved Compose/test/plan change, apply the exact Compose overlay to
 the detached frozen worktree, and pass p8 `--validate-only`.
@@ -170,3 +170,10 @@ the detached frozen worktree, and pass p8 `--validate-only`.
 
 Execute p8 in a persistent terminal. Accept it only if all readiness
 observations, artifacts, and authenticated cleanup pass.
+
+P8 proved the loopback binding: the host reached the mempool endpoint. It then
+failed before measurement because the operator AMI does not install `jq`, which
+the unchanged readiness command uses to verify the eight-item response. All 15
+resources and both temporary keys were removed, and authenticated cleanup is
+empty. Step 5 remains incomplete pending an explicit frozen deployment
+invalidation decision for the missing host package.

@@ -101,6 +101,7 @@ final_topology_destroy() {
   aws ec2 delete-key-pair --profile "$FINAL_AWS_PROFILE" --region us-east-1 --key-name "$FINAL_THREE_REGION_PRIMARY_KEY_NAME" || status=1
   aws ec2 delete-key-pair --profile "$FINAL_AWS_PROFILE" --region eu-west-1 --key-name "$FINAL_THREE_REGION_SECONDARY_KEY_NAME" || status=1
   aws ec2 delete-key-pair --profile "$FINAL_AWS_PROFILE" --region eu-central-1 --key-name "$FINAL_THREE_REGION_TERTIARY_KEY_NAME" || status=1
+  rm -f "$FINAL_THREE_REGION_PRIMARY_KEY_PATH" "$FINAL_THREE_REGION_SECONDARY_KEY_PATH" "$FINAL_THREE_REGION_TERTIARY_KEY_PATH" || status=1
   return "$status"
 }
 

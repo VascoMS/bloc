@@ -4,6 +4,9 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/scripts/lib/final-campaign-lifecycle.sh"
 
+task6_case="${TASK6_CASE:-all}"
+task6_selected() { [[ "$task6_case" == all || "$task6_case" == "$1" ]]; }
+
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/bloc-final-lifecycle.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
@@ -54,6 +57,12 @@ grep -Fq 'sudo chown 10001:10001 /etc/bloc/operator.json' "$stage_log" || {
   echo "staging did not assign the operator secret to the frozen runtime identity" >&2
   exit 1
 }
+if task6_selected controller-output; then
+  grep -Fq 'sudo chown 10001:10001 /opt/bloc/ec2/results' "$stage_log" || {
+    echo "controller results are not writable by the frozen runtime identity" >&2
+    exit 1
+  }
+fi
 
 : >"$stage_log"
 FINAL_STAGE_FAIL_COPY=1
@@ -99,6 +108,28 @@ fi
 }
 unset -f final_topology_key_for_host final_ssh sleep
 
+if task6_selected measurement-failure; then
+  measurement_root="$fixture/measurement-failure"
+  mkdir -p "$measurement_root"
+  printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"}}' >"$measurement_root/inventory.json"
+  FINAL_EXPERIMENT_ID=measurement-failure FINAL_BLOCKS=1 FINAL_REPETITIONS=3
+  FINAL_WARMUPS=1 FINAL_SEED=20260621 FINAL_DEADLINE=12s
+  FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
+  measurement_attempts=0
+  final_topology_key_for_host() { printf 'test-key.pem\n'; }
+  final_ssh() { measurement_attempts=$((measurement_attempts + 1)); return 1; }
+  if final_execute_measurement "$measurement_root"; then
+    echo "measurement accepted failed evaluator SSH commands" >&2
+    exit 1
+  fi
+  [[ "$measurement_attempts" -eq 1 ]] || {
+    echo "measurement continued after the first evaluator SSH failure" >&2
+    exit 1
+  }
+  unset -f final_topology_key_for_host final_ssh
+fi
+
 recovery_root="$fixture/recovery"
 mkdir -p "$recovery_root"
 printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$recovery_root/inventory.json"
@@ -117,6 +148,9 @@ run_recovery "$recovery_root"
 grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery omitted BLOC_IMAGE" >&2; exit 1; }
 grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
+if task6_selected recovery-node-id; then
+  grep -Fq "NODE_ID='0'" "$recovery_log" || { echo "recovery omitted operator NODE_ID" >&2; exit 1; }
+fi
 unset -f final_topology_key_for_host final_ssh rsync run_recovery
 
 apt_log="$fixture/apt-get.log"
@@ -201,7 +235,12 @@ install_fakes() {
   }
   final_topology_key_for_host() { printf '%s/key.pem\n' "$FINAL_TEST_ROOT"; }
   final_topology_destroy() { printf 'destroy\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != cleanup ]]; }
-  final_topology_verify_absent() { printf 'verify-absent\n' >>"$FINAL_EVENT_LOG"; printf '{}\n' >"$1/cleanup-topology.json"; }
+  final_topology_verify_absent() {
+    printf 'verify-absent\n' >>"$FINAL_EVENT_LOG"
+    printf '{}\n' >"$1/cleanup-topology.json"
+    FINAL_CLEANUP_REGIONS=us-east-1
+    export FINAL_CLEANUP_REGIONS
+  }
   final_materialize_public() {
     printf 'materialize\n' >>"$FINAL_EVENT_LOG"
     mkdir -p "$1/generated-public"
@@ -217,6 +256,13 @@ install_fakes() {
   final_sampler_stop() { printf 'sampler-stop\n' >>"$FINAL_EVENT_LOG"; }
   final_execute_measurement() { printf 'measure\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != evaluator ]]; }
   final_recover_artifacts() { printf 'recover\n' >>"$FINAL_EVENT_LOG"; }
+  python3() {
+    case "$*" in
+      *assert-final-phase*) printf 'validate-phase\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != validation ]] ;;
+      *assert-final-cleanup*) printf 'validate-cleanup\n' >>"$FINAL_EVENT_LOG" ;;
+      *) command python3 "$@" ;;
+    esac
+  }
 }
 
 run_case() {
@@ -231,25 +277,34 @@ run_case() {
   printf '%s\n' "$root"
 }
 
-success_root="$(run_case success latency off '' 0)"
-[[ "$(tr '\n' ' ' <"$success_root/events")" == 'prepare apply materialize stage images start health measure recover destroy verify-absent ' ]]
-! grep -q sampler "$success_root/events"
+if task6_selected mandatory-validation; then
+  success_root="$(run_case success latency off '' 0)"
+  [[ "$(tr '\n' ' ' <"$success_root/events")" == 'prepare apply materialize stage images start health measure recover destroy verify-absent validate-phase validate-cleanup ' ]] || {
+    echo "successful lifecycle did not run mandatory artifact validation" >&2
+    exit 1
+  }
+  ! grep -q sampler "$success_root/events"
 
-resource_root="$(run_case resource resource on '' 0)"
-grep -Fq sampler-start "$resource_root/events"
-grep -Fq sampler-stop "$resource_root/events"
+  resource_root="$(run_case resource resource on '' 0)"
+  grep -Fq sampler-start "$resource_root/events"
+  grep -Fq sampler-stop "$resource_root/events"
 
-for stage in checksum image health evaluator cleanup; do
-  failed_root="$(run_case "failure-$stage" latency off "$stage" 1)"
-  grep -Fq recover "$failed_root/events"
-  grep -Fq destroy "$failed_root/events"
-  grep -Fq verify-absent "$failed_root/events"
-done
+  for stage in checksum image health evaluator cleanup validation; do
+    failed_root="$(run_case "failure-$stage" latency off "$stage" 1)"
+    grep -Fq recover "$failed_root/events"
+    grep -Fq destroy "$failed_root/events"
+    grep -Fq verify-absent "$failed_root/events"
+  done
 
-checksum_root="$fixture/failure-checksum"
-! grep -Fq start "$checksum_root/events"
-image_root="$fixture/failure-image"
-! grep -Fq start "$image_root/events"
+  checksum_root="$fixture/failure-checksum"
+  ! grep -Fq start "$checksum_root/events"
+  image_root="$fixture/failure-image"
+  ! grep -Fq start "$image_root/events"
+  jq -e '.status == "invalid"' "$fixture/failure-validation/artifacts/manifest.json" >/dev/null || {
+    echo "artifact validation failure did not invalidate the manifest" >&2
+    exit 1
+  }
+fi
 
 if find "$fixture" -path '*/artifacts/*' -type f \( -name '*secret*' -o -name 'operator-*.json' \) | grep -q .; then
   echo "private secret leaked into a public artifact root" >&2
@@ -276,6 +331,15 @@ if [[ "${1:-}" == same-az ]]; then
   grep -Fq 'cpu_credits = "unlimited"' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/bloc-node' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"
+  if task6_selected local-key-cleanup; then
+    mkdir -p "$(dirname "$FINAL_SAME_AZ_KEY_PATH")"
+    printf 'temporary-key\n' >"$FINAL_SAME_AZ_KEY_PATH"
+    terraform() { return 0; }
+    aws() { return 0; }
+    final_topology_destroy "$adapter_root" || { echo "same-AZ destroy failed under controlled boundaries" >&2; exit 1; }
+    [[ ! -e "$FINAL_SAME_AZ_KEY_PATH" ]] || { echo "same-AZ destroy retained its local private key" >&2; exit 1; }
+    unset -f terraform aws
+  fi
   echo "same-AZ adapter contract tests passed"
 fi
 
@@ -329,5 +393,18 @@ if [[ "${1:-}" == three-region ]]; then
   }
   cleanup_record="$(final_three_region_region_cleanup eu-west-1 "$FINAL_THREE_REGION_SECONDARY_KEY_NAME")"
   jq -e '.query_succeeded == true and .instances == ["i-eu-west-leftover"] and .vpcs == [] and .peering_connections == []' <<<"$cleanup_record" >/dev/null
+  if task6_selected local-key-cleanup; then
+    mkdir -p "$(dirname "$FINAL_THREE_REGION_PRIMARY_KEY_PATH")"
+    printf 'temporary-us-key\n' >"$FINAL_THREE_REGION_PRIMARY_KEY_PATH"
+    printf 'temporary-eu-west-key\n' >"$FINAL_THREE_REGION_SECONDARY_KEY_PATH"
+    printf 'temporary-eu-central-key\n' >"$FINAL_THREE_REGION_TERTIARY_KEY_PATH"
+    terraform() { return 0; }
+    aws() { return 0; }
+    final_topology_destroy "$adapter_root" || { echo "three-region destroy failed under controlled boundaries" >&2; exit 1; }
+    for key_path in "$FINAL_THREE_REGION_PRIMARY_KEY_PATH" "$FINAL_THREE_REGION_SECONDARY_KEY_PATH" "$FINAL_THREE_REGION_TERTIARY_KEY_PATH"; do
+      [[ ! -e "$key_path" ]] || { echo "three-region destroy retained local private key: $key_path" >&2; exit 1; }
+    done
+    unset -f terraform aws
+  fi
   echo "three-region adapter contract tests passed"
 fi

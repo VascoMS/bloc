@@ -243,14 +243,14 @@ resources, cloud keys, and Terraform state are empty. Step 5 remains incomplete.
 - Produces: writable evaluator output, fail-closed measurement and acceptance,
   usable recovery logs, and complete local/cloud key cleanup.
 
-- [ ] **Step 1: Write failing boundary regressions**
+- [x] **Step 1: Write failing boundary regressions**
 
 Require the controller results directory to be owned by `10001:10001`, any
 evaluator SSH failure to fail measurement immediately, live execution to enable
 artifact validation, recovery to supply each operator's `NODE_ID`, and both
 topology destroy paths to remove their exact local temporary keys.
 
-- [ ] **Step 2: Implement only the five proven corrections**
+- [x] **Step 2: Implement only the five proven corrections**
 
 Change only the controller output-directory ownership, explicit evaluator error
 propagation, live validator switch, recovery environment, and local-key removal.

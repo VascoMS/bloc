@@ -87,7 +87,7 @@ final_run_campaign_lifecycle() {
       public_config_id:$bundle[0].public_config_id,encrypted_corpus_id:$bundle[0].encrypted_corpus_id,
       batches:[8,32,128],seed:$seed,deadline:$deadline,warmups:$warmups,repetitions:$repetitions,blocks:$blocks,sampler:$sampler}' \
     >"$artifact_root/manifest.json"
-  if [[ "${FINAL_VALIDATE_ARTIFACTS:-0}" -eq 1 && "$status" -eq 0 ]]; then
+  if [[ "$status" -eq 0 ]]; then
     python3 "$FINAL_REPO_ROOT/scripts/lib/campaign_artifacts.py" assert-final-phase \
       --phase-root "$artifact_root" --expected-topology "$FINAL_TOPOLOGY" --expected-phase "$FINAL_PHASE" || status=1
     cleanup_args=()
@@ -161,7 +161,7 @@ final_stage_hosts() {
   controller="$(jq -c .controller "$artifact_root/inventory.json")"; controller_host="$(jq -r .public_ip <<<"$controller")"
   controller_key="$(final_topology_key_for_host "$controller")"
   final_wait_host_ready "$controller_key" "$controller_host" || return 1
-  final_ssh "$controller_key" "$controller_host" 'sudo mkdir -p /opt/bloc/ec2/results && sudo chown -R ubuntu:ubuntu /opt/bloc/ec2' || return 1
+  final_ssh "$controller_key" "$controller_host" 'sudo mkdir -p /opt/bloc/ec2/results && sudo chown ubuntu:ubuntu /opt/bloc/ec2 && sudo chown 10001:10001 /opt/bloc/ec2/results' || return 1
   final_scp "$controller_key" "$artifact_root/generated-public/remote-eval.json" "$controller_host" /opt/bloc/ec2/remote-eval.json || return 1
 }
 
@@ -238,7 +238,7 @@ final_execute_measurement() {
     IFS=',' read -r -a final_batches <<<"$order"
     for batch in "${final_batches[@]}"; do
       warmups=0; [[ "$block" -eq 0 ]] && warmups="$FINAL_WARMUPS"
-      final_ssh "$key" "$host" "docker run --rm -v /opt/bloc/ec2:/work -w /work '$FINAL_BLOC_IMAGE' eval-remote --config remote-eval.json --experiment-id '$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions_per_block' --repetition-blocks 1 --measurement-block '$((block+1))' --planned-scenario-runs '$FINAL_REPETITIONS' --seed '$FINAL_SEED' --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign --deadline '$FINAL_DEADLINE' --timeout '$FINAL_DEADLINE' --out-dir 'results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch' --image-tag '$FINAL_BLOC_IMAGE' --git-commit '$FINAL_SOURCE_SHA'"
+      final_ssh "$key" "$host" "docker run --rm -v /opt/bloc/ec2:/work -w /work '$FINAL_BLOC_IMAGE' eval-remote --config remote-eval.json --experiment-id '$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions_per_block' --repetition-blocks 1 --measurement-block '$((block+1))' --planned-scenario-runs '$FINAL_REPETITIONS' --seed '$FINAL_SEED' --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign --deadline '$FINAL_DEADLINE' --timeout '$FINAL_DEADLINE' --out-dir 'results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch' --image-tag '$FINAL_BLOC_IMAGE' --git-commit '$FINAL_SOURCE_SHA'" || return 1
     done
     block=$((block + 1))
   done
@@ -253,7 +253,7 @@ final_recover_artifacts() {
   while IFS= read -r host_json; do
     id="$(jq -r .id <<<"$host_json")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
     mkdir -p "$artifact_root/logs/node-$id"
-    final_ssh "$key" "$host" "cd /etc/bloc && BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml logs --no-color" >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
+    final_ssh "$key" "$host" "cd /etc/bloc && NODE_ID='$id' BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml logs --no-color" >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
     rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/resources/" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || true
   done < <(jq -c '.nodes[]' "$inventory")
 }

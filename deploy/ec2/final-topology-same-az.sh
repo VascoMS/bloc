@@ -54,6 +54,7 @@ final_topology_destroy() {
   work="$artifact_root/generated-public/terraform"
   AWS_PROFILE="$FINAL_AWS_PROFILE" terraform -chdir="$work" destroy -input=false -auto-approve || status=1
   aws ec2 delete-key-pair --profile "$FINAL_AWS_PROFILE" --region us-east-1 --key-name "$FINAL_SAME_AZ_KEY_NAME" || status=1
+  rm -f "$FINAL_SAME_AZ_KEY_PATH" || status=1
   return "$status"
 }
 

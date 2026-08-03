@@ -229,16 +229,17 @@ final_sampler_stop() {
 }
 
 final_execute_measurement() {
-  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block
+  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block next_slot
   controller="$(jq -c .controller "$artifact_root/inventory.json")"; host="$(jq -r .public_ip <<<"$controller")"
   key="$(final_topology_key_for_host "$controller")"; repetitions_per_block=$((FINAL_REPETITIONS / FINAL_BLOCKS))
-  block=0
+  block=0; next_slot=1
   while [[ "$block" -lt "$FINAL_BLOCKS" ]]; do
     case $((block % 3)) in 0) order=8,32,128;; 1) order=32,128,8;; 2) order=128,8,32;; esac
     IFS=',' read -r -a final_batches <<<"$order"
     for batch in "${final_batches[@]}"; do
       warmups=0; [[ "$block" -eq 0 ]] && warmups="$FINAL_WARMUPS"
-      final_ssh "$key" "$host" "docker run --rm -v /opt/bloc/ec2:/work -w /work '$FINAL_BLOC_IMAGE' eval-remote --config remote-eval.json --experiment-id '$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions_per_block' --repetition-blocks 1 --measurement-block '$((block+1))' --planned-scenario-runs '$FINAL_REPETITIONS' --seed '$FINAL_SEED' --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign --deadline '$FINAL_DEADLINE' --timeout '$FINAL_DEADLINE' --out-dir 'results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch' --image-tag '$FINAL_BLOC_IMAGE' --git-commit '$FINAL_SOURCE_SHA'" || return 1
+      final_ssh "$key" "$host" "docker run --rm -v /opt/bloc/ec2:/work -w /work '$FINAL_BLOC_IMAGE' eval-remote --config remote-eval.json --experiment-id '$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions_per_block' --repetition-blocks 1 --measurement-block '$((block+1))' --planned-scenario-runs '$FINAL_REPETITIONS' --seed '$FINAL_SEED' --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign --deadline '$FINAL_DEADLINE' --timeout '$FINAL_DEADLINE' --out-dir 'results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch' --image-tag '$FINAL_BLOC_IMAGE' --git-commit '$FINAL_SOURCE_SHA'" || return 1
+      next_slot=$((next_slot + warmups + repetitions_per_block))
     done
     block=$((block + 1))
   done

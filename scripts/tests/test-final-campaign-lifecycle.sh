@@ -130,6 +130,36 @@ if task6_selected measurement-failure; then
   unset -f final_topology_key_for_host final_ssh
 fi
 
+measurement_slots_root="$fixture/measurement-slots"
+mkdir -p "$measurement_slots_root"
+printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"}}' >"$measurement_slots_root/inventory.json"
+measurement_commands="$measurement_slots_root/commands.log"
+FINAL_EXPERIMENT_ID=measurement-slots FINAL_SEED=20260621 FINAL_DEADLINE=12s
+FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
+final_topology_key_for_host() { printf 'test-key.pem\n'; }
+final_ssh() { printf '%s\n' "$3" >>"$measurement_commands"; }
+
+FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_WARMUPS=1
+: >"$measurement_commands"
+final_execute_measurement "$measurement_slots_root"
+readiness_slots="$(sed -n "s/.*--first-slot '\([0-9][0-9]*\)'.*/\1/p" "$measurement_commands")"
+[[ "$readiness_slots" == $'1\n5\n9' ]] || {
+  echo "readiness measurement reused or skipped slots: ${readiness_slots:-missing --first-slot}" >&2
+  exit 1
+}
+
+FINAL_BLOCKS=10 FINAL_REPETITIONS=1000 FINAL_WARMUPS=10
+: >"$measurement_commands"
+final_execute_measurement "$measurement_slots_root"
+primary_slots="$(sed -n "s/.*--first-slot '\([0-9][0-9]*\)'.*/\1/p" "$measurement_commands")"
+expected_primary_slots=$'1\n111\n221\n331\n431\n531\n631\n731\n831\n931\n1031\n1131\n1231\n1331\n1431\n1531\n1631\n1731\n1831\n1931\n2031\n2131\n2231\n2331\n2431\n2531\n2631\n2731\n2831\n2931'
+[[ "$primary_slots" == "$expected_primary_slots" ]] || {
+  echo "primary measurement slot ranges overlap or contain gaps: ${primary_slots:-missing --first-slot}" >&2
+  exit 1
+}
+unset -f final_topology_key_for_host final_ssh
+
 recovery_root="$fixture/recovery"
 mkdir -p "$recovery_root"
 printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$recovery_root/inventory.json"

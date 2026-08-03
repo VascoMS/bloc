@@ -195,9 +195,16 @@ release-candidate configuration contract are defined in
   authenticated resource queries and state are empty, recovery logs are usable,
   and the local temporary key is absent. The approved monotonic slot allocator
   now passes a red/green readiness and full-primary regression, is committed on
-  the task branch, and is overlaid byte-for-byte onto the frozen worktree. P11
-  `--validate-only` passes; live p11 execution still requires separate
-  authorization.
+  the task branch, and is overlaid byte-for-byte onto the frozen worktree.
+  Authorized retry `bloc-ec2-i15-sa-n4-p11` then passed the complete live
+  readiness lifecycle. All nine measured attempts were successful, consistent,
+  and within 12 seconds: batch 8 was 89.350--99.365 ms, batch 32 was
+  312.324--319.261 ms, and batch 128 was 1.625--1.698 s. Slots were monotonic
+  across batch invocations (`1--4`, `5--8`, and `9--12` including warmups), all
+  four recovery logs are usable, the manifest and artifact validators pass,
+  Terraform destroyed all 15 resources, authenticated local/cloud cleanup and
+  state are empty, and the temporary key is absent. P11 is accepted readiness
+  evidence; primary latency and resource collection remain separately gated.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -223,13 +230,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live-run authorization and execute issue `#15`'s p11 n4
-   same-AZ readiness pilot; require all nine measured attempts to complete
-   consistently plus valid artifacts, usable logs, and authenticated cleanup.
-2. Keep source, images, corpus, schema, schedule, protocol configuration, and
-   metric semantics frozen throughout p11 and subsequent primary collection.
-3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
-   n4/n7 latency and resource phases using the frozen manifests.
+1. Obtain separate live-run authorization and collect issue `#15`'s primary
+   same-AZ n4/n7 latency phases using the frozen manifests.
+2. Collect the dedicated same-AZ n4/n7 resource phases separately from latency.
+3. Keep source, images, corpus, schema, schedule, protocol configuration, and
+   metric semantics frozen throughout primary collection.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
 5. Do not combine measurements from different source, image, corpus,

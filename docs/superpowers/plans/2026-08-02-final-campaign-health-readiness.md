@@ -305,7 +305,7 @@ Run focused/full lifecycle and topology regressions, commit the approved tooling
 change, apply the exact overlay to frozen `cf36eb`, and pass p11
 `--validate-only`.
 
-- [ ] **Step 4: Run and validate p11**
+- [x] **Step 4: Run and validate p11**
 
 Execute p11 only after explicit approval. Require 9/9 successful, consistent
 readiness measurements, valid artifacts and logs, and authenticated local/cloud
@@ -314,5 +314,7 @@ cleanup before primary collection.
 The regression failed first because the lifecycle command omitted
 `--first-slot`, then passed with readiness starts `1/5/9` and all 30 primary
 starts through `2931`. Commit `646422f` is overlaid exactly onto frozen
-`cf36eb`; full local gates and p11 `--validate-only` pass. Step 4 remains
-pending separate live-run authorization.
+`cf36eb`; full local gates and p11 `--validate-only` pass. Authorized live p11
+then retained 9/9 successful, consistent, deadline-met measurements, passed
+artifact validation, and removed all local/cloud resources and keys. Task 7 is
+complete.

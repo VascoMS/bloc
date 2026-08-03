@@ -193,7 +193,11 @@ release-candidate configuration contract are defined in
   artifact is complete negative readiness evidence, not an accepted readiness
   pilot and not primary metric evidence. Terraform destroyed all 15 resources;
   authenticated resource queries and state are empty, recovery logs are usable,
-  and the local temporary key is absent.
+  and the local temporary key is absent. The approved monotonic slot allocator
+  now passes a red/green readiness and full-primary regression, is committed on
+  the task branch, and is overlaid byte-for-byte onto the frozen worktree. P11
+  `--validate-only` passes; live p11 execution still requires separate
+  authorization.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -219,15 +223,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain the frozen-campaign-tooling invalidation decision to carry a monotonic
-   `next_slot` across every batch/block evaluator invocation, using the existing
-   proven A1/M3 pattern and leaving source, images, corpus, schema, schedule,
-   protocol configuration, and metric semantics unchanged.
-2. Add a focused regression requiring non-overlapping slot ranges across the
-   readiness and full primary schedules, apply the exact tooling overlay to the
-   detached frozen worktree, and rerun issue `#15`'s n4 same-AZ readiness pilot;
-   require all nine attempts to complete consistently plus valid artifacts and
-   authenticated cleanup.
+1. Obtain separate live-run authorization and execute issue `#15`'s p11 n4
+   same-AZ readiness pilot; require all nine measured attempts to complete
+   consistently plus valid artifacts, usable logs, and authenticated cleanup.
+2. Keep source, images, corpus, schema, schedule, protocol configuration, and
+   metric semantics frozen throughout p11 and subsequent primary collection.
 3. If the pilot and authenticated cleanup pass, collect the separate same-AZ
    n4/n7 latency and resource phases using the frozen manifests.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched

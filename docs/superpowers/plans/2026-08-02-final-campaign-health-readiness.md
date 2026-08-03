@@ -287,19 +287,19 @@ cleanup is empty. Step 4 remains incomplete.
 - Produces: one monotonic, non-overlapping slot range across all evaluator
   invocations on the persistent cluster.
 
-- [ ] **Step 1: Write a failing slot-range regression**
+- [x] **Step 1: Write a failing slot-range regression**
 
 Exercise the real measurement loop through a controlled SSH boundary. Require
 readiness invocations to begin at slots `1`, `5`, and `9`, and require the full
 primary schedule to allocate every subsequent range without overlap.
 
-- [ ] **Step 2: Apply the existing proven slot allocator**
+- [x] **Step 2: Apply the existing proven slot allocator**
 
 Initialize `next_slot=1`, pass it through `--first-slot`, then increment it by
 the invocation's warmups plus measured repetitions. Match the established
 `run-a1-pilot.sh` and `run-m3-three-region.sh` behavior.
 
-- [ ] **Step 3: Verify, commit, overlay, and validate**
+- [x] **Step 3: Verify, commit, overlay, and validate**
 
 Run focused/full lifecycle and topology regressions, commit the approved tooling
 change, apply the exact overlay to frozen `cf36eb`, and pass p11
@@ -310,3 +310,9 @@ change, apply the exact overlay to frozen `cf36eb`, and pass p11
 Execute p11 only after explicit approval. Require 9/9 successful, consistent
 readiness measurements, valid artifacts and logs, and authenticated local/cloud
 cleanup before primary collection.
+
+The regression failed first because the lifecycle command omitted
+`--first-slot`, then passed with readiness starts `1/5/9` and all 30 primary
+starts through `2931`. Commit `646422f` is overlaid exactly onto frozen
+`cf36eb`; full local gates and p11 `--validate-only` pass. Step 4 remains
+pending separate live-run authorization.

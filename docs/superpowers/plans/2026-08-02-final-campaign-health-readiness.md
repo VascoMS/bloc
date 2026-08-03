@@ -177,3 +177,45 @@ the unchanged readiness command uses to verify the eight-item response. All 15
 resources and both temporary keys were removed, and authenticated cleanup is
 empty. Step 5 remains incomplete pending an explicit frozen deployment
 invalidation decision for the missing host package.
+
+### Task 5: Operator-Host JSON Parser Dependency
+
+**Files:**
+- Modify: `deploy/ec2/terraform/user-data.sh`
+- Modify: `deploy/ec2/terraform-three-region/user-data.sh`
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+- Modify: `docs/STATUS.md`
+- Modify: `docs/CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: the existing host-side readiness command and Ubuntu package manager.
+- Produces: explicit `jq` availability on every same-AZ and three-region EC2 host.
+
+- [x] **Step 1: Write and verify a failing user-data regression**
+
+Execute both real user-data scripts against a controlled `apt-get` boundary and
+require their initial host-package installation to request `jq`. The current
+scripts must fail because they install `awscli`, certificates, `curl`, and
+`gnupg`, but not `jq`.
+
+- [x] **Step 2: Add the single package dependency**
+
+Add `jq` to the existing initial package list in both user-data variants. Do not
+change the health command, AMI selection, images, protocol configuration,
+corpus, source, or metric path.
+
+- [x] **Step 3: Run focused and topology regressions**
+
+Run the lifecycle test normally and with `same-az` and `three-region`, then run
+Terraform validation for both topology modules.
+
+- [ ] **Step 4: Commit, overlay, and validate**
+
+Commit the approved user-data/test/plan change, apply the exact user-data
+overlay to the detached frozen worktree, and pass p9 `--validate-only`.
+
+- [ ] **Step 5: Run and validate p9**
+
+Execute the authorized p9 n4 same-AZ readiness pilot in a persistent terminal.
+Accept it only if readiness, pilot measurements, artifact validation, and
+authenticated cleanup all pass.

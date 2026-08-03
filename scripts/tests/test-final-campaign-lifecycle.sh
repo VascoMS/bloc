@@ -119,6 +119,31 @@ grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recov
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
 unset -f final_topology_key_for_host final_ssh rsync run_recovery
 
+apt_log="$fixture/apt-get.log"
+fake_bin="$fixture/fake-bin"
+mkdir -p "$fake_bin"
+cat >"$fake_bin/apt-get" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$APT_GET_LOG"
+[[ "${1:-}" != install ]] || exit 97
+EOF
+chmod +x "$fake_bin/apt-get"
+
+for user_data in \
+  "$repo_root/deploy/ec2/terraform/user-data.sh" \
+  "$repo_root/deploy/ec2/terraform-three-region/user-data.sh"; do
+  : >"$apt_log"
+  status=0
+  PATH="$fake_bin:/usr/bin:/bin" APT_GET_LOG="$apt_log" bash "$user_data" >/dev/null 2>&1 || status=$?
+  [[ "$status" -eq 97 ]] || { echo "user data did not reach the controlled package boundary: $user_data" >&2; exit 1; }
+  awk '
+    $1 == "install" {
+      for (i = 1; i <= NF; i++) if ($i == "jq") found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$apt_log" || { echo "user data does not install jq: $user_data" >&2; exit 1; }
+done
+
 compose_json="$(
   NODE_ID=0 \
   BLOC_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \

@@ -132,3 +132,41 @@ boundary. Persistent-session p7 proved the ownership correction but exposed a
 separate mismatch: the health gate probes host loopback port 8080 while Compose
 keeps that port internal. Step 5 remains incomplete pending an explicit frozen
 deployment invalidation decision.
+
+### Task 4: Loopback-Only Mempool Health Binding
+
+**Files:**
+- Modify: `deploy/ec2/operator-compose.yaml`
+- Modify: `scripts/tests/test-final-campaign-lifecycle.sh`
+- Modify: `docs/STATUS.md`
+- Modify: `docs/CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: the existing host-loopback mempool health probe.
+- Produces: host-local access to mempool port 8080 without VPC exposure or a change to the internal Compose protocol path.
+
+- [x] **Step 1: Write and verify a failing resolved-Compose regression**
+
+Require mempool target port 8080 to publish only on host IP `127.0.0.1` and host
+port 8080. The current Compose model must fail because it publishes no port.
+
+- [x] **Step 2: Add the single loopback-only binding**
+
+Add `127.0.0.1:8080:8080` to the mempool service. Do not change its command,
+image, volume, internal service name, or the BLOC provider URL.
+
+- [x] **Step 3: Run focused and topology regressions**
+
+Run the lifecycle test normally and with `same-az` and `three-region`; require
+the resolved Compose port to use host IP `127.0.0.1` and reject wildcard
+publication.
+
+- [ ] **Step 4: Commit, overlay, and validate**
+
+Commit the approved Compose/test/plan change, apply the exact Compose overlay to
+the detached frozen worktree, and pass p8 `--validate-only`.
+
+- [ ] **Step 5: Run and validate p8**
+
+Execute p8 in a persistent terminal. Accept it only if all readiness
+observations, artifacts, and authenticated cleanup pass.

@@ -5,6 +5,8 @@ services:
     command: ["-source", "encrypted-corpus", "-encrypted-corpus", "/corpus/encrypted-corpus.json", "-listen", ":8080", "-max-items", "128"]
     volumes:
       - /etc/bloc/encrypted-corpus.json:/corpus/encrypted-corpus.json:ro
+    ports:
+      - "127.0.0.1:8080:8080"
 
   bloc-node:
     image: ${BLOC_IMAGE:?set BLOC_IMAGE to an immutable digest}

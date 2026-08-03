@@ -133,6 +133,14 @@ jq -e '.services["bloc-node"].volumes | any(.target == "/config/cluster.ec2.crs"
   echo "Compose no longer exposes the legacy EC2 CRS path" >&2
   exit 1
 }
+jq -e '(.services["mempool-il"].ports // []) | any(.target == 8080 and .published == "8080" and .host_ip == "127.0.0.1" and .protocol == "tcp")' <<<"$compose_json" >/dev/null || {
+  echo "Compose does not expose mempool health on loopback-only port 8080" >&2
+  exit 1
+}
+jq -e 'all((.services["mempool-il"].ports // [])[]; .target != 8080 or .host_ip == "127.0.0.1")' <<<"$compose_json" >/dev/null || {
+  echo "Compose exposes mempool port 8080 beyond host loopback" >&2
+  exit 1
+}
 
 make_fixture() {
   local root="$1"

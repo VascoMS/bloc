@@ -214,6 +214,16 @@ release-candidate configuration contract are defined in
   `(measurement_block, run_id)`; a 10-block regression accepts block-local IDs
   and still rejects duplicate pairs. The corrected final-phase and cleanup gates
   pass the retained artifact, so n4 latency is accepted without a live rerun.
+  Two subsequent n7 latency launches stopped before measurement during staging.
+  `bloc-ec2-i15-sa-n7-latency-p1` lost its one-shot SCP connection while
+  transferring the immutable corpus to operator 4. The unchanged p2 retry also
+  recorded `stage=failed` after three instances took about 17 minutes to become
+  ready. Both attempts destroyed all 18 resources and their temporary keys;
+  independent authenticated cleanup validation passes and Terraform state is
+  empty. The shared lifecycle bounds and retries SSH, but `final_scp` performs
+  one transfer with no connection/server-alive options or retry. A third launch
+  is paused pending explicit approval for a bounded SCP-only tooling correction
+  and regression; source, images, corpus, schema, and protocol remain unchanged.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -239,12 +249,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Collect the primary n7 same-AZ latency phase using the accepted n4 source,
-   images, corpus, schedule, protocol configuration, and metric semantics.
-2. Collect the separate n4/n7 resource phases without admitting their latency
-   rows into the p99 dataset.
-3. Retain the corrected block-scoped attempt-identity validator for every final
-   multi-block phase.
+1. Decide whether to invalidate the frozen staging helper so SCP uses the same
+   bounded connection/server-alive settings as SSH and retries a transfer at
+   most three times, with red/green exhaustion and recovery regressions.
+2. If approved, overlay the exact tested helper onto the frozen worktree and
+   retry n7 latency only after validate-only and authenticated empty cleanup.
+3. After accepted n7 latency, collect the separate n4/n7 resource phases without
+   admitting their latency rows into the p99 dataset.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
 5. Do not combine measurements from different source, image, corpus,

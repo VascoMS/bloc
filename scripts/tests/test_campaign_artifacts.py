@@ -379,6 +379,9 @@ class FinalCampaignArtifactTests(unittest.TestCase):
     def make_phase(self, phase="readiness-pilot", attempts=3):
         root = self.root / phase
         root.mkdir(parents=True)
+        blocks = 1 if phase == "readiness-pilot" else 10
+        if attempts % blocks != 0:
+            raise ValueError("attempts must divide evenly across blocks")
         source = "c" * 40
         bloc = "123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:" + "a" * 64
         mempool = "123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:" + "b" * 64
@@ -389,7 +392,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             "bundle_version": "bloc-campaign-bundle-v1", "public_config_id": "public",
             "encrypted_corpus_id": "corpus", "batches": [8, 32, 128], "seed": 20260621,
             "deadline": "12s", "warmups": 1 if phase == "readiness-pilot" else 10,
-            "repetitions": attempts, "blocks": 1 if phase == "readiness-pilot" else 10,
+            "repetitions": attempts, "blocks": blocks,
             "sampler": "on" if phase == "resource" else "off",
         })
         artifacts.write_json(root / "inventory.json", {"nodes": [
@@ -403,11 +406,13 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
             for batch in (8, 32, 128):
-                for index in range(attempts):
-                    writer.writerow({"run_id": f"b{batch}-{index}", "phase": "measured", "measurement_block": "1",
-                                     "planned_scenario_runs": str(attempts), "nodes": "4", "batch_size": str(batch),
-                                     "success": "true", "consistent": "true", "outcome": "completed",
-                                     "timed_out": "false", "selected_ciphertexts": str(batch)})
+                for block in range(1, blocks + 1):
+                    for index in range(1, attempts // blocks + 1):
+                        writer.writerow({"run_id": f"measured-r{index:03d}-b{batch}", "phase": "measured",
+                                         "measurement_block": str(block), "planned_scenario_runs": str(attempts),
+                                         "nodes": "4", "batch_size": str(batch), "success": "true",
+                                         "consistent": "true", "outcome": "completed", "timed_out": "false",
+                                         "selected_ciphertexts": str(batch)})
         return root
 
     def test_final_phase_accepts_complete_pilot_and_retained_failure(self):
@@ -416,6 +421,21 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         rows[0].update(success="false", consistent="false", outcome="timed_out", timed_out="true", selected_ciphertexts="0")
         artifacts.write_csv(next(root.glob("scenarios/**/run_measurements.csv")), rows)
         artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_phase_accepts_run_ids_scoped_to_measurement_block(self):
+        root = self.make_phase("latency", attempts=1000)
+        artifacts.assert_final_phase(root, "same-az", "latency")
+        path = next(root.glob("scenarios/**/run_measurements.csv"))
+        rows = artifacts.read_csv(path)
+        first = next(row for row in rows if row["batch_size"] == "8" and row["measurement_block"] == "1")
+        second = next(
+            row for row in rows
+            if row["batch_size"] == "8" and row["measurement_block"] == "1" and row is not first
+        )
+        second["run_id"] = first["run_id"]
+        artifacts.write_csv(path, rows)
+        with self.assertRaisesRegex(ValueError, "retained attempts"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
 
     def test_final_phase_rejects_identity_count_and_phase_mutations(self):
         for field, value, message in (

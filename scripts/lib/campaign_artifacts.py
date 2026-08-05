@@ -603,7 +603,8 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
     for batch in (8, 32, 128):
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
-        if len(selected) != repetitions or len({row.get("run_id") for row in selected}) != repetitions:
+        attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}
+        if len(selected) != repetitions or len(attempt_ids) != repetitions:
             raise ValueError(f"batch {batch}: expected {repetitions} retained attempts")
         if {int(row.get("measurement_block", 0)) for row in selected} != set(range(1, blocks + 1)):
             raise ValueError(f"batch {batch}: measurement block coverage is incomplete")

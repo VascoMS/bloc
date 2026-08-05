@@ -478,3 +478,32 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Related files: `deploy/ec2/run-final-campaign.sh`,
   `deploy/ec2/final-topology-*.sh`, `scripts/lib/final-campaign-lifecycle.sh`,
   `docs/VALIDATION.md`
+
+## 0025. Scope final campaign attempt identity to its measurement block
+
+- Date: 2026-08-05
+- Status: Accepted
+- Context: Final latency and resource phases invoke the remote evaluator once
+  per batch in each of ten balanced blocks. Each invocation intentionally starts
+  its human-readable `run_id` sequence at `measured-r001`, while the artifact
+  validator incorrectly required 1,000 globally unique bare IDs per batch. The
+  completed n4 latency phase retained all observations but failed that gate.
+- Options considered: rebuild the runtime so IDs are globally unique and rerun
+  every affected phase; discard uniqueness validation; or treat block metadata
+  and the evaluator ID as one attempt identity.
+- Decision: In final multi-block artifacts, one retained attempt is identified
+  by `(measurement_block, run_id)`. Every pair must be unique; repeating a bare
+  `run_id` in a different block is valid, while repeating it in the same block
+  invalidates the phase.
+- Rationale: The composite identity matches the frozen schedule and retained
+  schema, preserves duplicate detection, and corrects a validator-only mismatch
+  without changing runtime execution, protocol behavior, images, corpus, or any
+  collected observation.
+- Consequences: The validator and its 10-block regression are approved tooling
+  overlays on frozen source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`.
+  Existing artifacts may be promoted only after both corrected final-phase and
+  authenticated cleanup validation pass; measurements are never rewritten or
+  merged across candidates.
+- Related files: `scripts/lib/campaign_artifacts.py`,
+  `scripts/tests/test_campaign_artifacts.py`, `docs/VALIDATION.md`,
+  `docs/STATUS.md`

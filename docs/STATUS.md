@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-03`
+- Last reviewed: `2026-08-05`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -209,12 +209,11 @@ release-candidate configuration contract are defined in
   each batch retained 1,000 successful, consistent, deadline-met rows across
   all 10 blocks. Cleanup destroyed all 15 resources, authenticated queries and
   Terraform state are empty, all recovery logs are present, and no private key
-  remains. The frozen final-artifact validator nevertheless marked the phase
-  invalid because evaluator `run_id` values restart at `measured-r001` in each
-  block: each batch has 1,000 unique `(measurement_block, run_id)` identities
-  but only 100 globally unique `run_id` strings. Primary n7 and resource phases
-  are paused because resolving this mismatch requires an explicit decision to
-  invalidate and correct frozen campaign tooling or evidence identity semantics.
+  remains. The user approved invalidating the frozen validator's incorrect
+  globally unique `run_id` assumption. Final attempt identity is now explicitly
+  `(measurement_block, run_id)`; a 10-block regression accepts block-local IDs
+  and still rejects duplicate pairs. The corrected final-phase and cleanup gates
+  pass the retained artifact, so n4 latency is accepted without a live rerun.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -240,14 +239,12 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide whether to invalidate the frozen campaign-tooling contract so
-   multi-block attempt identity is validated as `(measurement_block, run_id)`
-   (or generated globally uniquely), with a regression covering 10 blocks.
-2. Revalidate the retained n4 latency artifact under the approved identity
-   semantics before deciding whether any live n4 rerun is necessary.
-3. Only after that gate, collect the primary n7 latency and separate n4/n7
-   resource phases using the same source, images, corpus, schedule, protocol
-   configuration, and metric semantics.
+1. Collect the primary n7 same-AZ latency phase using the accepted n4 source,
+   images, corpus, schedule, protocol configuration, and metric semantics.
+2. Collect the separate n4/n7 resource phases without admitting their latency
+   rows into the p99 dataset.
+3. Retain the corrected block-scoped attempt-identity validator for every final
+   multi-block phase.
 4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
 5. Do not combine measurements from different source, image, corpus,

@@ -86,6 +86,10 @@ for the protocol workload. Manifests and CSV/JSON rows must retain the source
 SHA, both image digests, public/corpus/prefix identities, requested and received
 counts, seed, block/order metadata, planned scenario count, transaction source,
 configuration, attempt outcome, and schema version.
+For multi-block final phases, evaluator `run_id` values are scoped to their
+invocation block; the retained attempt identity is therefore
+`(measurement_block, run_id)`. Every pair must be unique, and duplicate pairs
+invalidate the phase.
 
 No final campaign may mix source revisions or image digests. A code,
 configuration, corpus, or schema change requires an explicit invalidation

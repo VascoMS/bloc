@@ -236,11 +236,22 @@ release-candidate configuration contract are defined in
   terminalized slots. The phase is invalid and incomplete. Terraform destroyed
   all 18 resources and the temporary key; independent cleanup validation passes,
   Terraform state is empty, and no private key remains. Resource phases are
-  paused pending an explicit execution-tooling decision: retain the unchanged
-  foreground SSH design and relaunch from zero, or invalidate it in favor of a
-  uniquely identified remote job with reconnectable status polling that never
-  re-executes an ambiguous command. Source, images, corpus, schema, schedule, and
-  protocol remain unchanged.
+  paused pending an explicit execution-tooling decision. The user approved the
+  reconnectable option. The task branch now stages a controller-local helper,
+  atomically claims one block/batch/first-slot job identity, launches it at most
+  once, and polls durable status through short SSH connections. Tests prove a
+  lost start response plus transient poll failures reconnect without duplicate
+  execution, exhausted polling fails closed, a completed job can be reattached,
+  nonzero/ambiguous/lost states remain terminal, job state is recovered, and the
+  monotonic slot schedule is unchanged. Focused lifecycle/helper/contract,
+  29 artifact tests, Bash syntax, diff hygiene, and complete runner portability
+  pass. The helper and lifecycle were overlaid byte-for-byte onto frozen
+  `cf36eb` with SHA-256
+  `247158b5b9cdf0d4b7bc78b2907fd5c530e02266e3b8cbf9963ca7e8f7c84082`
+  and `0c2e8d943636a1b9d4856f9d8a75f839d99fec7e173461fd8133e47ad033ebcf`;
+  exact n7 latency p4 `--validate-only` passes. A separate live authorization
+  remains required. Source, images, corpus, schema, schedule, and protocol
+  remain unchanged.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -266,9 +277,8 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide whether to relaunch n7 latency unchanged from zero or approve a
-   reconnectable, uniquely identified remote-evaluator job boundary with
-   red/green no-reexecution and exhaustion regressions.
+1. Obtain separate live authorization, then execute and validate n7 latency p4
+   with authenticated empty cleanup before continuing.
 2. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
 3. Validate and accept issue #15 artifacts, then run issue `#16` using matched

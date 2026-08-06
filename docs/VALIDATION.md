@@ -528,6 +528,15 @@ must cover instances, volumes, VPCs, subnets, security groups, route tables,
 key pairs, peering connections, IAM role/profile objects, and empty Terraform
 state in every topology region. Cleanup failure invalidates the phase.
 
+Each evaluator block/batch invocation is a uniquely identified controller-local
+job whose directory is claimed atomically before launch. Long-lived evaluator
+execution is detached from SSH; the runner uses at most three idempotent start
+requests and 180 independent ten-second status polls. Losing a start response or
+poll connection cannot launch a duplicate command. Only durable `EXIT:0`
+advances the monotonic slot allocator. Missing, ambiguous, lost, nonzero, and
+exhausted states invalidate the phase, and retained job state/logs are recovered
+with the evaluator artifacts.
+
 The primary honest-path matrix is:
 
 | Dimension | Values |

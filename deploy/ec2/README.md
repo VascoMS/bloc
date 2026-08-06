@@ -71,6 +71,15 @@ all `t3.small` hosts in `us-east-1a`; the three-region adapter keeps the
 controller in `us-east-1` and maps operator `id % 3` to `us-east-1`,
 `eu-west-1`, and `eu-central-1` through three peerings and six routes.
 
+Evaluator invocations do not remain attached to a long-lived SSH session. The
+runner stages `run-final-remote-job.sh` on the controller, atomically claims one
+job identity per block/batch/first-slot tuple, starts that job at most once, and
+polls its durable status through short reconnectable SSH calls. A repeated start
+only observes the existing identity. Missing, ambiguous, lost, nonzero, or
+poll-exhausted jobs fail closed and are never automatically re-executed.
+Controller job commands, stdout, stderr, PID, and exit status are recovered
+alongside evaluator artifacts.
+
 Both adapters use two pre-existing private ECR repositories in `us-east-1`.
 Instances receive repository-scoped pull access only. They pull and inspect the
 exact digest and `linux/amd64` architecture before services start; the runner

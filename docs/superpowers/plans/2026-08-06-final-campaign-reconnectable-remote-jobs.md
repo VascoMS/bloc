@@ -28,11 +28,11 @@
 - Consumes: `start <job-id> <command> [args...]` and `status <job-id>`.
 - Produces: exactly-once directory claim plus `RUNNING`, `EXIT:<code>`, `MISSING`, `AMBIGUOUS`, or `LOST`.
 
-- [ ] Write a shell regression that starts one controlled command twice and requires one execution, atomic `EXIT:0`, and retained stdout/stderr.
-- [ ] Add nonzero-exit and preclaimed-directory cases requiring `EXIT:23` and `AMBIGUOUS` without execution.
-- [ ] Run `bash scripts/tests/test-final-remote-job.sh`; require failure because the helper does not exist.
-- [ ] Implement the minimal validated-ID, atomic-claim, detached-command, PID, log, and atomic-exit helper.
-- [ ] Run the focused test and require success; add it to runner portability and Bash syntax checks.
+- [x] Write a shell regression that starts one controlled command twice and requires one execution, atomic `EXIT:0`, and retained stdout/stderr.
+- [x] Add nonzero-exit and preclaimed-directory cases requiring `EXIT:23` and `AMBIGUOUS` without execution.
+- [x] Run `bash scripts/tests/test-final-remote-job.sh`; require failure because the helper does not exist.
+- [x] Implement the minimal validated-ID, atomic-claim, detached-command, PID, log, and atomic-exit helper.
+- [x] Run the focused test and require success; add it to runner portability and Bash syntax checks.
 
 ### Task 2: Reconnectable Lifecycle Integration
 
@@ -44,12 +44,12 @@
 - Consumes: `final_run_remote_job <key> <host> <job-id> <command> [args...]`.
 - Produces: bounded idempotent start/poll behavior and unchanged monotonic evaluator argv.
 
-- [ ] Add a regression whose first start response is lost after local launch, whose first two status connections fail, and which requires success with one command execution.
-- [ ] Add exhaustion and nonzero-status regressions requiring failure without a second execution.
-- [ ] Update the existing measurement failure and slot-allocation regressions to exercise `final_run_remote_job`, retaining exact starts `1/5/9` and the 30 primary starts through `2931`.
-- [ ] Run the lifecycle test and require the new boundary regressions to fail against foreground `final_ssh` execution.
-- [ ] Implement argument quoting, three idempotent start requests, 180 bounded status polls, terminal-state handling, controller staging, and job artifact recovery.
-- [ ] Run focused lifecycle, helper, final contract, 29 artifact, Bash syntax, diff, and complete runner portability checks.
+- [x] Add a regression whose first start response is lost after local launch, whose first two status connections fail, and which requires success with one command execution.
+- [x] Add exhaustion and nonzero-status regressions requiring failure without a second execution.
+- [x] Update the existing measurement failure and slot-allocation regressions to exercise `final_run_remote_job`, retaining exact starts `1/5/9` and the 30 primary starts through `2931`.
+- [x] Run the lifecycle test and require the new boundary regressions to fail against foreground `final_ssh` execution.
+- [x] Implement argument quoting, three idempotent start requests, 180 bounded status polls, terminal-state handling, controller staging, and job artifact recovery.
+- [x] Run focused lifecycle, helper, final contract, 29 artifact, Bash syntax, diff, and complete runner portability checks.
 
 ### Task 3: Frozen Overlay And Readiness Handoff
 
@@ -64,8 +64,8 @@
 - Consumes: tested task-branch helper and lifecycle files.
 - Produces: byte-identical frozen tooling overlay and a validated p4 command awaiting live authorization.
 
-- [ ] Document reconnectable execution and the no-reexecution failure rule in the canonical runbook and validation contract.
-- [ ] Overlay the helper/lifecycle byte-for-byte onto detached frozen source and prove matching SHA-256 values.
-- [ ] Run exact n7 latency p4 `--validate-only` with the frozen bundle and digests.
+- [x] Document reconnectable execution and the no-reexecution failure rule in the canonical runbook and validation contract.
+- [x] Overlay the helper/lifecycle byte-for-byte onto detached frozen source and prove matching SHA-256 values.
+- [x] Run exact n7 latency p4 `--validate-only` with the frozen bundle and digests.
 - [ ] Commit focused implementation/documentation changes, move issue #15 to In Progress, and post validation evidence.
 - [ ] Stop before AWS and report the exact live p4 command for separate authorization.

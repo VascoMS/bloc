@@ -57,6 +57,84 @@ fi
 }
 unset -f scp sleep
 
+remote_job_root="$fixture/remote-jobs"
+remote_job_count="$fixture/remote-job-count"
+remote_status_counter="$fixture/remote-status-counter"
+remote_start_calls=0
+remote_status_failures=2
+printf '%s\n' 0 >"$remote_status_counter"
+final_ssh() {
+  local key="$1" host="$2" command status_calls
+  shift 2
+  command="$*"
+  if [[ "$command" == *' start '* ]]; then
+    remote_start_calls=$((remote_start_calls + 1))
+    BLOC_REMOTE_JOB_ROOT="$remote_job_root" bash -c "$command" >/dev/null
+    [[ "$remote_start_calls" -ne 1 ]]
+    return
+  fi
+  status_calls=$(($(cat "$remote_status_counter") + 1))
+  printf '%s\n' "$status_calls" >"$remote_status_counter"
+  if [[ "$status_calls" -le "$remote_status_failures" ]]; then
+    return 255
+  fi
+  BLOC_REMOTE_JOB_ROOT="$remote_job_root" bash -c "$command"
+}
+sleep() { /bin/sleep 0.01; }
+FINAL_REMOTE_JOB_COMMAND="$repo_root/scripts/lib/final-remote-job.sh"
+FINAL_REMOTE_JOB_MAX_POLLS=100
+FINAL_REMOTE_JOB_POLL_INTERVAL=0.01
+
+final_run_remote_job test-key.pem 192.0.2.10 reconnect-job \
+  bash -c 'printf "run\n" >>"$1"' _ "$remote_job_count" || {
+    echo "remote evaluator job did not reconnect after lost SSH responses" >&2
+    exit 1
+  }
+[[ "$remote_start_calls" -eq 2 && "$(cat "$remote_status_counter")" -ge 3 ]] || {
+  echo "remote evaluator job used an unexpected reconnect schedule" >&2
+  exit 1
+}
+[[ "$(wc -l <"$remote_job_count" | tr -d ' ')" -eq 1 ]] || {
+  echo "remote evaluator job was re-executed after a lost start response" >&2
+  exit 1
+}
+
+remote_status_failures=999
+printf '%s\n' 0 >"$remote_status_counter"
+remote_start_calls=0
+FINAL_REMOTE_JOB_MAX_POLLS=3
+if final_run_remote_job test-key.pem 192.0.2.10 reconnect-job \
+  bash -c 'printf "duplicate\n" >>"$1"' _ "$remote_job_count"; then
+  echo "remote evaluator polling accepted status exhaustion" >&2
+  exit 1
+fi
+remote_status_failures=0
+printf '%s\n' 0 >"$remote_status_counter"
+FINAL_REMOTE_JOB_MAX_POLLS=100
+final_run_remote_job test-key.pem 192.0.2.10 reconnect-job \
+  bash -c 'printf "duplicate\n" >>"$1"' _ "$remote_job_count" || {
+    echo "completed remote evaluator job could not be reattached" >&2
+    exit 1
+  }
+[[ "$(wc -l <"$remote_job_count" | tr -d ' ')" -eq 1 ]] || {
+  echo "reattaching a completed remote evaluator job re-executed it" >&2
+  exit 1
+}
+
+remote_status_failures=0
+printf '%s\n' 0 >"$remote_status_counter"
+remote_start_calls=0
+if final_run_remote_job test-key.pem 192.0.2.10 failed-job bash -c 'exit 23' 2>/dev/null; then
+  echo "remote evaluator accepted a nonzero job exit status" >&2
+  exit 1
+fi
+[[ "$(BLOC_REMOTE_JOB_ROOT="$remote_job_root" bash "$repo_root/scripts/lib/final-remote-job.sh" status failed-job)" == EXIT:23 ]] || {
+  echo "remote evaluator failure status was not durable" >&2
+  exit 1
+}
+unset -f final_ssh sleep
+unset FINAL_REMOTE_JOB_COMMAND FINAL_REMOTE_JOB_MAX_POLLS FINAL_REMOTE_JOB_POLL_INTERVAL
+
 empty_cleanup="$fixture/empty-cleanup.json"
 nonempty_cleanup="$fixture/nonempty-cleanup.json"
 printf '%s\n' '{"regions":{"us-east-1":{"query_succeeded":true,"instances":[],"volumes":[],"vpcs":[],"subnets":[],"security_groups":[],"route_tables":[],"key_pairs":[],"peering_connections":[]}},"iam":{"query_succeeded":true,"roles":[],"instance_profiles":[]},"terraform_state":[]}' >"$empty_cleanup"
@@ -93,6 +171,10 @@ grep -Fq 'chmod 644 /etc/bloc/cluster.json /etc/bloc/cluster.crs /etc/bloc/encry
 grep -Fq 'chmod 600 /etc/bloc/operator.json' "$stage_log" || { echo "staging did not keep the operator secret private" >&2; exit 1; }
 grep -Fq 'sudo chown 10001:10001 /etc/bloc/operator.json' "$stage_log" || {
   echo "staging did not assign the operator secret to the frozen runtime identity" >&2
+  exit 1
+}
+grep -Fq 'run-final-remote-job.sh' "$stage_log" || {
+  echo "controller staging omitted the reconnectable remote-job helper" >&2
   exit 1
 }
 if task6_selected controller-output; then
@@ -156,7 +238,8 @@ if task6_selected measurement-failure; then
   FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
   measurement_attempts=0
   final_topology_key_for_host() { printf 'test-key.pem\n'; }
-  final_ssh() { measurement_attempts=$((measurement_attempts + 1)); return 1; }
+  final_ssh() { return 1; }
+  final_run_remote_job() { measurement_attempts=$((measurement_attempts + 1)); return 1; }
   if final_execute_measurement "$measurement_root"; then
     echo "measurement accepted failed evaluator SSH commands" >&2
     exit 1
@@ -165,7 +248,7 @@ if task6_selected measurement-failure; then
     echo "measurement continued after the first evaluator SSH failure" >&2
     exit 1
   }
-  unset -f final_topology_key_for_host final_ssh
+  unset -f final_topology_key_for_host final_ssh final_run_remote_job
 fi
 
 measurement_slots_root="$fixture/measurement-slots"
@@ -176,12 +259,13 @@ FINAL_EXPERIMENT_ID=measurement-slots FINAL_SEED=20260621 FINAL_DEADLINE=12s
 FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
-final_ssh() { printf '%s\n' "$3" >>"$measurement_commands"; }
+final_ssh() { echo "measurement used foreground SSH" >&2; return 1; }
+final_run_remote_job() { printf '%s\n' "$*" >>"$measurement_commands"; }
 
 FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_WARMUPS=1
 : >"$measurement_commands"
 final_execute_measurement "$measurement_slots_root"
-readiness_slots="$(sed -n "s/.*--first-slot '\([0-9][0-9]*\)'.*/\1/p" "$measurement_commands")"
+readiness_slots="$(sed -n "s/.*--first-slot \([0-9][0-9]*\).*/\1/p" "$measurement_commands")"
 [[ "$readiness_slots" == $'1\n5\n9' ]] || {
   echo "readiness measurement reused or skipped slots: ${readiness_slots:-missing --first-slot}" >&2
   exit 1
@@ -190,23 +274,24 @@ readiness_slots="$(sed -n "s/.*--first-slot '\([0-9][0-9]*\)'.*/\1/p" "$measurem
 FINAL_BLOCKS=10 FINAL_REPETITIONS=1000 FINAL_WARMUPS=10
 : >"$measurement_commands"
 final_execute_measurement "$measurement_slots_root"
-primary_slots="$(sed -n "s/.*--first-slot '\([0-9][0-9]*\)'.*/\1/p" "$measurement_commands")"
+primary_slots="$(sed -n "s/.*--first-slot \([0-9][0-9]*\).*/\1/p" "$measurement_commands")"
 expected_primary_slots=$'1\n111\n221\n331\n431\n531\n631\n731\n831\n931\n1031\n1131\n1231\n1331\n1431\n1531\n1631\n1731\n1831\n1931\n2031\n2131\n2231\n2331\n2431\n2531\n2631\n2731\n2831\n2931'
 [[ "$primary_slots" == "$expected_primary_slots" ]] || {
   echo "primary measurement slot ranges overlap or contain gaps: ${primary_slots:-missing --first-slot}" >&2
   exit 1
 }
-unset -f final_topology_key_for_host final_ssh
+unset -f final_topology_key_for_host final_ssh final_run_remote_job
 
 recovery_root="$fixture/recovery"
 mkdir -p "$recovery_root"
 printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$recovery_root/inventory.json"
 recovery_log="$recovery_root/recovery.log"
+recovery_rsync_log="$recovery_root/rsync.log"
 FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
 final_ssh() { printf '%s\n' "$3" >>"$recovery_log"; }
-rsync() { return 0; }
+rsync() { printf '%s\n' "$*" >>"$recovery_rsync_log"; return 0; }
 
 run_recovery() {
   local artifact_root="$1"
@@ -216,6 +301,7 @@ run_recovery "$recovery_root"
 grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery omitted BLOC_IMAGE" >&2; exit 1; }
 grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
+grep -Fq '/opt/bloc/ec2/jobs/' "$recovery_rsync_log" || { echo "recovery omitted controller job state" >&2; exit 1; }
 if task6_selected recovery-node-id; then
   grep -Fq "NODE_ID='0'" "$recovery_log" || { echo "recovery omitted operator NODE_ID" >&2; exit 1; }
 fi

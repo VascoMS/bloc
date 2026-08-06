@@ -123,6 +123,68 @@ final_scp() {
   return 1
 }
 
+final_shell_join() {
+  local joined= argument quoted
+  for argument in "$@"; do
+    printf -v quoted '%q' "$argument"
+    joined="${joined:+$joined }$quoted"
+  done
+  printf '%s\n' "$joined"
+}
+
+final_run_remote_job() {
+  local key="$1" host="$2" job_id="$3" job_command start_command status_command state exit_status
+  local start_attempt=1 poll_attempt=1
+  local max_polls="${FINAL_REMOTE_JOB_MAX_POLLS:-180}"
+  local poll_interval="${FINAL_REMOTE_JOB_POLL_INTERVAL:-10}"
+  shift 3
+  job_command="${FINAL_REMOTE_JOB_COMMAND:-/opt/bloc/ec2/run-final-remote-job.sh}"
+  [[ "$max_polls" =~ ^[1-9][0-9]*$ ]] || { echo "invalid remote job poll bound: $max_polls" >&2; return 1; }
+  start_command="$(final_shell_join "$job_command" start "$job_id" "$@")"
+  status_command="$(final_shell_join "$job_command" status "$job_id")"
+
+  while [[ "$start_attempt" -le 3 ]]; do
+    if final_ssh "$key" "$host" "$start_command" >/dev/null; then
+      break
+    fi
+    [[ "$start_attempt" -eq 3 ]] || sleep 2
+    start_attempt=$((start_attempt + 1))
+  done
+
+  while [[ "$poll_attempt" -le "$max_polls" ]]; do
+    if state="$(final_ssh "$key" "$host" "$status_command" 2>/dev/null)"; then
+      case "$state" in
+        EXIT:*)
+          exit_status="${state#EXIT:}"
+          [[ "$exit_status" =~ ^[0-9]+$ ]] || {
+            echo "remote job $job_id returned malformed status: $state" >&2
+            return 1
+          }
+          if [[ "$exit_status" -eq 0 ]]; then
+            return 0
+          fi
+          echo "remote job $job_id failed with exit status $exit_status" >&2
+          return 1
+          ;;
+        RUNNING)
+          ;;
+        MISSING|AMBIGUOUS|LOST)
+          echo "remote job $job_id entered fail-closed state $state" >&2
+          return 1
+          ;;
+        *)
+          echo "remote job $job_id returned unknown status: $state" >&2
+          return 1
+          ;;
+      esac
+    fi
+    [[ "$poll_attempt" -eq "$max_polls" ]] || sleep "$poll_interval"
+    poll_attempt=$((poll_attempt + 1))
+  done
+  echo "remote job $job_id status polling exhausted after $max_polls attempts" >&2
+  return 1
+}
+
 final_wait_host_ready() {
   local key="$1" host="$2" attempt=1
   while [[ "$attempt" -le 60 ]]; do
@@ -172,6 +234,8 @@ final_stage_hosts() {
   final_wait_host_ready "$controller_key" "$controller_host" || return 1
   final_ssh "$controller_key" "$controller_host" 'sudo mkdir -p /opt/bloc/ec2/results && sudo chown ubuntu:ubuntu /opt/bloc/ec2 && sudo chown 10001:10001 /opt/bloc/ec2/results' || return 1
   final_scp "$controller_key" "$artifact_root/generated-public/remote-eval.json" "$controller_host" /opt/bloc/ec2/remote-eval.json || return 1
+  final_scp "$controller_key" "$FINAL_REPO_ROOT/scripts/lib/final-remote-job.sh" "$controller_host" /opt/bloc/ec2/run-final-remote-job.sh || return 1
+  final_ssh "$controller_key" "$controller_host" 'chmod 700 /opt/bloc/ec2/run-final-remote-job.sh' || return 1
 }
 
 final_pull_one_image() {
@@ -238,7 +302,8 @@ final_sampler_stop() {
 }
 
 final_execute_measurement() {
-  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block next_slot
+  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block next_slot job_id
+  local -a evaluator_command
   controller="$(jq -c .controller "$artifact_root/inventory.json")"; host="$(jq -r .public_ip <<<"$controller")"
   key="$(final_topology_key_for_host "$controller")"; repetitions_per_block=$((FINAL_REPETITIONS / FINAL_BLOCKS))
   block=0; next_slot=1
@@ -247,7 +312,17 @@ final_execute_measurement() {
     IFS=',' read -r -a final_batches <<<"$order"
     for batch in "${final_batches[@]}"; do
       warmups=0; [[ "$block" -eq 0 ]] && warmups="$FINAL_WARMUPS"
-      final_ssh "$key" "$host" "docker run --rm -v /opt/bloc/ec2:/work -w /work '$FINAL_BLOC_IMAGE' eval-remote --config remote-eval.json --experiment-id '$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch' --first-slot '$next_slot' --batch-size '$batch' --warmups '$warmups' --repetitions '$repetitions_per_block' --repetition-blocks 1 --measurement-block '$((block+1))' --planned-scenario-runs '$FINAL_REPETITIONS' --seed '$FINAL_SEED' --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign --deadline '$FINAL_DEADLINE' --timeout '$FINAL_DEADLINE' --out-dir 'results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch' --image-tag '$FINAL_BLOC_IMAGE' --git-commit '$FINAL_SOURCE_SHA'" || return 1
+      job_id="$FINAL_EXPERIMENT_ID-block-$((block+1))-batch-$batch-slot-$next_slot"
+      evaluator_command=(docker run --rm -v /opt/bloc/ec2:/work -w /work "$FINAL_BLOC_IMAGE" eval-remote
+        --config remote-eval.json --experiment-id "$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch"
+        --first-slot "$next_slot" --batch-size "$batch" --warmups "$warmups"
+        --repetitions "$repetitions_per_block" --repetition-blocks 1 --measurement-block "$((block+1))"
+        --planned-scenario-runs "$FINAL_REPETITIONS" --seed "$FINAL_SEED"
+        --tx-source mock-encrypted-corpus --mempool-url http://mempool-il:8080 --final-campaign
+        --deadline "$FINAL_DEADLINE" --timeout "$FINAL_DEADLINE"
+        --out-dir "results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch"
+        --image-tag "$FINAL_BLOC_IMAGE" --git-commit "$FINAL_SOURCE_SHA")
+      final_run_remote_job "$key" "$host" "$job_id" "${evaluator_command[@]}" || return 1
       next_slot=$((next_slot + warmups + repetitions_per_block))
     done
     block=$((block + 1))
@@ -260,6 +335,10 @@ final_recover_artifacts() {
   host_json="$(jq -c .controller "$inventory")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
   mkdir -p "$artifact_root/scenarios/controller"
   rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/results/" "$artifact_root/scenarios/controller/" || return 1
+  if final_ssh "$key" "$host" 'test -d /opt/bloc/ec2/jobs'; then
+    mkdir -p "$artifact_root/controller-jobs"
+    rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/jobs/" "$artifact_root/controller-jobs/" || return 1
+  fi
   while IFS= read -r host_json; do
     id="$(jq -r .id <<<"$host_json")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
     mkdir -p "$artifact_root/logs/node-$id"

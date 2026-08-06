@@ -12,7 +12,8 @@ scripts=(
   deploy/ec2/run-final-campaign.sh deploy/ec2/run-same-az-campaign.sh
   deploy/ec2/run-three-region-campaign.sh scripts/lib/final-campaign-contract.sh
   scripts/lib/final-campaign-lifecycle.sh deploy/ec2/final-topology-same-az.sh
-  deploy/ec2/run-merge-plan-attribution.sh deploy/ec2/sample-container-resources.sh
+  scripts/lib/final-remote-job.sh deploy/ec2/run-merge-plan-attribution.sh
+  deploy/ec2/sample-container-resources.sh
 )
 for script in "${scripts[@]}"; do bash -n "$script"; done
 
@@ -21,6 +22,7 @@ PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/bloc-runner-pycache" python3 -m unittest sc
 grep -Fqx '!mempool-il/' .dockerignore || { echo "Docker build context excludes the mempool-il module" >&2; exit 1; }
 grep -Fqx '!mempool-il/**' .dockerignore || { echo "Docker build context excludes mempool-il source files" >&2; exit 1; }
 bash scripts/tests/test-final-campaign-contract.sh
+bash scripts/tests/test-final-remote-job.sh
 
 bash bloc-node/scripts/run-acs-safety-campaign.sh --validate-only
 grep -Fq '"sbc/hbbft/rbc.go":$r' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC implementation" >&2; exit 1; }

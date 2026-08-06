@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-05`
+- Last reviewed: `2026-08-06`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -220,10 +220,12 @@ release-candidate configuration contract are defined in
   recorded `stage=failed` after three instances took about 17 minutes to become
   ready. Both attempts destroyed all 18 resources and their temporary keys;
   independent authenticated cleanup validation passes and Terraform state is
-  empty. The shared lifecycle bounds and retries SSH, but `final_scp` performs
-  one transfer with no connection/server-alive options or retry. A third launch
-  is paused pending explicit approval for a bounded SCP-only tooling correction
-  and regression; source, images, corpus, schema, and protocol remain unchanged.
+  empty. The approved staging-helper correction now gives SCP the same bounded
+  connection/server-alive settings as SSH and retries each transfer at most
+  three times. Recovery and exhaustion regressions, the complete local campaign
+  runner suite, byte-identical frozen-worktree overlay, and n7 p3
+  `--validate-only` pass. The authorized n7 latency retry is ready to execute;
+  source, images, corpus, schema, schedule, and protocol remain unchanged.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -249,16 +251,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide whether to invalidate the frozen staging helper so SCP uses the same
-   bounded connection/server-alive settings as SSH and retries a transfer at
-   most three times, with red/green exhaustion and recovery regressions.
-2. If approved, overlay the exact tested helper onto the frozen worktree and
-   retry n7 latency only after validate-only and authenticated empty cleanup.
-3. After accepted n7 latency, collect the separate n4/n7 resource phases without
+1. Execute and validate `bloc-ec2-i15-sa-n7-latency-p3`, then require
+   authenticated empty cleanup before continuing.
+2. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
-4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
-5. Do not combine measurements from different source, image, corpus,
+4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
 6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file

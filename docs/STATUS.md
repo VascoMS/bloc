@@ -224,8 +224,23 @@ release-candidate configuration contract are defined in
   connection/server-alive settings as SSH and retries each transfer at most
   three times. Recovery and exhaustion regressions, the complete local campaign
   runner suite, byte-identical frozen-worktree overlay, and n7 p3
-  `--validate-only` pass. The authorized n7 latency retry is ready to execute;
-  source, images, corpus, schema, schedule, and protocol remain unchanged.
+  `--validate-only` passed. Authorized retry
+  `bloc-ec2-i15-sa-n7-latency-p3` then provisioned the expected 18 resources and
+  passed materialization, all seven corpus transfers, exact image verification,
+  startup, and health. Measurement stopped during block 2 when the foreground
+  controller SSH session timed out. The recovered controller artifact proves
+  the remote batch-128 command nevertheless completed all 100 measured rows
+  after terminal output stopped at row 71; block 1 is complete and block 2
+  retains complete batch-32/128 cells, for 500 measured rows total. A blind
+  command retry is unsafe because it can re-execute completed work against
+  terminalized slots. The phase is invalid and incomplete. Terraform destroyed
+  all 18 resources and the temporary key; independent cleanup validation passes,
+  Terraform state is empty, and no private key remains. Resource phases are
+  paused pending an explicit execution-tooling decision: retain the unchanged
+  foreground SSH design and relaunch from zero, or invalidate it in favor of a
+  uniquely identified remote job with reconnectable status polling that never
+  re-executes an ambiguous command. Source, images, corpus, schema, schedule, and
+  protocol remain unchanged.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -251,15 +266,16 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Execute and validate `bloc-ec2-i15-sa-n7-latency-p3`, then require
-   authenticated empty cleanup before continuing.
+1. Decide whether to relaunch n7 latency unchanged from zero or approve a
+   reconnectable, uniquely identified remote-evaluator job boundary with
+   red/green no-reexecution and exhaustion regressions.
 2. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
 3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
 4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-6. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

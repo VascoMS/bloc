@@ -110,8 +110,17 @@ final_ssh() {
 }
 
 final_scp() {
-  local key="$1" source="$2" host="$3" destination="$4"
-  scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$source" "ubuntu@$host:$destination"
+  local key="$1" source="$2" host="$3" destination="$4" attempt=1
+  while [[ "$attempt" -le 3 ]]; do
+    if scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+      "$source" "ubuntu@$host:$destination"; then
+      return 0
+    fi
+    [[ "$attempt" -eq 3 ]] || sleep 2
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 final_wait_host_ready() {

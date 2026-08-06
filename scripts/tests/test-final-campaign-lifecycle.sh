@@ -19,6 +19,44 @@ grep -Fq -- '-o ServerAliveInterval=10' "$ssh_log" || { echo "SSH lacks a server
 grep -Fq -- '-o ServerAliveCountMax=2' "$ssh_log" || { echo "SSH lacks a bounded server-alive count" >&2; exit 1; }
 unset -f ssh
 
+scp_log="$fixture/scp.log"
+scp_attempts=0
+scp_fail_until=2
+scp_sleeps=0
+scp() {
+  scp_attempts=$((scp_attempts + 1))
+  printf '%s\n' "$*" >>"$scp_log"
+  [[ "$scp_attempts" -gt "$scp_fail_until" ]]
+}
+sleep() { scp_sleeps=$((scp_sleeps + 1)); }
+
+if ! final_scp test-key.pem source.tar 192.0.2.10 /tmp/source.tar; then
+  echo "SCP did not recover on its third bounded attempt" >&2
+  exit 1
+fi
+[[ "$scp_attempts" -eq 3 && "$scp_sleeps" -eq 2 ]] || {
+  echo "SCP used an unexpected recovery retry schedule" >&2
+  exit 1
+}
+grep -Fq -- '-o ConnectTimeout=10' "$scp_log" || { echo "SCP lacks a connection timeout" >&2; exit 1; }
+grep -Fq -- '-o ConnectionAttempts=1' "$scp_log" || { echo "SCP permits unbounded connection retries" >&2; exit 1; }
+grep -Fq -- '-o ServerAliveInterval=10' "$scp_log" || { echo "SCP lacks a server-alive interval" >&2; exit 1; }
+grep -Fq -- '-o ServerAliveCountMax=2' "$scp_log" || { echo "SCP lacks a bounded server-alive count" >&2; exit 1; }
+
+: >"$scp_log"
+scp_attempts=0
+scp_fail_until=99
+scp_sleeps=0
+if final_scp test-key.pem source.tar 192.0.2.10 /tmp/source.tar; then
+  echo "SCP accepted a transfer that exhausted every attempt" >&2
+  exit 1
+fi
+[[ "$scp_attempts" -eq 3 && "$scp_sleeps" -eq 2 ]] || {
+  echo "SCP did not stop at the bounded attempt limit" >&2
+  exit 1
+}
+unset -f scp sleep
+
 empty_cleanup="$fixture/empty-cleanup.json"
 nonempty_cleanup="$fixture/nonempty-cleanup.json"
 printf '%s\n' '{"regions":{"us-east-1":{"query_succeeded":true,"instances":[],"volumes":[],"vpcs":[],"subnets":[],"security_groups":[],"route_tables":[],"key_pairs":[],"peering_connections":[]}},"iam":{"query_succeeded":true,"roles":[],"instance_profiles":[]},"terraform_state":[]}' >"$empty_cleanup"

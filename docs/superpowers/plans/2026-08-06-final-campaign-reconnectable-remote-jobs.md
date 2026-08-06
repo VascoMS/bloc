@@ -67,5 +67,5 @@
 - [x] Document reconnectable execution and the no-reexecution failure rule in the canonical runbook and validation contract.
 - [x] Overlay the helper/lifecycle byte-for-byte onto detached frozen source and prove matching SHA-256 values.
 - [x] Run exact n7 latency p4 `--validate-only` with the frozen bundle and digests.
-- [ ] Commit focused implementation/documentation changes, move issue #15 to In Progress, and post validation evidence.
-- [ ] Stop before AWS and report the exact live p4 command for separate authorization.
+- [x] Commit focused implementation/documentation changes, move issue #15 to In Progress, and post validation evidence.
+- [x] Stop before AWS and report the exact live p4 command for separate authorization.

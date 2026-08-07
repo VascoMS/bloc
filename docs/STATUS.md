@@ -249,9 +249,25 @@ release-candidate configuration contract are defined in
   `cf36eb` with SHA-256
   `247158b5b9cdf0d4b7bc78b2907fd5c530e02266e3b8cbf9963ca7e8f7c84082`
   and `0c2e8d943636a1b9d4856f9d8a75f839d99fec7e173461fd8133e47ad033ebcf`;
-  exact n7 latency p4 `--validate-only` passes. A separate live authorization
-  remains required. Source, images, corpus, schema, schedule, and protocol
-  remain unchanged.
+  exact n7 latency p4 `--validate-only` passes. Authorized live p4 then passed
+  provisioning, staging, exact image checks, startup, and health, and the
+  reconnectable helper retained 30 unique job identities without a duplicate
+  launch. The controller's unchanged 8 GiB root volume filled during the final
+  block-10 batch-128 job: 29 jobs exited zero, the final job retained 74 of 100
+  measured attempts, its `runs.jsonl` ends mid-JSON, and its atomic exit-status
+  file is empty. The phase is invalid with 2,974 complete measured records and
+  26 missing records; none are accepted or combined with n4. Recovery retained
+  about 4.7 GiB of evaluator output but an optional resource-directory `rsync`
+  ran despite the latency sampler being off and hung for more than nine hours;
+  terminating only that subprocess allowed automatic teardown to continue.
+  Terraform destroyed all 18 resources and deleted the key pair. Independent
+  authenticated cleanup validation passes, Terraform state is empty, and no
+  private key remains. Before a from-zero p5, the task requires an explicit
+  decision to increase controller-only storage and to bound or skip optional
+  resource recovery; source, images, corpus, schema, schedule, and protocol
+  remain unchanged. The lifecycle also reports successful destroy and cleanup
+  as failed after any earlier phase failure because its event labels use the
+  cumulative status; the independent cleanup artifact is authoritative for p4.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -277,15 +293,21 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live authorization, then execute and validate n7 latency p4
-   with authenticated empty cleanup before continuing.
-2. After accepted n7 latency, collect the separate n4/n7 resource phases without
+1. Decide whether to authorize the minimal p5 readiness correction: increase
+   controller-only root storage above 8 GiB, skip latency-phase resource
+   recovery and bound recovery transport, and correct per-stage lifecycle
+   labels without changing the frozen source, images, corpus, schema, schedule,
+   or protocol. Validate locally before requesting a new live launch.
+2. Execute n7 latency p5 from zero only after that correction and separate live
+   authorization, then require 3,000 measured records plus authenticated empty
+   cleanup before acceptance.
+3. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
-3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
-4. Do not combine measurements from different source, image, corpus,
+5. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

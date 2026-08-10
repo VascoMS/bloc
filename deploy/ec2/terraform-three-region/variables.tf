@@ -93,6 +93,16 @@ variable "controller_instance_type" {
   }
 }
 
+variable "controller_root_volume_size" {
+  type    = number
+  default = 16
+
+  validation {
+    condition     = var.controller_root_volume_size == 16
+    error_message = "The final campaign controller requires a 16 GiB root volume."
+  }
+}
+
 variable "cpu_credits" {
   type    = string
   default = "unlimited"

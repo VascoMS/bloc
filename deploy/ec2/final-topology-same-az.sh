@@ -25,6 +25,7 @@ final_same_az_prepare_files() {
     printf 'name_prefix = "%s"\n' "$FINAL_EXPERIMENT_ID"
     printf 'node_count = %s\n' "$node_count"
     printf 'operator_instance_type = "t3.small"\ncontroller_instance_type = "t3.small"\n'
+    printf 'controller_root_volume_size = 16\n'
     printf 'cpu_credits = "unlimited"\n'
     printf 'key_name = "%s"\nadmin_cidrs = ["%s"]\n' "$FINAL_SAME_AZ_KEY_NAME" "$FINAL_ADMIN_CIDR"
     printf 'ecr_repository_arns = ["%s", "%s"]\n' "$bloc_arn" "$mempool_arn"

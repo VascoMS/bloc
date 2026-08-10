@@ -437,6 +437,7 @@ resource "aws_instance" "controller" {
 
   credit_specification { cpu_credits = var.cpu_credits }
   root_block_device {
+    volume_size           = var.controller_root_volume_size
     encrypted             = true
     delete_on_termination = true
   }

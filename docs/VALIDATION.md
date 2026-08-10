@@ -507,7 +507,10 @@ Final n4/n7 manifests bind `bloc-cluster-v3`, `bte-tx-v2`, and the two
 per-cluster BMax-128 corpus artifacts to those identities. Latency collection
 and dedicated resource sampling are separate phases. The primary same-AZ
 control is `us-east-1a` on `t3.small`; n=10 and batch 512 remain a later
-30-observation extension pilot.
+30-observation extension pilot. Final-campaign controllers use a 16 GiB
+encrypted, delete-on-termination root volume; operator volumes retain the AMI
+default. This storage difference is outside the measured operator set and
+retains the complete evaluator evidence alongside controller container layers.
 
 The implemented workflow generates a network-independent BMax-128 identity,
 CRS, and private operator files for each node count, encrypts the committed
@@ -535,7 +538,10 @@ requests and 180 independent ten-second status polls. Losing a start response or
 poll connection cannot launch a duplicate command. Only durable `EXIT:0`
 advances the monotonic slot allocator. Missing, ambiguous, lost, nonzero, and
 exhausted states invalidate the phase, and retained job state/logs are recovered
-with the evaluator artifacts.
+with the evaluator artifacts. Recovery uses a 60-second rsync I/O timeout and
+bounded SSH transport. It requests operator resource directories only when the
+phase sampler is on. Recovery, destroy, and authenticated cleanup events retain
+their own status rather than inheriting an earlier measurement failure.
 
 The primary honest-path matrix is:
 

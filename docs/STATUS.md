@@ -268,6 +268,15 @@ release-candidate configuration contract are defined in
   remain unchanged. The lifecycle also reports successful destroy and cleanup
   as failed after any earlier phase failure because its event labels use the
   cumulative status; the independent cleanup artifact is authoritative for p4.
+  That decision is now approved and implemented on the task branch and frozen
+  overlay: both final topologies allocate a 16 GiB encrypted controller root
+  volume while operator volumes remain unchanged, recovery uses bounded rsync
+  and omits resource directories when the sampler is off, and post-measurement
+  lifecycle stages record independent outcomes. Regression-first lifecycle and
+  adapter tests, both direct Terraform validations, static Terraform contract,
+  29 artifact tests, race-gate contract, full runner portability, exact-overlay
+  hashes, and exact frozen n7 p5 same-AZ and three-region `--validate-only`
+  checks pass. P5 still requires separate live authorization.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -293,21 +302,16 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide whether to authorize the minimal p5 readiness correction: increase
-   controller-only root storage above 8 GiB, skip latency-phase resource
-   recovery and bound recovery transport, and correct per-stage lifecycle
-   labels without changing the frozen source, images, corpus, schema, schedule,
-   or protocol. Validate locally before requesting a new live launch.
-2. Execute n7 latency p5 from zero only after that correction and separate live
-   authorization, then require 3,000 measured records plus authenticated empty
-   cleanup before acceptance.
-3. After accepted n7 latency, collect the separate n4/n7 resource phases without
+1. Obtain separate live authorization, then execute n7 latency p5 from zero
+   under the validated controller-storage and recovery overlay. Require 3,000
+   measured records plus authenticated empty cleanup before acceptance.
+2. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
-4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
-5. Do not combine measurements from different source, image, corpus,
+4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-6. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

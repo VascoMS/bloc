@@ -33,6 +33,7 @@ final_three_region_prepare_files() {
     printf 'primary_availability_zone = "us-east-1a"\nsecondary_availability_zone = "eu-west-1a"\ntertiary_availability_zone = "eu-central-1a"\n'
     printf 'name_prefix = "%s"\nnode_count = %s\n' "$FINAL_EXPERIMENT_ID" "$node_count"
     printf 'operator_instance_type = "t3.small"\ncontroller_instance_type = "t3.small"\n'
+    printf 'controller_root_volume_size = 16\n'
     printf 'cpu_credits = "unlimited"\n'
     printf 'primary_key_name = "%s"\n' "$FINAL_THREE_REGION_PRIMARY_KEY_NAME"
     printf 'secondary_key_name = "%s"\n' "$FINAL_THREE_REGION_SECONDARY_KEY_NAME"

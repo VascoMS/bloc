@@ -67,15 +67,27 @@ final_run_campaign_lifecycle() {
     final_lifecycle_event "$artifact_root" measurement failed; status=1
   fi
   if [[ "$sampler_started" -eq 1 ]]; then
-    final_sampler_stop "$artifact_root" || status=1
-    final_lifecycle_event "$artifact_root" sampler-stop "$([[ "$status" -eq 0 ]] && echo ok || echo failed)"
+    if final_sampler_stop "$artifact_root"; then
+      final_lifecycle_event "$artifact_root" sampler-stop ok
+    else
+      final_lifecycle_event "$artifact_root" sampler-stop failed; status=1
+    fi
   fi
-  final_recover_artifacts "$artifact_root" || status=1
-  final_lifecycle_event "$artifact_root" recovery "$([[ "$status" -eq 0 ]] && echo ok || echo failed)"
-  final_topology_destroy "$artifact_root" || status=1
-  final_lifecycle_event "$artifact_root" destroy "$([[ "$status" -eq 0 ]] && echo ok || echo failed)"
-  final_topology_verify_absent "$artifact_root" || status=1
-  final_lifecycle_event "$artifact_root" cleanup-verification "$([[ "$status" -eq 0 ]] && echo ok || echo failed)"
+  if final_recover_artifacts "$artifact_root"; then
+    final_lifecycle_event "$artifact_root" recovery ok
+  else
+    final_lifecycle_event "$artifact_root" recovery failed; status=1
+  fi
+  if final_topology_destroy "$artifact_root"; then
+    final_lifecycle_event "$artifact_root" destroy ok
+  else
+    final_lifecycle_event "$artifact_root" destroy failed; status=1
+  fi
+  if final_topology_verify_absent "$artifact_root"; then
+    final_lifecycle_event "$artifact_root" cleanup-verification ok
+  else
+    final_lifecycle_event "$artifact_root" cleanup-verification failed; status=1
+  fi
   jq -n --arg status "$([[ "$status" -eq 0 ]] && echo complete || echo invalid)" \
     --arg phase "$FINAL_PHASE" --arg topology "$FINAL_TOPOLOGY" --argjson n "$FINAL_NODE_COUNT" \
     --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
@@ -121,6 +133,13 @@ final_scp() {
     attempt=$((attempt + 1))
   done
   return 1
+}
+
+final_rsync() {
+  local key="$1" source="$2" host="$3" destination="$4"
+  rsync -az --timeout=60 \
+    -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=10 -o ServerAliveCountMax=2" \
+    "ubuntu@$host:$source" "$destination"
 }
 
 final_shell_join() {
@@ -334,15 +353,17 @@ final_recover_artifacts() {
   [[ -f "$inventory" ]] || return 0
   host_json="$(jq -c .controller "$inventory")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
   mkdir -p "$artifact_root/scenarios/controller"
-  rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/results/" "$artifact_root/scenarios/controller/" || return 1
+  final_rsync "$key" /opt/bloc/ec2/results/ "$host" "$artifact_root/scenarios/controller/" || return 1
   if final_ssh "$key" "$host" 'test -d /opt/bloc/ec2/jobs'; then
     mkdir -p "$artifact_root/controller-jobs"
-    rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/jobs/" "$artifact_root/controller-jobs/" || return 1
+    final_rsync "$key" /opt/bloc/ec2/jobs/ "$host" "$artifact_root/controller-jobs/" || return 1
   fi
   while IFS= read -r host_json; do
     id="$(jq -r .id <<<"$host_json")"; host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
     mkdir -p "$artifact_root/logs/node-$id"
     final_ssh "$key" "$host" "cd /etc/bloc && NODE_ID='$id' BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml logs --no-color" >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
-    rsync -az -e "ssh -i $key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "ubuntu@$host:/opt/bloc/ec2/resources/" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || true
+    if [[ "$FINAL_SAMPLER" == on ]]; then
+      final_rsync "$key" /opt/bloc/ec2/resources/ "$host" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || true
+    fi
   done < <(jq -c '.nodes[]' "$inventory")
 }

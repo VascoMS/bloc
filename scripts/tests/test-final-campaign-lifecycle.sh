@@ -289,6 +289,7 @@ recovery_log="$recovery_root/recovery.log"
 recovery_rsync_log="$recovery_root/rsync.log"
 FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+FINAL_SAMPLER=off
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
 final_ssh() { printf '%s\n' "$3" >>"$recovery_log"; }
 rsync() { printf '%s\n' "$*" >>"$recovery_rsync_log"; return 0; }
@@ -302,9 +303,25 @@ grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery om
 grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
 grep -Fq '/opt/bloc/ec2/jobs/' "$recovery_rsync_log" || { echo "recovery omitted controller job state" >&2; exit 1; }
+grep -Fq -- '--timeout=60' "$recovery_rsync_log" || { echo "recovery rsync lacks a bounded I/O timeout" >&2; exit 1; }
+grep -Fq -- '-o ConnectTimeout=10' "$recovery_rsync_log" || { echo "recovery rsync SSH lacks a connection timeout" >&2; exit 1; }
+if grep -Fq '/opt/bloc/ec2/resources/' "$recovery_rsync_log"; then
+  echo "latency recovery requested resource-sampler output while the sampler was off" >&2
+  exit 1
+fi
 if task6_selected recovery-node-id; then
   grep -Fq "NODE_ID='0'" "$recovery_log" || { echo "recovery omitted operator NODE_ID" >&2; exit 1; }
 fi
+
+: >"$recovery_log"
+: >"$recovery_rsync_log"
+FINAL_SAMPLER=on
+run_recovery "$recovery_root"
+grep -Fq '/opt/bloc/ec2/resources/' "$recovery_rsync_log" || {
+  echo "resource recovery omitted sampler output while the sampler was on" >&2
+  exit 1
+}
+grep -Fq -- '--timeout=60' "$recovery_rsync_log" || { echo "resource recovery rsync lacks a bounded I/O timeout" >&2; exit 1; }
 unset -f final_topology_key_for_host final_ssh rsync run_recovery
 
 apt_log="$fixture/apt-get.log"
@@ -409,7 +426,7 @@ install_fakes() {
   final_sampler_start() { printf 'sampler-start\n' >>"$FINAL_EVENT_LOG"; }
   final_sampler_stop() { printf 'sampler-stop\n' >>"$FINAL_EVENT_LOG"; }
   final_execute_measurement() { printf 'measure\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != evaluator ]]; }
-  final_recover_artifacts() { printf 'recover\n' >>"$FINAL_EVENT_LOG"; }
+  final_recover_artifacts() { printf 'recover\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != recovery ]]; }
   python3() {
     case "$*" in
       *assert-final-phase*) printf 'validate-phase\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != validation ]] ;;
@@ -443,12 +460,21 @@ if task6_selected mandatory-validation; then
   grep -Fq sampler-start "$resource_root/events"
   grep -Fq sampler-stop "$resource_root/events"
 
-  for stage in checksum image health evaluator cleanup validation; do
+  for stage in checksum image health evaluator recovery cleanup validation; do
     failed_root="$(run_case "failure-$stage" latency off "$stage" 1)"
     grep -Fq recover "$failed_root/events"
     grep -Fq destroy "$failed_root/events"
     grep -Fq verify-absent "$failed_root/events"
   done
+
+  evaluator_lifecycle="$fixture/failure-evaluator/artifacts/lifecycle.jsonl"
+  jq -e 'select(.event == "measurement") | .status == "failed"' "$evaluator_lifecycle" >/dev/null
+  jq -e 'select(.event == "recovery") | .status == "ok"' "$evaluator_lifecycle" >/dev/null
+  jq -e 'select(.event == "destroy") | .status == "ok"' "$evaluator_lifecycle" >/dev/null
+  jq -e 'select(.event == "cleanup-verification") | .status == "ok"' "$evaluator_lifecycle" >/dev/null
+  recovery_lifecycle="$fixture/failure-recovery/artifacts/lifecycle.jsonl"
+  jq -e 'select(.event == "recovery") | .status == "failed"' "$recovery_lifecycle" >/dev/null
+  jq -e 'select(.event == "destroy") | .status == "ok"' "$recovery_lifecycle" >/dev/null
 
   checksum_root="$fixture/failure-checksum"
   ! grep -Fq start "$checksum_root/events"
@@ -482,6 +508,8 @@ if [[ "${1:-}" == same-az ]]; then
   grep -Fq 'availability_zone = "us-east-1a"' "$tfvars"
   grep -Fq 'operator_instance_type = "t3.small"' "$tfvars"
   grep -Fq 'controller_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'controller_root_volume_size = 16' "$tfvars"
+  grep -Fq 'volume_size           = var.controller_root_volume_size' "$adapter_root/generated-public/terraform/main.tf"
   grep -Fq 'cpu_credits = "unlimited"' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/bloc-node' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"
@@ -518,6 +546,8 @@ if [[ "${1:-}" == three-region ]]; then
   grep -Fq 'tertiary_availability_zone = "eu-central-1a"' "$tfvars"
   grep -Fq 'operator_instance_type = "t3.small"' "$tfvars"
   grep -Fq 'controller_instance_type = "t3.small"' "$tfvars"
+  grep -Fq 'controller_root_volume_size = 16' "$tfvars"
+  grep -Fq 'volume_size           = var.controller_root_volume_size' "$adapter_root/generated-public/terraform/main.tf"
   grep -Fq 'cpu_credits = "unlimited"' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/bloc-node' "$tfvars"
   grep -Fq 'arn:aws:ecr:us-east-1:123456789012:repository/mempool-il' "$tfvars"

@@ -70,6 +70,10 @@ Replace only `--validate-only` with `--execute-live` after separate authorizatio
 all `t3.small` hosts in `us-east-1a`; the three-region adapter keeps the
 controller in `us-east-1` and maps operator `id % 3` to `us-east-1`,
 `eu-west-1`, and `eu-central-1` through three peerings and six routes.
+Both final adapters give only the controller a 16 GiB encrypted root volume so
+the full retained n7 evidence set fits alongside the OS and container layers;
+operator root volumes retain the AMI default. Every root volume is deleted with
+its instance.
 
 Evaluator invocations do not remain attached to a long-lived SSH session. The
 runner stages `run-final-remote-job.sh` on the controller, atomically claims one
@@ -78,7 +82,12 @@ polls its durable status through short reconnectable SSH calls. A repeated start
 only observes the existing identity. Missing, ambiguous, lost, nonzero, or
 poll-exhausted jobs fail closed and are never automatically re-executed.
 Controller job commands, stdout, stderr, PID, and exit status are recovered
-alongside evaluator artifacts.
+alongside evaluator artifacts. Recovery transfers use a 60-second rsync I/O
+timeout plus the same bounded SSH connection/server-alive settings as ordinary
+control calls. Latency and readiness phases do not request resource-sampler
+directories because their sampler is off; resource phases recover them.
+Recovery, destroy, and cleanup-verification lifecycle events report their own
+outcomes even when an earlier measurement has already invalidated the phase.
 
 Both adapters use two pre-existing private ECR repositories in `us-east-1`.
 Instances receive repository-scoped pull access only. They pull and inspect the

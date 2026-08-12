@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-06`
+- Last reviewed: `2026-08-12`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -276,7 +276,24 @@ release-candidate configuration contract are defined in
   adapter tests, both direct Terraform validations, static Terraform contract,
   29 artifact tests, race-gate contract, full runner portability, exact-overlay
   hashes, and exact frozen n7 p5 same-AZ and three-region `--validate-only`
-  checks pass. P5 still requires separate live authorization.
+  checks pass. Authorized live p5 then provisioned the expected eight
+  `t3.small` instances in `us-east-1a` with 8 GiB encrypted operator volumes
+  and the corrected 16 GiB encrypted controller volume. Materialization and
+  staging passed, but the controller stopped answering SSH during its final
+  digest-pinned image pull and verification. It was reachable again during
+  recovery about one minute later. No service started and no measurement was
+  attempted, so `bloc-ec2-i15-sa-n7-latency-p5` is rejected rather than metric
+  evidence. Recovery, destroy, and authenticated cleanup all passed;
+  Terraform destroyed all 18 resources, its state is empty, the AWS and local
+  keys are absent, and the independent cleanup validator passes. The image
+  pull itself is currently a one-shot bounded SSH operation, and failures on
+  earlier operators can be masked by later loop iterations. A p6 launch is
+  blocked on an explicit decision to add at most three idempotent retries for
+  the same digest-pinned pull and to propagate every operator/controller pull
+  failure immediately. That tooling-only correction would retain the frozen
+  source, image digests, corpus, schema, schedule, configuration, and protocol
+  semantics, but it must not be applied to the frozen execution overlay without
+  approval.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -302,16 +319,20 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live authorization, then execute n7 latency p5 from zero
-   under the validated controller-storage and recovery overlay. Require 3,000
-   measured records plus authenticated empty cleanup before acceptance.
-2. After accepted n7 latency, collect the separate n4/n7 resource phases without
+1. Decide whether to authorize a bounded three-attempt digest-pull retry with
+   fail-fast propagation for every host. If approved, implement it with
+   transient-recovery, retry-exhaustion, and earlier-operator-failure
+   regressions, then repeat all no-AWS campaign validation against the frozen
+   execution overlay.
+2. Obtain separate live authorization for an n7 latency p6 from zero. Require
+   3,000 measured records plus authenticated empty cleanup before acceptance.
+3. After accepted n7 latency, collect the separate n4/n7 resource phases without
    admitting their latency rows into the p99 dataset.
-3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+4. Validate and accept issue #15 artifacts, then run issue `#16` using matched
    manifests and configurations.
-4. Do not combine measurements from different source, image, corpus,
+5. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

@@ -92,8 +92,11 @@ outcomes even when an earlier measurement has already invalidated the phase.
 Both adapters use two pre-existing private ECR repositories in `us-east-1`.
 Instances receive repository-scoped pull access only. They pull and inspect the
 exact digest and `linux/amd64` architecture before services start; the runner
-never builds, tags, pushes, or substitutes an image. Each operator receives the
-same encrypted corpus and only its own mode-0600 secret.
+never builds, tags, pushes, or substitutes an image. Each exact image operation
+receives at most three attempts over bounded SSH, and every attempt repeats the
+digest and architecture checks. Exhaustion on any operator or controller stops
+the phase before services start. Each operator receives the same encrypted
+corpus and only its own mode-0600 secret.
 
 The fixed phases are `readiness-pilot` (n4 only: 1 warmup, 3 attempts, sampler
 off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and

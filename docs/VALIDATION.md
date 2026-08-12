@@ -531,6 +531,13 @@ must cover instances, volumes, VPCs, subnets, security groups, route tables,
 key pairs, peering connections, IAM role/profile objects, and empty Terraform
 state in every topology region. Cleanup failure invalidates the phase.
 
+Each operator image and the controller evaluator image receive at most three
+pull attempts over the existing bounded SSH transport. Every attempt pulls the
+same full private-ECR digest reference and repeats the `linux/amd64` and
+`RepoDigests` checks. Exhausting any image operation fails immediately and
+prevents later hosts or service startup from masking the failure; retries never
+permit a tag, alternate registry, rebuild, or image substitution.
+
 Each evaluator block/batch invocation is a uniquely identified controller-local
 job whose directory is claimed atomically before launch. Long-lived evaluator
 execution is detached from SSH; the runner uses at most three idempotent start

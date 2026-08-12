@@ -57,6 +57,55 @@ fi
 }
 unset -f scp sleep
 
+if task6_selected image-pull-retry; then
+  image_pull_log="$fixture/image-pull.log"
+  image_pull_attempts=0
+  image_pull_fail_until=2
+  image_pull_sleeps=0
+  final_ssh() {
+    image_pull_attempts=$((image_pull_attempts + 1))
+    printf '%s\n' "$*" >>"$image_pull_log"
+    [[ "$image_pull_attempts" -gt "$image_pull_fail_until" ]]
+  }
+  sleep() { image_pull_sleeps=$((image_pull_sleeps + 1)); }
+  test_image='123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+  final_pull_one_image test-key.pem 192.0.2.10 "$test_image" || {
+    echo "image pull did not recover on its third bounded attempt" >&2
+    exit 1
+  }
+  [[ "$image_pull_attempts" -eq 3 && "$image_pull_sleeps" -eq 2 ]] || {
+    echo "image pull used an unexpected recovery retry schedule" >&2
+    exit 1
+  }
+  grep -Fq "docker pull '$test_image'" "$image_pull_log" || {
+    echo "image pull no longer uses the exact digest reference" >&2
+    exit 1
+  }
+  grep -Fq "Architecture}}')\" = amd64" "$image_pull_log" || {
+    echo "image pull no longer verifies amd64 architecture" >&2
+    exit 1
+  }
+  grep -Fq "grep -F '@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" "$image_pull_log" || {
+    echo "image pull no longer verifies the requested RepoDigest" >&2
+    exit 1
+  }
+
+  : >"$image_pull_log"
+  image_pull_attempts=0
+  image_pull_fail_until=99
+  image_pull_sleeps=0
+  if final_pull_one_image test-key.pem 192.0.2.10 "$test_image"; then
+    echo "image pull accepted an operation that exhausted every attempt" >&2
+    exit 1
+  fi
+  [[ "$image_pull_attempts" -eq 3 && "$image_pull_sleeps" -eq 2 ]] || {
+    echo "image pull did not stop at the bounded attempt limit" >&2
+    exit 1
+  }
+  unset -f final_ssh sleep
+fi
+
 remote_job_root="$fixture/remote-jobs"
 remote_job_count="$fixture/remote-job-count"
 remote_status_counter="$fixture/remote-status-counter"

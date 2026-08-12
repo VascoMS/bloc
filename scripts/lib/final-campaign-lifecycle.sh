@@ -258,10 +258,17 @@ final_stage_hosts() {
 }
 
 final_pull_one_image() {
-  local key="$1" host="$2" image="$3" region registry digest
+  local key="$1" host="$2" image="$3" region registry digest attempt=1
   region="$(sed -E 's#^[0-9]{12}\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com/.*#\1#' <<<"$image")"
   registry="${image%%/*}"; digest="${image##*@}"
-  final_ssh "$key" "$host" "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry' >/dev/null && docker pull '$image' >/dev/null && test \"\$(docker image inspect '$image' --format '{{.Architecture}}')\" = amd64 && docker image inspect '$image' --format '{{join .RepoDigests \"\\n\"}}' | grep -F '@$digest' >/dev/null"
+  while [[ "$attempt" -le 3 ]]; do
+    if final_ssh "$key" "$host" "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry' >/dev/null && docker pull '$image' >/dev/null && test \"\$(docker image inspect '$image' --format '{{.Architecture}}')\" = amd64 && docker image inspect '$image' --format '{{join .RepoDigests \"\\n\"}}' | grep -F '@$digest' >/dev/null"; then
+      return 0
+    fi
+    [[ "$attempt" -eq 3 ]] || sleep 2
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 final_pull_verify_images() {

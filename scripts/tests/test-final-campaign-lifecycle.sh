@@ -103,6 +103,27 @@ if task6_selected image-pull-retry; then
     echo "image pull did not stop at the bounded attempt limit" >&2
     exit 1
   }
+
+  image_inventory_root="$fixture/image-inventory"
+  mkdir -p "$image_inventory_root"
+  printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"},"nodes":[{"id":0,"public_ip":"192.0.2.10"},{"id":1,"public_ip":"192.0.2.11"}]}' >"$image_inventory_root/inventory.json"
+  FINAL_BLOC_IMAGE="$test_image"
+  FINAL_MEMPOOL_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  image_verify_calls=()
+  final_topology_key_for_host() { printf 'test-key.pem\n'; }
+  final_pull_one_image() {
+    image_verify_calls+=("$2|$3")
+    [[ "$2" != 192.0.2.10 || "$3" != "$FINAL_BLOC_IMAGE" ]]
+  }
+  if final_pull_verify_images "$image_inventory_root"; then
+    echo "image verification masked the first operator failure" >&2
+    exit 1
+  fi
+  [[ "${#image_verify_calls[@]}" -eq 1 ]] || {
+    echo "image verification continued after the first operator failure" >&2
+    exit 1
+  }
+  unset -f final_topology_key_for_host final_pull_one_image
   unset -f final_ssh sleep
 fi
 

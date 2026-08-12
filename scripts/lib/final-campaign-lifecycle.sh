@@ -275,11 +275,12 @@ final_pull_verify_images() {
   local artifact_root="$1" host_json host key
   while IFS= read -r host_json; do
     host="$(jq -r .public_ip <<<"$host_json")"; key="$(final_topology_key_for_host "$host_json")"
-    final_pull_one_image "$key" "$host" "$FINAL_BLOC_IMAGE"
-    final_pull_one_image "$key" "$host" "$FINAL_MEMPOOL_IMAGE"
+    final_pull_one_image "$key" "$host" "$FINAL_BLOC_IMAGE" || return 1
+    final_pull_one_image "$key" "$host" "$FINAL_MEMPOOL_IMAGE" || return 1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
   host_json="$(jq -c .controller "$artifact_root/inventory.json")"; host="$(jq -r .public_ip <<<"$host_json")"
-  key="$(final_topology_key_for_host "$host_json")"; final_pull_one_image "$key" "$host" "$FINAL_BLOC_IMAGE"
+  key="$(final_topology_key_for_host "$host_json")"
+  final_pull_one_image "$key" "$host" "$FINAL_BLOC_IMAGE" || return 1
 }
 
 final_start_services() {

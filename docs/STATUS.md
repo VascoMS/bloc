@@ -298,8 +298,24 @@ release-candidate configuration contract are defined in
   SHA-256 is
   `ac64399ec838e82ca70bfb183fa5e41026b758d9c1366e97ead3139fce8fb666`.
   Frozen source, image digests, corpus, schema, schedule, configuration, and
-  protocol semantics remain unchanged. A from-zero p6 remains separately
-  gated by live authorization rather than implied by this local correction.
+  protocol semantics remain unchanged. Authorized from-zero attempt
+  `bloc-ec2-i15-sa-n7-latency-p6` then completed the primary n7 same-AZ
+  latency phase in 3h10m06s. Each batch retained 1,000 measured attempts over
+  all 10 balanced blocks, and all 3,000 attempts were successful, consistent,
+  and within the 12-second completion boundary. Type-7 total-slot latency was
+  p50/p95/p99 143.081/156.662/301.749 ms for batch 8,
+  388.567/484.247/1,026.110 ms for batch 32, and
+  1,730.534/2,064.372/3,232.609 ms for batch 128. The manifest binds the run
+  to frozen source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, the exact
+  BLOC and mempool image digests above, encrypted corpus
+  `5506222c7dfba596817276ea1d919e976bbfe6c1cfeb5cda9d66c4066c8be528`,
+  seven `t3.small` operators in `us-east-1a`, seed `20260621`, 10 warmups,
+  1,000 measured attempts per batch, 10 blocks, and resource sampling off.
+  Final-phase and cleanup validators pass. Terraform destroyed all 18
+  resources and the temporary key; its state is empty, the local PEM is
+  absent, and direct authenticated EC2/IAM queries found no scoped residual
+  resources. The n7 latency artifact is accepted primary evidence. Separate
+  n4/n7 resource phases have not been launched and remain the next gated work.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -325,15 +341,15 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live authorization for an n7 latency p6 from zero. Require
-   3,000 measured records plus authenticated empty cleanup before acceptance.
-2. After accepted n7 latency, collect the separate n4/n7 resource phases without
+1. Obtain separate live authorization and collect the n4/n7 resource phases
+   without
    admitting their latency rows into the p99 dataset.
-3. Validate and accept issue #15 artifacts, then run issue `#16` using matched
+2. Validate and accept the complete issue #15 artifact set, then run issue
+   `#16` using matched
    manifests and configurations.
-4. Do not combine measurements from different source, image, corpus,
+3. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+4. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

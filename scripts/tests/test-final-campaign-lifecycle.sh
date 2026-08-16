@@ -127,6 +127,51 @@ if task6_selected image-pull-retry; then
   unset -f final_ssh sleep
 fi
 
+if task6_selected host-loop-fail-closed; then
+  host_loop_root="$fixture/host-loop-fail-closed"
+  mkdir -p "$host_loop_root"
+  printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10"},{"id":1,"public_ip":"192.0.2.11"},{"id":2,"public_ip":"192.0.2.12"}]}' >"$host_loop_root/inventory.json"
+  FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  FINAL_EXPERIMENT_ID=test-campaign
+  final_topology_key_for_host() { printf 'test-key.pem\n'; }
+  host_loop_calls=()
+  final_ssh() {
+    host_loop_calls+=("$2|$3")
+    [[ "$2" != 192.0.2.10 ]]
+  }
+
+  if final_start_services "$host_loop_root"; then
+    echo "service startup masked the first operator failure" >&2
+    exit 1
+  fi
+  [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
+    echo "service startup continued after the first operator failure" >&2
+    exit 1
+  }
+
+  host_loop_calls=()
+  if final_sampler_start "$host_loop_root"; then
+    echo "sampler startup masked the first operator failure" >&2
+    exit 1
+  fi
+  [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
+    echo "sampler startup continued after the first operator failure" >&2
+    exit 1
+  }
+
+  host_loop_calls=()
+  if final_sampler_stop "$host_loop_root"; then
+    echo "sampler shutdown masked the first operator failure" >&2
+    exit 1
+  fi
+  [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
+    echo "sampler shutdown continued after the first operator failure" >&2
+    exit 1
+  }
+  unset -f final_topology_key_for_host final_ssh
+fi
+
 remote_job_root="$fixture/remote-jobs"
 remote_job_count="$fixture/remote-job-count"
 remote_status_counter="$fixture/remote-status-counter"

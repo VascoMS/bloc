@@ -287,7 +287,7 @@ final_start_services() {
   local artifact_root="$1" node id host key
   while IFS= read -r node; do
     id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" "cd /etc/bloc && NODE_ID='$id' BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml up -d"
+    final_ssh "$key" "$host" "cd /etc/bloc && NODE_ID='$id' BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml up -d" || return 1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
 }
 
@@ -316,7 +316,7 @@ final_sampler_start() {
   local artifact_root="$1" node id host key
   while IFS= read -r node; do
     id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" "mkdir -p /opt/bloc/ec2/resources; rm -f /tmp/bloc-resource.stop; nohup /opt/bloc/ec2/sample-container-resources.sh run --container bloc-bloc-node-1 --output /opt/bloc/ec2/resources/node-$id.csv --stop-file /tmp/bloc-resource.stop --node '$id' --scenario '$FINAL_EXPERIMENT_ID' --phase resource-measured >/opt/bloc/ec2/resources/node-$id.log 2>&1 &"
+    final_ssh "$key" "$host" "mkdir -p /opt/bloc/ec2/resources; rm -f /tmp/bloc-resource.stop; nohup /opt/bloc/ec2/sample-container-resources.sh run --container bloc-bloc-node-1 --output /opt/bloc/ec2/resources/node-$id.csv --stop-file /tmp/bloc-resource.stop --node '$id' --scenario '$FINAL_EXPERIMENT_ID' --phase resource-measured >/opt/bloc/ec2/resources/node-$id.log 2>&1 &" || return 1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
 }
 
@@ -324,7 +324,7 @@ final_sampler_stop() {
   local artifact_root="$1" node host key
   while IFS= read -r node; do
     host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" 'touch /tmp/bloc-resource.stop'
+    final_ssh "$key" "$host" 'touch /tmp/bloc-resource.stop' || return 1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
 }
 

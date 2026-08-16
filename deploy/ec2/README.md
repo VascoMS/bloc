@@ -281,6 +281,11 @@ counters are separate from `bloc_protocol_message_bytes_total` protocol-message
 metrics. Historical M3 `resource-samples.csv` artifacts retain only the coarse
 running/restart/OOM stability gate and intentionally produce no host summary.
 
+Final-campaign operator loops fail on the first unsuccessful service-start or
+resource-sampler start/stop action; a later host cannot mask an earlier host
+failure. Measurement failure still proceeds through bounded recovery, teardown,
+and authenticated absence checks.
+
 ## EC2 Merge + Plan Attribution
 
 Use the attribution runner only after relevant protocol, chart, deployment, and

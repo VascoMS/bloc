@@ -538,6 +538,10 @@ same full private-ECR digest reference and repeats the `linux/amd64` and
 prevents later hosts or service startup from masking the failure; retries never
 permit a tag, alternate registry, rebuild, or image substitution.
 
+Operator service startup and resource-sampler start/stop are also fail-closed
+per host: the first failed remote action terminates that stage, and a later
+operator success cannot overwrite it.
+
 Each evaluator block/batch invocation is a uniquely identified controller-local
 job whose directory is claimed atomically before launch. Long-lived evaluator
 execution is detached from SSH; the runner uses at most three idempotent start

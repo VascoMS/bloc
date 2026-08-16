@@ -325,12 +325,29 @@ release-candidate configuration contract are defined in
   and deleted the temporary key. A transient credential rejection invalidated
   the wrapper's first cleanup-verification event, but a fresh authenticated
   check passes with empty instances, volumes, VPC/network objects, key pairs,
-  IAM role/profile objects, and Terraform state. Before a from-zero n4 p2, the
-  task requires an explicit decision to make service startup and resource
-  sampler start/stop fail immediately on any host error, with regressions and
-  an exact frozen-tooling overlay. Source, images, corpus, configuration,
-  schedule, schema, and protocol semantics remain unchanged. N7 resource
-  collection has not launched.
+  IAM role/profile objects, and Terraform state. The approved fail-closed
+  correction now propagates every per-host service-start and sampler
+  start/stop failure immediately. Its focused regression, complete lifecycle,
+  contract, Terraform, runner-portability, 29 artifact, and full node/BTE/
+  mempool race suites pass; task and frozen lifecycle helpers are byte-identical
+  at SHA-256
+  `0ae2371303f027bd226d273c337870d42a9b1490170ac78d780a50fa70026296`,
+  and exact n4/n7 resource `--validate-only` passes. Authorized from-zero n4
+  resource attempt `bloc-ec2-i15-sa-n4-resource-p2` then cleared every
+  provisioning, staging, image, service, health, and sampler gate. It was
+  rejected during block 2, batch 128 after the reconnectable supervisor
+  reported the cell `LOST`. Recovered durable evidence proves the cell instead
+  completed normally: `exit.status` is `0`, stdout contains all 100 successful
+  attempts for slots 401--500, and stderr is empty. The status helper has a
+  check-then-act race: `exit.status` can appear after its initial file test but
+  before its dead-PID test, causing a false `LOST` without rechecking the now
+  durable status. Measurement stopped fail-closed, sampler stop and recovery
+  passed, Terraform destroyed all 15 resources and deleted the key, and fresh
+  authenticated cleanup is fully empty. Resolving issue #15 now requires an
+  explicit decision to invalidate only frozen campaign supervision tooling so
+  the dead-PID path rechecks `exit.status`, with a deterministic regression and
+  unchanged protocol/source/image/corpus/configuration/schedule/schema. N7
+  resource collection has not launched.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -356,10 +373,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide the fail-closed per-host service/sampler tooling correction, validate
-   and overlay it exactly, then rerun n4 resource from zero. Proceed to n7 only
-   after n4 artifact and authenticated cleanup acceptance; do not admit resource
-   phase latency rows into the p99 dataset.
+1. Decide the reconnectable-job exit-publication recheck, validate and overlay
+   only that campaign-supervisor correction, then rerun n4 resource from zero.
+   Proceed to n7 only after n4 artifact and authenticated cleanup acceptance;
+   do not admit resource-phase latency rows into the p99 dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

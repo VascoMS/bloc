@@ -315,7 +315,22 @@ release-candidate configuration contract are defined in
   resources and the temporary key; its state is empty, the local PEM is
   absent, and direct authenticated EC2/IAM queries found no scoped residual
   resources. The n7 latency artifact is accepted primary evidence. Separate
-  n4/n7 resource phases have not been launched and remain the next gated work.
+  n4/n7 resource phases remained the next gated work. Authorized n4 resource
+  attempt `bloc-ec2-i15-sa-n4-resource-p1` then passed provisioning, staging,
+  and exact image verification but was rejected before measurement. Operator
+  1's service-start SSH call timed out; the per-host startup loop did not
+  propagate that failure, so later host success masked it. Node 0 consequently
+  remained at HTTP 503 while retrying the absent libp2p peer. No resource
+  sampler or evaluator measurement ran. Terraform destroyed all 15 resources
+  and deleted the temporary key. A transient credential rejection invalidated
+  the wrapper's first cleanup-verification event, but a fresh authenticated
+  check passes with empty instances, volumes, VPC/network objects, key pairs,
+  IAM role/profile objects, and Terraform state. Before a from-zero n4 p2, the
+  task requires an explicit decision to make service startup and resource
+  sampler start/stop fail immediately on any host error, with regressions and
+  an exact frozen-tooling overlay. Source, images, corpus, configuration,
+  schedule, schema, and protocol semantics remain unchanged. N7 resource
+  collection has not launched.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -341,9 +356,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live authorization and collect the n4/n7 resource phases
-   without
-   admitting their latency rows into the p99 dataset.
+1. Decide the fail-closed per-host service/sampler tooling correction, validate
+   and overlay it exactly, then rerun n4 resource from zero. Proceed to n7 only
+   after n4 artifact and authenticated cleanup acceptance; do not admit resource
+   phase latency rows into the p99 dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

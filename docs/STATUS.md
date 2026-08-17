@@ -343,11 +343,17 @@ release-candidate configuration contract are defined in
   before its dead-PID test, causing a false `LOST` without rechecking the now
   durable status. Measurement stopped fail-closed, sampler stop and recovery
   passed, Terraform destroyed all 15 resources and deleted the key, and fresh
-  authenticated cleanup is fully empty. Resolving issue #15 now requires an
-  explicit decision to invalidate only frozen campaign supervision tooling so
-  the dead-PID path rechecks `exit.status`, with a deterministic regression and
-  unchanged protocol/source/image/corpus/configuration/schedule/schema. N7
-  resource collection has not launched.
+  authenticated cleanup is fully empty. The approved supervision correction
+  now rechecks `exit.status` after a failed PID liveness test before declaring
+  `LOST`. Its deterministic regression failed against the old helper with the
+  exact false-`LOST` result and passes after the four-line correction. The
+  focused helper, complete lifecycle, contract, Terraform, runner-portability,
+  29 artifact, race-gate-contract, and Bash syntax suites pass; task and frozen
+  helpers are byte-identical at SHA-256
+  `a0bfb2e28e04bed69c2a7394b3be16440f89c35051146efa1899d20869949cac`.
+  Frozen protocol/source/image/corpus/configuration/schedule/schema remain
+  unchanged. N4 must restart from zero as p3; n7 resource collection has not
+  launched.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -373,10 +379,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide the reconnectable-job exit-publication recheck, validate and overlay
-   only that campaign-supervisor correction, then rerun n4 resource from zero.
-   Proceed to n7 only after n4 artifact and authenticated cleanup acceptance;
-   do not admit resource-phase latency rows into the p99 dataset.
+1. Validate the exact n4/n7 resource contracts with the corrected frozen
+   supervisor, then rerun n4 resource from zero as p3. Proceed to n7 only after
+   n4 artifact and authenticated cleanup acceptance; do not admit
+   resource-phase latency rows into the p99 dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

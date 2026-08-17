@@ -81,6 +81,8 @@ job identity per block/batch/first-slot tuple, starts that job at most once, and
 polls its durable status through short reconnectable SSH calls. A repeated start
 only observes the existing identity. Missing, ambiguous, lost, nonzero, or
 poll-exhausted jobs fail closed and are never automatically re-executed.
+When PID liveness fails after the initial exit-file check, status rechecks the
+atomically published exit file before declaring the job lost.
 Controller job commands, stdout, stderr, PID, and exit status are recovered
 alongside evaluator artifacts. Recovery transfers use a 60-second rsync I/O
 timeout plus the same bounded SSH connection/server-alive settings as ordinary

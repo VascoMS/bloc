@@ -547,12 +547,14 @@ job whose directory is claimed atomically before launch. Long-lived evaluator
 execution is detached from SSH; the runner uses at most three idempotent start
 requests and 180 independent ten-second status polls. Losing a start response or
 poll connection cannot launch a duplicate command. Only durable `EXIT:0`
-advances the monotonic slot allocator. Missing, ambiguous, lost, nonzero, and
-exhausted states invalidate the phase, and retained job state/logs are recovered
-with the evaluator artifacts. Recovery uses a 60-second rsync I/O timeout and
-bounded SSH transport. It requests operator resource directories only when the
-phase sampler is on. Recovery, destroy, and authenticated cleanup events retain
-their own status rather than inheriting an earlier measurement failure.
+advances the monotonic slot allocator. If PID liveness fails after the initial
+exit-file check, the helper rechecks the atomically published `exit.status`
+before reporting `LOST`. Missing, ambiguous, lost, nonzero, and exhausted states
+invalidate the phase, and retained job state/logs are recovered with the
+evaluator artifacts. Recovery uses a 60-second rsync I/O timeout and bounded SSH
+transport. It requests operator resource directories only when the phase
+sampler is on. Recovery, destroy, and authenticated cleanup events retain their
+own status rather than inheriting an earlier measurement failure.
 
 The primary honest-path matrix is:
 

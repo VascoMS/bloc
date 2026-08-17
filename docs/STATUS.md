@@ -352,8 +352,21 @@ release-candidate configuration contract are defined in
   helpers are byte-identical at SHA-256
   `a0bfb2e28e04bed69c2a7394b3be16440f89c35051146efa1899d20869949cac`.
   Frozen protocol/source/image/corpus/configuration/schedule/schema remain
-  unchanged. N4 must restart from zero as p3; n7 resource collection has not
-  launched.
+  unchanged. Authorized n4 resource p3 then completed all 3,000 evaluator
+  attempts with 30/30 controller jobs exiting zero, but is rejected as resource
+  evidence. Every recovered operator sampler log contains only the required-
+  argument error because `final_sampler_start` omits the node's `--region`; no
+  resource CSV exists. The lifecycle recorded sampler start/stop as successful
+  because it checks only asynchronous SSH launch/touch completion, resource
+  recovery suppresses missing-file failures, and `assert-final-phase` checks
+  the sampler manifest flag without invoking resource coverage/cadence/counter/
+  restart/OOM validation. The retained p3 manifest is reclassified `invalid`.
+  Terraform destroyed all 15 resources and the key, and authenticated cleanup
+  plus state are empty. A safe retry requires an explicit frozen-tooling
+  invalidation covering per-node region and configuration labels, bounded
+  sampler startup/minimum-row/shutdown gates, mandatory resource recovery, and
+  final resource evidence validation/summary generation. N7 resource collection
+  has not launched.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -379,10 +392,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Validate the exact n4/n7 resource contracts with the corrected frozen
-   supervisor, then rerun n4 resource from zero as p3. Proceed to n7 only after
-   n4 artifact and authenticated cleanup acceptance; do not admit
-   resource-phase latency rows into the p99 dataset.
+1. Decide the fail-closed resource-sampler lifecycle and artifact-validation
+   correction, validate and overlay only that tooling, then rerun n4 resource
+   from zero. Proceed to n7 only after n4 resource evidence and authenticated
+   cleanup acceptance; do not admit resource-phase latency rows into the p99
+   dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

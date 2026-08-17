@@ -61,6 +61,10 @@ case "$action" in
       pid="$(cat "$job_dir/pid")"
       if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
         echo RUNNING
+      elif [[ -f "$job_dir/exit.status" ]]; then
+        status="$(cat "$job_dir/exit.status")"
+        [[ "$status" =~ ^[0-9]+$ ]] || { echo AMBIGUOUS; exit 0; }
+        echo "EXIT:$status"
       else
         echo LOST
       fi

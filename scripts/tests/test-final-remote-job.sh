@@ -57,6 +57,27 @@ printf '%s\n' 99999999 >"$job_root/job-lost/pid"
   exit 1
 }
 
+mkdir -p "$job_root/job-exit-publication-race"
+printf '%s\n' 99999998 >"$job_root/job-exit-publication-race/pid"
+race_exit_status="$job_root/job-exit-publication-race/exit.status"
+race_env="$fixture/race-env.sh"
+cat >"$race_env" <<'EOF'
+kill() {
+  printf '0\n' >"$BLOC_REMOTE_JOB_RACE_EXIT_STATUS"
+  return 1
+}
+EOF
+race_status="$(
+  BASH_ENV="$race_env" \
+    BLOC_REMOTE_JOB_RACE_EXIT_STATUS="$race_exit_status" \
+    BLOC_REMOTE_JOB_ROOT="$job_root" \
+    bash "$helper" status job-exit-publication-race
+)"
+[[ "$race_status" == EXIT:0 ]] || {
+  echo "a status published during the liveness check was reported $race_status, want EXIT:0" >&2
+  exit 1
+}
+
 if BLOC_REMOTE_JOB_ROOT="$job_root" bash "$helper" start '../escape' true 2>/dev/null; then
   echo "remote job helper accepted an unsafe identity" >&2
   exit 1

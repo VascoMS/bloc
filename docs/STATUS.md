@@ -391,7 +391,11 @@ release-candidate configuration contract are defined in
   further retry requires an explicit decision either to replace per-sample
   Docker network reads with a non-blocking container-network counter source and
   add failure diagnostics, preserving 250 ms evidence, or to relax the accepted
-  cadence contract.
+  cadence contract. The user has deferred that decision and all further
+  resource collection; issue #15 remains open for the paused resource scope,
+  while its accepted n4/n7 same-AZ latency evidence is the matched control for
+  issue #16. The active execution priority is now the frozen n4/n7 three-region
+  latency campaign only. Economic analysis remains deferred with issue #20.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -417,19 +421,21 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide the sampler invalidation exposed by rejected n4 resource p4. Prefer
-   preserving the 250 ms contract by replacing the blocking per-sample Docker
-   network read with a validated non-blocking counter source and adding precise
-   sampler failure diagnostics; validate and overlay only that tooling before a
-   from-zero n4 retry. Proceed to n7 only after n4 resource evidence and
-   authenticated cleanup acceptance; do not admit resource-phase latency rows
-   into the p99 dataset.
-2. Validate and accept the complete issue #15 artifact set, then run issue
-   `#16` using matched
-   manifests and configurations.
-3. Do not combine measurements from different source, image, corpus,
+1. Start issue #16 from the issue #15 campaign-tooling baseline and refresh the
+   exact frozen n4/n7 three-region latency `--validate-only` contracts. Keep
+   source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, both image digests,
+   cluster-specific corpora, batches `8/32/128`, 10 warmups, 1,000 measured
+   attempts per cell, 10 balanced blocks, seed `20260621`, and the 12-second
+   completion boundary unchanged.
+2. After separate live-run authorization, collect and validate three-region n4
+   latency, require authenticated cleanup, then repeat for n7. Do not start a
+   resource phase, extension pilot, or economic-analysis task.
+3. Leave issue #15 open and paused for resource collection. Do not admit any
+   resource-phase latency rows or rejected campaign attempts into the p99
+   dataset.
+4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-4. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

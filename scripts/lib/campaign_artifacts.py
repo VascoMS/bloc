@@ -51,6 +51,8 @@ RESOURCE_SUMMARY_FIELDS = [
 RESOURCE_SAMPLE_INTERVAL_SECONDS = 0.25
 RESOURCE_SAMPLE_INTERVAL_TOLERANCE_SECONDS = 0.10
 RESOURCE_MINIMUM_SAMPLES = 4
+FINAL_RESOURCE_BATCHES = (8, 32, 128)
+FINAL_RESOURCE_BLOCKS = 10
 
 
 def write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: list[str] | None = None) -> None:
@@ -169,6 +171,127 @@ def resource_evidence_summary(
             "network_transmit_delta_bytes": sum(int(row["network_transmit_delta_bytes"]) for row in values),
         })
     return node_summaries + cluster_summaries
+
+
+def aggregate_final_resource_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate validated per-block node summaries into per-batch evidence."""
+    node_groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row["scope"] != "node":
+            continue
+        match = re.fullmatch(r"(n[47]-b(?:8|32|128))-block-(?:[1-9]|10)", str(row["scenario"]))
+        if not match:
+            raise ValueError(f"invalid final resource scenario {row['scenario']!r}")
+        node_groups[(str(row["node"]), str(row["region"]), match.group(1), str(row["phase"]))].append(row)
+
+    node_rows: list[dict[str, Any]] = []
+    for (node, region, scenario, phase), values in sorted(node_groups.items()):
+        node_rows.append({
+            "scope": "node", "node": node, "region": region, "scenario": scenario, "phase": phase,
+            "samples": sum(int(row["samples"]) for row in values),
+            "first_timestamp": min(str(row["first_timestamp"]) for row in values),
+            "last_timestamp": max(str(row["last_timestamp"]) for row in values),
+            "cpu_usage_delta_us": sum(int(row["cpu_usage_delta_us"]) for row in values),
+            "memory_current_max_bytes": max(int(row["memory_current_max_bytes"]) for row in values),
+            "memory_peak_bytes": max(int(row["memory_peak_bytes"]) for row in values),
+            "network_receive_delta_bytes": sum(int(row["network_receive_delta_bytes"]) for row in values),
+            "network_transmit_delta_bytes": sum(int(row["network_transmit_delta_bytes"]) for row in values),
+        })
+
+    cluster_rows: list[dict[str, Any]] = []
+    for scenario, phase in sorted({(row["scenario"], row["phase"]) for row in node_rows}):
+        values = [row for row in node_rows if row["scenario"] == scenario and row["phase"] == phase]
+        cluster_rows.append({
+            "scope": "cluster", "node": "all", "region": "cluster", "scenario": scenario, "phase": phase,
+            "samples": sum(int(row["samples"]) for row in values),
+            "first_timestamp": min(str(row["first_timestamp"]) for row in values),
+            "last_timestamp": max(str(row["last_timestamp"]) for row in values),
+            "cpu_usage_delta_us": sum(int(row["cpu_usage_delta_us"]) for row in values),
+            "memory_current_max_bytes": sum(int(row["memory_current_max_bytes"]) for row in values),
+            "memory_peak_bytes": sum(int(row["memory_peak_bytes"]) for row in values),
+            "network_receive_delta_bytes": sum(int(row["network_receive_delta_bytes"]) for row in values),
+            "network_transmit_delta_bytes": sum(int(row["network_transmit_delta_bytes"]) for row in values),
+        })
+    return node_rows + cluster_rows
+
+
+def _final_resource_segments(phase_root: Path) -> tuple[list[dict[str, str]], set[tuple[str, str]]]:
+    inventory = json.loads((phase_root / "inventory.json").read_text(encoding="utf-8-sig"))
+    placement = {str(node["id"]): str(node["region"]) for node in inventory.get("nodes", [])}
+    if set(placement) not in ({str(node) for node in range(4)}, {str(node) for node in range(7)}):
+        raise ValueError(f"{phase_root}: final resource placement is invalid")
+
+    expected_paths: dict[Path, tuple[str, str, str]] = {}
+    expected_configurations: set[tuple[str, str]] = set()
+    for node, region in placement.items():
+        for block in range(1, FINAL_RESOURCE_BLOCKS + 1):
+            for batch in FINAL_RESOURCE_BATCHES:
+                scenario = f"n{len(placement)}-b{batch}-block-{block}"
+                path = phase_root / f"logs/node-{node}/resources/node-{node}-block-{block}-batch-{batch}.csv"
+                expected_paths[path] = (node, region, scenario)
+                expected_configurations.add((scenario, "resource-measured"))
+    actual_paths = set(phase_root.glob("logs/node-*/resources/*.csv"))
+    if actual_paths != set(expected_paths):
+        missing = sorted(str(path.relative_to(phase_root)) for path in set(expected_paths) - actual_paths)
+        extra = sorted(str(path.relative_to(phase_root)) for path in actual_paths - set(expected_paths))
+        raise ValueError(f"{phase_root}: resource segment set is incomplete or unexpected; missing={missing}, extra={extra}")
+
+    merged: list[dict[str, str]] = []
+    for path, (node, region, scenario) in sorted(expected_paths.items(), key=lambda item: str(item[0])):
+        log_path = path.with_suffix(".log")
+        if not log_path.is_file():
+            raise ValueError(f"{phase_root}: resource segment log is missing: {log_path.relative_to(phase_root)}")
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if (reader.fieldnames or []) != RESOURCE_TIMESERIES_FIELDS:
+                raise ValueError(f"{path}: invalid resource_timeseries.csv columns")
+            rows = list(reader)
+        if any(
+            row["node"] != node or row["region"] != region or row["scenario"] != scenario
+            or row["phase"] != "resource-measured"
+            for row in rows
+        ):
+            raise ValueError(f"{path}: resource segment metadata mismatch")
+        merged.extend(rows)
+    return merged, expected_configurations
+
+
+def finalize_final_resource_artifacts(phase_root: Path) -> None:
+    merged, expected_configurations = _final_resource_segments(phase_root)
+    expected_nodes = {str(node["id"]) for node in json.loads(
+        (phase_root / "inventory.json").read_text(encoding="utf-8-sig")
+    )["nodes"]}
+    write_csv(phase_root / "resource_timeseries.csv", merged, RESOURCE_TIMESERIES_FIELDS)
+    segment_summaries = resource_evidence_summary(
+        phase_root / "resource_timeseries.csv", expected_nodes, expected_configurations
+    )
+    write_csv(phase_root / "resource-segment-summary.csv", segment_summaries, RESOURCE_SUMMARY_FIELDS)
+    write_csv(
+        phase_root / "resource-summary.csv",
+        aggregate_final_resource_summaries(segment_summaries),
+        RESOURCE_SUMMARY_FIELDS,
+    )
+
+
+def _summary_as_strings(rows: Iterable[dict[str, Any]]) -> list[dict[str, str]]:
+    return [{field: str(row[field]) for field in RESOURCE_SUMMARY_FIELDS} for row in rows]
+
+
+def assert_final_resource_artifacts(phase_root: Path) -> None:
+    merged, expected_configurations = _final_resource_segments(phase_root)
+    inventory = json.loads((phase_root / "inventory.json").read_text(encoding="utf-8-sig"))
+    expected_nodes = {str(node["id"]) for node in inventory["nodes"]}
+    timeseries_path = phase_root / "resource_timeseries.csv"
+    if read_csv(timeseries_path) != merged:
+        raise ValueError(f"{timeseries_path}: merged resource segments do not match recovered evidence")
+    segment_summaries = resource_evidence_summary(timeseries_path, expected_nodes, expected_configurations)
+    segment_path = phase_root / "resource-segment-summary.csv"
+    if read_csv(segment_path) != _summary_as_strings(segment_summaries):
+        raise ValueError(f"{segment_path}: resource segment summary does not match recovered evidence")
+    summary_path = phase_root / "resource-summary.csv"
+    expected_summary = aggregate_final_resource_summaries(segment_summaries)
+    if read_csv(summary_path) != _summary_as_strings(expected_summary):
+        raise ValueError(f"{summary_path}: resource summary does not match recovered evidence")
 
 
 def parse_expected(values: list[str]) -> dict[tuple[str, str], int]:
@@ -618,6 +741,8 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
                 raise ValueError(f"batch {batch}: failed row was not retained with a classification")
             if row.get("outcome") == "timed_out" and not _true(row.get("timed_out", "")):
                 raise ValueError(f"batch {batch}: timeout classification is inconsistent")
+    if expected_phase == "resource":
+        assert_final_resource_artifacts(phase_root)
 
 
 def assert_final_cleanup(path: Path, expected_regions: list[str]) -> None:
@@ -691,6 +816,8 @@ def command_main() -> int:
     final_phase.add_argument("--phase-root", required=True, type=Path)
     final_phase.add_argument("--expected-topology", required=True)
     final_phase.add_argument("--expected-phase", required=True)
+    final_resources = sub.add_parser("finalize-final-resources")
+    final_resources.add_argument("--phase-root", required=True, type=Path)
     final_cleanup = sub.add_parser("assert-final-cleanup")
     final_cleanup.add_argument("--cleanup", required=True, type=Path)
     final_cleanup.add_argument("--region", action="append", required=True)
@@ -735,6 +862,8 @@ def command_main() -> int:
         )
     elif args.command == "assert-final-phase":
         assert_final_phase(args.phase_root, args.expected_topology, args.expected_phase)
+    elif args.command == "finalize-final-resources":
+        finalize_final_resource_artifacts(args.phase_root)
     elif args.command == "assert-final-cleanup":
         assert_final_cleanup(args.cleanup, args.region)
     return 0

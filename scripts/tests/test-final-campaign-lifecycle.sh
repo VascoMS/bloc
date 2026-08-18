@@ -130,10 +130,11 @@ fi
 if task6_selected host-loop-fail-closed; then
   host_loop_root="$fixture/host-loop-fail-closed"
   mkdir -p "$host_loop_root"
-  printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10"},{"id":1,"public_ip":"192.0.2.11"},{"id":2,"public_ip":"192.0.2.12"}]}' >"$host_loop_root/inventory.json"
+  printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10","region":"us-east-1"},{"id":1,"public_ip":"192.0.2.11","region":"us-east-1"},{"id":2,"public_ip":"192.0.2.12","region":"us-east-1"}]}' >"$host_loop_root/inventory.json"
   FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
   FINAL_EXPERIMENT_ID=test-campaign
+  FINAL_NODE_COUNT=3
   final_topology_key_for_host() { printf 'test-key.pem\n'; }
   host_loop_calls=()
   final_ssh() {
@@ -151,22 +152,84 @@ if task6_selected host-loop-fail-closed; then
   }
 
   host_loop_calls=()
-  if final_sampler_start "$host_loop_root"; then
+  if final_sampler_start "$host_loop_root" 1 8; then
     echo "sampler startup masked the first operator failure" >&2
     exit 1
   fi
-  [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
-    echo "sampler startup continued after the first operator failure" >&2
+  [[ "$(printf '%s\n' "${host_loop_calls[@]}" | grep -c 'nohup .*sample-container-resources.sh')" -eq 1 ]] || {
+    echo "sampler startup launched another operator after the first failure" >&2
+    exit 1
+  }
+  [[ "$(printf '%s\n' "${host_loop_calls[@]}" | grep -c 'touch .*bloc-resource')" -eq 3 ]] || {
+    echo "sampler startup failure did not stop every potentially launched operator" >&2
     exit 1
   }
 
   host_loop_calls=()
-  if final_sampler_stop "$host_loop_root"; then
+  if final_sampler_stop "$host_loop_root" 1 8; then
     echo "sampler shutdown masked the first operator failure" >&2
     exit 1
   fi
-  [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
-    echo "sampler shutdown continued after the first operator failure" >&2
+  [[ "${#host_loop_calls[@]}" -eq 3 ]] || {
+    echo "sampler shutdown did not attempt every operator after a failure" >&2
+    exit 1
+  }
+  unset -f final_topology_key_for_host final_ssh
+fi
+
+if task6_selected resource-sampler-cell; then
+  sampler_cell_root="$fixture/resource-sampler-cell"
+  mkdir -p "$sampler_cell_root"
+  printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10","region":"us-east-1"},{"id":1,"public_ip":"192.0.2.11","region":"us-east-1"}]}' >"$sampler_cell_root/inventory.json"
+  FINAL_EXPERIMENT_ID=test-campaign FINAL_NODE_COUNT=2
+  final_topology_key_for_host() { printf 'test-key.pem\n'; }
+  sampler_cell_log="$sampler_cell_root/ssh.log"
+  final_ssh() { printf '%s|%s\n' "$2" "$3" >>"$sampler_cell_log"; }
+
+  final_sampler_start "$sampler_cell_root" 2 32 || {
+    echo "per-cell sampler did not pass its live/minimum-row startup gate" >&2
+    exit 1
+  }
+  grep -Fq -- "--region 'us-east-1'" "$sampler_cell_log" || {
+    echo "per-cell sampler omitted the operator region" >&2
+    exit 1
+  }
+  grep -Fq -- "--scenario 'n2-b32-block-2'" "$sampler_cell_log" || {
+    echo "per-cell sampler omitted the n/batch/block scenario identity" >&2
+    exit 1
+  }
+  grep -Fq '/opt/bloc/ec2/resources/node-0-block-2-batch-32.csv' "$sampler_cell_log" || {
+    echo "per-cell sampler output is not uniquely segmented" >&2
+    exit 1
+  }
+  grep -Fq 'kill -0' "$sampler_cell_log" || {
+    echo "per-cell sampler startup does not require a live PID" >&2
+    exit 1
+  }
+  grep -Fq 'wc -l' "$sampler_cell_log" || {
+    echo "per-cell sampler startup does not require minimum rows" >&2
+    exit 1
+  }
+
+  : >"$sampler_cell_log"
+  final_sampler_stop "$sampler_cell_root" 2 32 || {
+    echo "per-cell sampler did not stop cleanly with valid output" >&2
+    exit 1
+  }
+  grep -Fq "touch '/tmp/bloc-resource-node-0-block-2-batch-32.stop'" "$sampler_cell_log" || {
+    echo "per-cell sampler shutdown omitted its unique stop file" >&2
+    exit 1
+  }
+  grep -Fq 'kill -0' "$sampler_cell_log" || {
+    echo "per-cell sampler shutdown does not wait for process exit" >&2
+    exit 1
+  }
+  grep -Fq 'wc -l' "$sampler_cell_log" || {
+    echo "per-cell sampler shutdown does not validate retained rows" >&2
+    exit 1
+  }
+  grep -Fq 'timestamp,sample_index,node,region,scenario,phase,cpu_usage_us,memory_current_bytes,memory_peak_bytes,network_receive_bytes,network_transmit_bytes,restart_count,oom_killed' "$sampler_cell_log" || {
+    echo "per-cell sampler shutdown does not validate the CSV schema" >&2
     exit 1
   }
   unset -f final_topology_key_for_host final_ssh
@@ -373,6 +436,7 @@ measurement_commands="$measurement_slots_root/commands.log"
 FINAL_EXPERIMENT_ID=measurement-slots FINAL_SEED=20260621 FINAL_DEADLINE=12s
 FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
+FINAL_SAMPLER=off
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
 final_ssh() { echo "measurement used foreground SSH" >&2; return 1; }
 final_run_remote_job() { printf '%s\n' "$*" >>"$measurement_commands"; }
@@ -395,7 +459,27 @@ expected_primary_slots=$'1\n111\n221\n331\n431\n531\n631\n731\n831\n931\n1031\n1
   echo "primary measurement slot ranges overlap or contain gaps: ${primary_slots:-missing --first-slot}" >&2
   exit 1
 }
+
+resource_measurement_log="$measurement_slots_root/resource-events.log"
+: >"$resource_measurement_log"
+FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_WARMUPS=0 FINAL_SAMPLER=on
+final_sampler_start() { printf 'start|%s|%s\n' "$2" "$3" >>"$resource_measurement_log"; }
+final_sampler_stop() { printf 'stop|%s|%s\n' "$2" "$3" >>"$resource_measurement_log"; }
+final_run_remote_job() {
+  local batch=''
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == --batch-size ]]; then batch="$2"; break; fi
+    shift
+  done
+  printf 'measure|%s\n' "$batch" >>"$resource_measurement_log"
+}
+final_execute_measurement "$measurement_slots_root"
+[[ "$(cat "$resource_measurement_log")" == $'start|1|8\nmeasure|8\nstop|1|8\nstart|1|32\nmeasure|32\nstop|1|32\nstart|1|128\nmeasure|128\nstop|1|128' ]] || {
+  echo "resource measurement did not isolate the sampler to each balanced block/batch cell" >&2
+  exit 1
+}
 unset -f final_topology_key_for_host final_ssh final_run_remote_job
+unset -f final_sampler_start final_sampler_stop
 
 recovery_root="$fixture/recovery"
 mkdir -p "$recovery_root"
@@ -437,6 +521,15 @@ grep -Fq '/opt/bloc/ec2/resources/' "$recovery_rsync_log" || {
   exit 1
 }
 grep -Fq -- '--timeout=60' "$recovery_rsync_log" || { echo "resource recovery rsync lacks a bounded I/O timeout" >&2; exit 1; }
+
+rsync() {
+  printf '%s\n' "$*" >>"$recovery_rsync_log"
+  [[ "$*" != *'/opt/bloc/ec2/resources/'* ]]
+}
+if run_recovery "$recovery_root"; then
+  echo "resource recovery accepted missing sampler evidence" >&2
+  exit 1
+fi
 unset -f final_topology_key_for_host final_ssh rsync run_recovery
 
 apt_log="$fixture/apt-get.log"
@@ -544,6 +637,7 @@ install_fakes() {
   final_recover_artifacts() { printf 'recover\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != recovery ]]; }
   python3() {
     case "$*" in
+      *finalize-final-resources*) printf 'finalize-resources\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != resource-artifacts ]] ;;
       *assert-final-phase*) printf 'validate-phase\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != validation ]] ;;
       *assert-final-cleanup*) printf 'validate-cleanup\n' >>"$FINAL_EVENT_LOG" ;;
       *) command python3 "$@" ;;
@@ -572,8 +666,7 @@ if task6_selected mandatory-validation; then
   ! grep -q sampler "$success_root/events"
 
   resource_root="$(run_case resource resource on '' 0)"
-  grep -Fq sampler-start "$resource_root/events"
-  grep -Fq sampler-stop "$resource_root/events"
+  grep -Fq finalize-resources "$resource_root/events"
 
   for stage in checksum image health evaluator recovery cleanup validation; do
     failed_root="$(run_case "failure-$stage" latency off "$stage" 1)"

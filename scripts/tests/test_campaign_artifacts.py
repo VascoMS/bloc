@@ -391,7 +391,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             "source_sha": source, "bloc_image": bloc, "mempool_image": mempool,
             "bundle_version": "bloc-campaign-bundle-v1", "public_config_id": "public",
             "encrypted_corpus_id": "corpus", "batches": [8, 32, 128], "seed": 20260621,
-            "deadline": "12s", "warmups": 1 if phase == "readiness-pilot" else 10,
+            "deadline": "12s", "warmups": 1 if phase == "readiness-pilot" else (0 if phase == "resource" else 10),
             "repetitions": attempts, "blocks": blocks,
             "sampler": "on" if phase == "resource" else "off",
         })
@@ -415,6 +415,26 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                                          "selected_ciphertexts": str(batch)})
         return root
 
+    def add_resource_segments(self, root):
+        for node in range(4):
+            for block in range(1, 11):
+                for batch in (8, 32, 128):
+                    rows = []
+                    for index in range(4):
+                        rows.append({
+                            "timestamp": f"2026-08-18T00:00:00.{index * 250:03d}Z",
+                            "sample_index": str(index), "node": str(node), "region": "us-east-1",
+                            "scenario": f"n4-b{batch}-block-{block}", "phase": "resource-measured",
+                            "cpu_usage_us": str(1000 + index * 10),
+                            "memory_current_bytes": str(100 + index), "memory_peak_bytes": "200",
+                            "network_receive_bytes": str(2000 + index * 20),
+                            "network_transmit_bytes": str(3000 + index * 30),
+                            "restart_count": "0", "oom_killed": "false",
+                        })
+                    path = root / f"logs/node-{node}/resources/node-{node}-block-{block}-batch-{batch}.csv"
+                    artifacts.write_csv(path, rows, artifacts.RESOURCE_TIMESERIES_FIELDS)
+                    path.with_suffix(".log").write_text("", encoding="utf-8")
+
     def test_final_phase_accepts_complete_pilot_and_retained_failure(self):
         root = self.make_phase()
         rows = artifacts.read_csv(next(root.glob("scenarios/**/run_measurements.csv")))
@@ -436,6 +456,43 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         artifacts.write_csv(path, rows)
         with self.assertRaisesRegex(ValueError, "retained attempts"):
             artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_resource_phase_merges_exact_segments_and_generates_summaries(self):
+        root = self.make_phase("resource", attempts=1000)
+        self.add_resource_segments(root)
+
+        artifacts.finalize_final_resource_artifacts(root)
+        artifacts.assert_final_phase(root, "same-az", "resource")
+
+        self.assertEqual(len(artifacts.read_csv(root / "resource_timeseries.csv")), 4 * 10 * 3 * 4)
+        self.assertEqual(len(artifacts.read_csv(root / "resource-segment-summary.csv")), 4 * 10 * 3 + 10 * 3)
+        self.assertEqual(len(artifacts.read_csv(root / "resource-summary.csv")), 4 * 3 + 3)
+        scenarios = {row["scenario"] for row in artifacts.read_csv(root / "resource-summary.csv")}
+        self.assertEqual(scenarios, {"n4-b8", "n4-b32", "n4-b128"})
+
+    def test_final_resource_phase_rejects_missing_segment_before_acceptance(self):
+        root = self.make_phase("resource", attempts=1000)
+        self.add_resource_segments(root)
+        (root / "logs/node-3/resources/node-3-block-10-batch-128.csv").unlink()
+
+        with self.assertRaisesRegex(ValueError, "resource segment set"):
+            artifacts.finalize_final_resource_artifacts(root)
+
+    def test_final_resource_phase_rejects_wrong_operator_region(self):
+        root = self.make_phase("resource", attempts=1000)
+        self.add_resource_segments(root)
+        path = root / "logs/node-2/resources/node-2-block-4-batch-32.csv"
+        rows = artifacts.read_csv(path)
+        rows[0]["region"] = "eu-west-1"
+        artifacts.write_csv(path, rows, artifacts.RESOURCE_TIMESERIES_FIELDS)
+
+        with self.assertRaisesRegex(ValueError, "metadata mismatch"):
+            artifacts.finalize_final_resource_artifacts(root)
+
+    def test_final_resource_phase_does_not_accept_manifest_only(self):
+        root = self.make_phase("resource", attempts=1000)
+        with self.assertRaisesRegex((OSError, ValueError), "resource"):
+            artifacts.assert_final_phase(root, "same-az", "resource")
 
     def test_final_phase_rejects_identity_count_and_phase_mutations(self):
         for field, value, message in (

@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-12`
+- Last reviewed: `2026-08-18`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -365,8 +365,18 @@ release-candidate configuration contract are defined in
   plus state are empty. A safe retry requires an explicit frozen-tooling
   invalidation covering per-node region and configuration labels, bounded
   sampler startup/minimum-row/shutdown gates, mandatory resource recovery, and
-  final resource evidence validation/summary generation. N7 resource collection
-  has not launched.
+  final resource evidence validation/summary generation. That approved tooling
+  correction is now implemented and overlaid without changing frozen protocol,
+  source, images, corpus, configuration, evaluator schema, or schedule. Each block/batch
+  cell has a region-bound sampler segment; startup requires a live PID, exact
+  header, and four rows; shutdown is bounded and attempts every node; recovery
+  requires every operator directory; acceptance requires the exact 30-cell
+  coverage per node and regenerates segment and per-batch summaries while
+  checking cadence, counters, restart, and OOM state. The focused regressions,
+  33 artifact tests, lifecycle/contract/remote-job/race-gate/Terraform/runner
+  suites, both direct Terraform validations, task/frozen helper equality, and
+  exact n4 p4/n7 p1 resource `--validate-only` contracts pass. N7 resource
+  collection has not launched.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -392,11 +402,9 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Decide the fail-closed resource-sampler lifecycle and artifact-validation
-   correction, validate and overlay only that tooling, then rerun n4 resource
-   from zero. Proceed to n7 only after n4 resource evidence and authenticated
-   cleanup acceptance; do not admit resource-phase latency rows into the p99
-   dataset.
+1. Run n4 resource p4 from zero with the approved correction. Proceed to n7
+   resource p1 only after n4 resource evidence and authenticated cleanup
+   acceptance; do not admit resource-phase latency rows into the p99 dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

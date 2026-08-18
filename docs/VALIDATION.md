@@ -24,12 +24,15 @@ quantile, maximum, throughput, scaling, topology, resource, or local-versus-VM
 claims. Final RQ1/RQ2 performance evidence is VM-only.
 
 Resource evidence is collected only in dedicated `resource-measured` phases,
-never while primary latency/p99 observations run. Acceptance requires 250 ms
-host-local raw samples for every node/configuration, contiguous sample indexes,
-monotonic CPU/network counters, no restart/OOM signal, and separate per-node and
-cluster summaries. Cluster memory fields are sums of per-node maxima/peaks, not
-temporally synchronized readings. Container network bytes must not be presented
-as protocol message bytes. Accepted historical M3 `resource-samples.csv`
+never while primary latency/p99 observations run. Each balanced block/batch cell
+has a separately started and stopped node-local segment labeled by node region,
+`n`, batch, and block. Acceptance requires the exact node/block/batch segment
+set, the canonical CSV header, at least four 250 ms samples per segment,
+contiguous sample indexes, matching inventory metadata, monotonic CPU/network
+counters, no restart/OOM signal, and generated per-segment plus
+per-batch/node/cluster summaries. Cluster memory fields are sums of per-node
+maxima/peaks, not temporally synchronized readings. Container network bytes must
+not be presented as protocol message bytes. Accepted historical M3 `resource-samples.csv`
 artifacts retain their original running/restart/OOM stability gate but are coarse
 evidence and must not yield a host-resource summary.
 
@@ -538,9 +541,14 @@ same full private-ECR digest reference and repeats the `linux/amd64` and
 prevents later hosts or service startup from masking the failure; retries never
 permit a tag, alternate registry, rebuild, or image substitution.
 
-Operator service startup and resource-sampler start/stop are also fail-closed
-per host: the first failed remote action terminates that stage, and a later
-operator success cannot overwrite it.
+Operator service startup and resource-sampler startup are fail-closed per host:
+the first failed remote action prevents measurement and a later operator success
+cannot overwrite it. Each resource block/batch cell requires a live sampler PID,
+canonical header, and four samples before its evaluator job. Shutdown attempts
+every operator, waits for process exit, and validates the segment before the next
+cell. Resource recovery is mandatory; final-phase acceptance recomputes coverage,
+cadence, monotonic counters, restart/OOM state, and summaries from the recovered
+segments.
 
 Each evaluator block/batch invocation is a uniquely identified controller-local
 job whose directory is claimed atomically before launch. Long-lived evaluator

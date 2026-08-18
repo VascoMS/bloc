@@ -270,23 +270,32 @@ runbook's pilot/continuation decision and with generated `BMax` large enough.
 Same-region and three-region runners execute a separate `resource-measured`
 evaluation pass after the primary latency phase. Each operator samples its own
 container every 250 ms with cgroup-v2 CPU/memory counters and Docker fallback;
-the sampler records neither credentials nor process configuration. The raw
-`resource_timeseries.csv` retains timestamp, sample index, node/region,
-scenario/phase, CPU microseconds, memory current/peak, network receive/transmit
-bytes, restart count, and OOM state. `resource-summary.csv` reports per-node
-configuration and cluster totals. Cluster memory fields are sums of per-node
-maxima/peaks, not temporally synchronized cluster readings. A sampler must stay
-live and write at least four data rows before its stop file is created; a single
-sampling iteration permits at most four two-second Docker calls, while the
-runner allows a bounded ten-second shutdown window. Host/container network
+the sampler records neither credentials nor process configuration. A separate
+sampler process and CSV segment wraps each balanced block/batch evaluator job,
+with `n`, batch, and block bound into its scenario label. Startup requires the
+operator region, a live PID, the exact CSV header, and at least four data rows;
+shutdown creates only that segment's stop file, waits at most ten seconds for
+process exit, and rechecks the header and retained row count. A single sampling
+iteration permits at most four two-second Docker calls.
+
+Resource-directory recovery is mandatory for every operator. The finalizer
+requires the exact node/block/batch segment set and matching metadata before it
+writes merged `resource_timeseries.csv`, per-segment
+`resource-segment-summary.csv`, and per-batch/node/cluster
+`resource-summary.csv`. The raw series retains timestamp, sample index,
+node/region, scenario/phase, CPU microseconds, memory current/peak, network
+receive/transmit bytes, restart count, and OOM state. Cluster memory fields are
+sums of per-node maxima/peaks, not temporally synchronized cluster readings.
+Host/container network
 counters are separate from `bloc_protocol_message_bytes_total` protocol-message
 metrics. Historical M3 `resource-samples.csv` artifacts retain only the coarse
 running/restart/OOM stability gate and intentionally produce no host summary.
 
-Final-campaign operator loops fail on the first unsuccessful service-start or
-resource-sampler start/stop action; a later host cannot mask an earlier host
-failure. Measurement failure still proceeds through bounded recovery, teardown,
-and authenticated absence checks.
+Final-campaign operator service-start and sampler-start loops fail closed; a
+later host cannot mask an earlier failure. Sampler shutdown attempts every
+operator so one failed stop cannot leave later samplers running, while retaining
+the aggregate failure. Measurement failure still proceeds through bounded
+recovery, teardown, and authenticated absence checks.
 
 ## EC2 Merge + Plan Attribution
 

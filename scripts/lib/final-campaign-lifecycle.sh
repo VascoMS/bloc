@@ -10,7 +10,7 @@ final_assert_cleanup_empty() {
 }
 
 final_run_campaign_lifecycle() {
-  local artifact_root="$1" status=0 sampler_started=0 old_ifs region
+  local artifact_root="$1" status=0 old_ifs region
   local cleanup_args=()
   [[ ! -e "$artifact_root" ]] || { echo "artifact root already exists: $artifact_root" >&2; return 1; }
   mkdir -p "$artifact_root/generated-public" "$artifact_root/scenarios" "$artifact_root/logs"
@@ -53,30 +53,22 @@ final_run_campaign_lifecycle() {
   elif [[ "$status" -eq 0 ]]; then
     final_lifecycle_event "$artifact_root" health failed; status=1
   fi
-  if [[ "$status" -eq 0 && "$FINAL_SAMPLER" == on ]]; then
-    if final_sampler_start "$artifact_root"; then
-      sampler_started=1
-      final_lifecycle_event "$artifact_root" sampler-start ok
-    else
-      final_lifecycle_event "$artifact_root" sampler-start failed; status=1
-    fi
-  fi
   if [[ "$status" -eq 0 ]] && final_execute_measurement "$artifact_root"; then
     final_lifecycle_event "$artifact_root" measurement ok
   elif [[ "$status" -eq 0 ]]; then
     final_lifecycle_event "$artifact_root" measurement failed; status=1
   fi
-  if [[ "$sampler_started" -eq 1 ]]; then
-    if final_sampler_stop "$artifact_root"; then
-      final_lifecycle_event "$artifact_root" sampler-stop ok
-    else
-      final_lifecycle_event "$artifact_root" sampler-stop failed; status=1
-    fi
-  fi
   if final_recover_artifacts "$artifact_root"; then
     final_lifecycle_event "$artifact_root" recovery ok
   else
     final_lifecycle_event "$artifact_root" recovery failed; status=1
+  fi
+  if [[ "$status" -eq 0 && "$FINAL_SAMPLER" == on ]]; then
+    if python3 "$FINAL_REPO_ROOT/scripts/lib/campaign_artifacts.py" finalize-final-resources --phase-root "$artifact_root"; then
+      final_lifecycle_event "$artifact_root" resource-artifacts ok
+    else
+      final_lifecycle_event "$artifact_root" resource-artifacts failed; status=1
+    fi
   fi
   if final_topology_destroy "$artifact_root"; then
     final_lifecycle_event "$artifact_root" destroy ok
@@ -313,23 +305,49 @@ final_wait_node_healthy() {
 }
 
 final_sampler_start() {
-  local artifact_root="$1" node id host key
+  local artifact_root="$1" block="$2" batch="$3" node id host key region scenario output log pid_file stop_file
+  local minimum_resource_rows=4 sampler_start_timeout_seconds=60
+  local resource_header='timestamp,sample_index,node,region,scenario,phase,cpu_usage_us,memory_current_bytes,memory_peak_bytes,network_receive_bytes,network_transmit_bytes,restart_count,oom_killed'
+  scenario="n${FINAL_NODE_COUNT}-b${batch}-block-${block}"
+  while IFS= read -r node; do
+    id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; region="$(jq -r .region <<<"$node")"
+    key="$(final_topology_key_for_host "$node")"
+    output="/opt/bloc/ec2/resources/node-$id-block-$block-batch-$batch.csv"
+    log="/opt/bloc/ec2/resources/node-$id-block-$block-batch-$batch.log"
+    pid_file="/tmp/bloc-resource-node-$id-block-$block-batch-$batch.pid"
+    stop_file="/tmp/bloc-resource-node-$id-block-$block-batch-$batch.stop"
+    if ! final_ssh "$key" "$host" "mkdir -p /opt/bloc/ec2/resources; rm -f '$stop_file' '$output' '$log' '$pid_file'; nohup /opt/bloc/ec2/sample-container-resources.sh run --container bloc-bloc-node-1 --output '$output' --stop-file '$stop_file' --node '$id' --region '$region' --scenario '$scenario' --phase resource-measured >'$log' 2>&1 & echo \$! >'$pid_file'"; then
+      final_sampler_stop "$artifact_root" "$block" "$batch" >/dev/null 2>&1 || true
+      return 1
+    fi
+  done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
   while IFS= read -r node; do
     id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" "mkdir -p /opt/bloc/ec2/resources; rm -f /tmp/bloc-resource.stop; nohup /opt/bloc/ec2/sample-container-resources.sh run --container bloc-bloc-node-1 --output /opt/bloc/ec2/resources/node-$id.csv --stop-file /tmp/bloc-resource.stop --node '$id' --scenario '$FINAL_EXPERIMENT_ID' --phase resource-measured >/opt/bloc/ec2/resources/node-$id.log 2>&1 &" || return 1
+    output="/opt/bloc/ec2/resources/node-$id-block-$block-batch-$batch.csv"
+    pid_file="/tmp/bloc-resource-node-$id-block-$block-batch-$batch.pid"
+    if ! final_ssh "$key" "$host" "attempt=0; while [ \$attempt -lt $sampler_start_timeout_seconds ]; do test -s '$pid_file' || exit 1; pid=\$(cat '$pid_file'); kill -0 \"\$pid\" 2>/dev/null || exit 1; rows=0; test -f '$output' && rows=\$(wc -l <'$output'); header=\$(head -n 1 '$output' 2>/dev/null || true); [ \"\$rows\" -ge $((minimum_resource_rows + 1)) ] && [ \"\$header\" = '$resource_header' ] && exit 0; sleep 1; attempt=\$((attempt + 1)); done; exit 1"; then
+      final_sampler_stop "$artifact_root" "$block" "$batch" >/dev/null 2>&1 || true
+      return 1
+    fi
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
 }
 
 final_sampler_stop() {
-  local artifact_root="$1" node host key
+  local artifact_root="$1" block="$2" batch="$3" node id host key output pid_file stop_file status=0
+  local minimum_resource_rows=4 sampler_stop_timeout_seconds=10
+  local resource_header='timestamp,sample_index,node,region,scenario,phase,cpu_usage_us,memory_current_bytes,memory_peak_bytes,network_receive_bytes,network_transmit_bytes,restart_count,oom_killed'
   while IFS= read -r node; do
-    host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
-    final_ssh "$key" "$host" 'touch /tmp/bloc-resource.stop' || return 1
+    id="$(jq -r .id <<<"$node")"; host="$(jq -r .public_ip <<<"$node")"; key="$(final_topology_key_for_host "$node")"
+    output="/opt/bloc/ec2/resources/node-$id-block-$block-batch-$batch.csv"
+    pid_file="/tmp/bloc-resource-node-$id-block-$block-batch-$batch.pid"
+    stop_file="/tmp/bloc-resource-node-$id-block-$block-batch-$batch.stop"
+    final_ssh "$key" "$host" "test -s '$pid_file' || exit 1; pid=\$(cat '$pid_file'); kill -0 \"\$pid\" 2>/dev/null || exit 1; touch '$stop_file'; deadline=\$((\$(date +%s) + $sampler_stop_timeout_seconds)); while kill -0 \"\$pid\" 2>/dev/null; do [ \$(date +%s) -lt \$deadline ] || exit 1; sleep 0.25; done; test -f '$output'; rows=\$(wc -l <'$output'); header=\$(head -n 1 '$output'); [ \"\$rows\" -ge $((minimum_resource_rows + 1)) ] && [ \"\$header\" = '$resource_header' ]" || status=1
   done < <(jq -c '.nodes[]' "$artifact_root/inventory.json")
+  return "$status"
 }
 
 final_execute_measurement() {
-  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block next_slot job_id
+  local artifact_root="$1" controller host key block order batch warmups repetitions_per_block next_slot job_id cell_status
   local -a evaluator_command
   controller="$(jq -c .controller "$artifact_root/inventory.json")"; host="$(jq -r .public_ip <<<"$controller")"
   key="$(final_topology_key_for_host "$controller")"; repetitions_per_block=$((FINAL_REPETITIONS / FINAL_BLOCKS))
@@ -339,6 +357,14 @@ final_execute_measurement() {
     IFS=',' read -r -a final_batches <<<"$order"
     for batch in "${final_batches[@]}"; do
       warmups=0; [[ "$block" -eq 0 ]] && warmups="$FINAL_WARMUPS"
+      if [[ "${FINAL_SAMPLER:-off}" == on ]]; then
+        if final_sampler_start "$artifact_root" "$((block + 1))" "$batch"; then
+          final_lifecycle_event "$artifact_root" "sampler-start-block-$((block + 1))-batch-$batch" ok
+        else
+          final_lifecycle_event "$artifact_root" "sampler-start-block-$((block + 1))-batch-$batch" failed
+          return 1
+        fi
+      fi
       job_id="$FINAL_EXPERIMENT_ID-block-$((block+1))-batch-$batch-slot-$next_slot"
       evaluator_command=(docker run --rm -v /opt/bloc/ec2:/work -w /work "$FINAL_BLOC_IMAGE" eval-remote
         --config remote-eval.json --experiment-id "$FINAL_EXPERIMENT_ID-b$((block+1))-tx$batch"
@@ -349,7 +375,17 @@ final_execute_measurement() {
         --deadline "$FINAL_DEADLINE" --timeout "$FINAL_DEADLINE"
         --out-dir "results/$FINAL_EXPERIMENT_ID/block-$((block+1))/batch-$batch"
         --image-tag "$FINAL_BLOC_IMAGE" --git-commit "$FINAL_SOURCE_SHA")
-      final_run_remote_job "$key" "$host" "$job_id" "${evaluator_command[@]}" || return 1
+      cell_status=0
+      final_run_remote_job "$key" "$host" "$job_id" "${evaluator_command[@]}" || cell_status=1
+      if [[ "${FINAL_SAMPLER:-off}" == on ]]; then
+        if final_sampler_stop "$artifact_root" "$((block + 1))" "$batch"; then
+          final_lifecycle_event "$artifact_root" "sampler-stop-block-$((block + 1))-batch-$batch" ok
+        else
+          final_lifecycle_event "$artifact_root" "sampler-stop-block-$((block + 1))-batch-$batch" failed
+          cell_status=1
+        fi
+      fi
+      [[ "$cell_status" -eq 0 ]] || return 1
       next_slot=$((next_slot + warmups + repetitions_per_block))
     done
     block=$((block + 1))
@@ -371,7 +407,7 @@ final_recover_artifacts() {
     mkdir -p "$artifact_root/logs/node-$id"
     final_ssh "$key" "$host" "cd /etc/bloc && NODE_ID='$id' BLOC_IMAGE='$FINAL_BLOC_IMAGE' MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE' docker compose -f operator-compose.yaml logs --no-color" >"$artifact_root/logs/node-$id/compose.log" 2>&1 || true
     if [[ "$FINAL_SAMPLER" == on ]]; then
-      final_rsync "$key" /opt/bloc/ec2/resources/ "$host" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || true
+      final_rsync "$key" /opt/bloc/ec2/resources/ "$host" "$artifact_root/logs/node-$id/resources/" 2>/dev/null || return 1
     fi
   done < <(jq -c '.nodes[]' "$inventory")
 }

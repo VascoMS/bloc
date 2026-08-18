@@ -367,16 +367,31 @@ release-candidate configuration contract are defined in
   sampler startup/minimum-row/shutdown gates, mandatory resource recovery, and
   final resource evidence validation/summary generation. That approved tooling
   correction is now implemented and overlaid without changing frozen protocol,
-  source, images, corpus, configuration, evaluator schema, or schedule. Each block/batch
-  cell has a region-bound sampler segment; startup requires a live PID, exact
+  source, images, corpus, configuration, evaluator schema, or schedule. Each
+  block/batch cell has a region-bound sampler segment; startup requires a live PID, exact
   header, and four rows; shutdown is bounded and attempts every node; recovery
   requires every operator directory; acceptance requires the exact 30-cell
   coverage per node and regenerates segment and per-batch summaries while
   checking cadence, counters, restart, and OOM state. The focused regressions,
   33 artifact tests, lifecycle/contract/remote-job/race-gate/Terraform/runner
   suites, both direct Terraform validations, task/frozen helper equality, and
-  exact n4 p4/n7 p1 resource `--validate-only` contracts pass. N7 resource
-  collection has not launched.
+  exact n4 p4/n7 p1 resource `--validate-only` contracts pass. Authorized n4
+  resource p4 then passed provisioning, immutable staging/images, service
+  startup, and health, but failed closed before measurement at the first
+  block-1/batch-8 sampler gate. Three operators retained 7--9 samples at about
+  2.0-second intervals, which the 250 ms cadence contract correctly rejects;
+  node 2 exited after two samples, below the four-row minimum, with an empty
+  sampler log. The sampler's nominal 250 ms loop executes bounded
+  `docker stats --no-stream` network collection on every sample, and its
+  `set -e` path exits on a transient sample failure without identifying the
+  failed sub-read. P4 is invalid and contains no evaluator observation.
+  Terraform destroyed all 15 resources and the key; the cleanup artifact,
+  fresh instance/VPC queries, absent IAM role, empty state, and missing local
+  key confirm complete cleanup. N7 resource collection has not launched. A
+  further retry requires an explicit decision either to replace per-sample
+  Docker network reads with a non-blocking container-network counter source and
+  add failure diagnostics, preserving 250 ms evidence, or to relax the accepted
+  cadence contract.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -402,9 +417,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run n4 resource p4 from zero with the approved correction. Proceed to n7
-   resource p1 only after n4 resource evidence and authenticated cleanup
-   acceptance; do not admit resource-phase latency rows into the p99 dataset.
+1. Decide the sampler invalidation exposed by rejected n4 resource p4. Prefer
+   preserving the 250 ms contract by replacing the blocking per-sample Docker
+   network read with a validated non-blocking counter source and adding precise
+   sampler failure diagnostics; validate and overlay only that tooling before a
+   from-zero n4 retry. Proceed to n7 only after n4 resource evidence and
+   authenticated cleanup acceptance; do not admit resource-phase latency rows
+   into the p99 dataset.
 2. Validate and accept the complete issue #15 artifact set, then run issue
    `#16` using matched
    manifests and configurations.

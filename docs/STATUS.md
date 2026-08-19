@@ -422,8 +422,9 @@ release-candidate configuration contract are defined in
   validators pass; all regional EC2/network/key categories, IAM role/profile
   categories, and Terraform state are empty both in the retained cleanup
   artifact and in independent authenticated API queries. Issue #16's amended
-  latency-only scope is complete. Resource collection remains paused under
-  issue #15, and extension and economic analysis remain deferred.
+  latency-only scope is complete and the issue is closed as completed. Resource
+  collection remains paused under issue #15, and extension and economic
+  analysis remain deferred.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -449,17 +450,14 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Close issue #16 after recording the accepted n7 three-region latency
-   evidence and its authenticated cleanup; keep its explicitly deferred
-   resource, extension, and economic-analysis work outside the completed scope.
-2. Leave issue #15 open and paused for resource collection. Do not admit any
+1. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
-3. Do not combine measurements from different source, image, corpus,
+2. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-4. Obtain explicit direction before selecting or launching the next milestone
+3. Obtain explicit direction before selecting or launching the next milestone
    task or any further billable VM campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+4. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

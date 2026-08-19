@@ -785,6 +785,22 @@ if [[ "${1:-}" == three-region ]]; then
   }
   cleanup_record="$(final_three_region_region_cleanup eu-west-1 "$FINAL_THREE_REGION_SECONDARY_KEY_NAME")"
   jq -e '.query_succeeded == true and .instances == ["i-eu-west-leftover"] and .vpcs == [] and .peering_connections == []' <<<"$cleanup_record" >/dev/null
+  if task6_selected cleanup-json-assembly; then
+    final_three_region_query_array() { printf '[]\n'; }
+    terraform() { return 0; }
+    if ! final_topology_verify_absent "$adapter_root"; then
+      echo "three-region cleanup could not assemble valid empty topology evidence" >&2
+      exit 1
+    fi
+    jq -e '
+      .regions["us-east-1"].query_succeeded == true and
+      .regions["eu-west-1"].query_succeeded == true and
+      .regions["eu-central-1"].query_succeeded == true and
+      .iam.query_succeeded == true and
+      .terraform_state == []
+    ' "$adapter_root/cleanup-topology.json" >/dev/null
+    unset -f terraform
+  fi
   if task6_selected local-key-cleanup; then
     mkdir -p "$(dirname "$FINAL_THREE_REGION_PRIMARY_KEY_PATH")"
     printf 'temporary-us-key\n' >"$FINAL_THREE_REGION_PRIMARY_KEY_PATH"

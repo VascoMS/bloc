@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-18`
+- Last reviewed: `2026-08-19`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -394,7 +394,22 @@ release-candidate configuration contract are defined in
   cadence contract. The user has deferred that decision and all further
   resource collection; issue #15 remains open for the paused resource scope,
   while its accepted n4/n7 same-AZ latency evidence is the matched control for
-  issue #16. The active execution priority is now the frozen n4/n7 three-region
+  issue #16. Issue #16's authorized n4 three-region latency run
+  `bloc-ec2-i16-tr-n4-latency-p1` completed and is accepted without a live
+  rerun: all 3,000 measured attempts were successful, consistent, and within
+  12 seconds across 10 balanced blocks. Type-7 p50/p95/p99 was
+  299.452/323.761/539.382 ms for batch 8,
+  517.925/627.276/1,039.952 ms for batch 32, and
+  2,016.202/2,238.784/3,131.810 ms for batch 128. Its original post-destroy
+  cleanup event failed because the three-region Bash adapter appended an extra
+  closing brace while passing valid region JSON to `jq`; measurement,
+  recovery, and destroy had already passed. A regression-first serializer fix
+  now passes the full lifecycle and runner-portability suites and is
+  byte-identical in the task and frozen worktrees. Fresh authenticated cleanup
+  queries are empty for all regional EC2/network/key categories, IAM
+  role/profile categories, and Terraform state; final cleanup and phase
+  validators pass, and replay events preserve the original failure and later
+  acceptance. The active execution priority is now the frozen n7 three-region
   latency campaign only. Economic analysis remains deferred with issue #20.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
@@ -421,15 +436,15 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Start issue #16 from the issue #15 campaign-tooling baseline and refresh the
-   exact frozen n4/n7 three-region latency `--validate-only` contracts. Keep
+1. Refresh issue #16's exact frozen n7 three-region latency `--validate-only`
+   contract. Keep
    source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, both image digests,
    cluster-specific corpora, batches `8/32/128`, 10 warmups, 1,000 measured
    attempts per cell, 10 balanced blocks, seed `20260621`, and the 12-second
    completion boundary unchanged.
-2. After separate live-run authorization, collect and validate three-region n4
-   latency, require authenticated cleanup, then repeat for n7. Do not start a
-   resource phase, extension pilot, or economic-analysis task.
+2. After separate live-run authorization, collect and validate three-region n7
+   latency and require authenticated cleanup. Do not start a resource phase,
+   extension pilot, or economic-analysis task.
 3. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.

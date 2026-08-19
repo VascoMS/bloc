@@ -616,6 +616,33 @@ configured/generated `BMax` must be at least the largest requested batch.
 `--repetition-blocks`. Stable seeded blocks balance scenario order while making
 the order reproducible from the manifest.
 
+#### Accepted Issue #16 n4 Three-Region Latency
+
+Campaign `bloc-ec2-i16-tr-n4-latency-p1` is accepted primary three-region
+latency evidence for `n=4,t=3`. It binds frozen source
+`cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, the shared immutable BLOC and
+mempool image digests above, the n4 BMax-128 encrypted corpus, four `t3.small`
+operators placed 2/1/1 in `us-east-1a`, `eu-west-1a`, and `eu-central-1a`, and
+the fixed latency schedule. Each batch retained exactly 1,000 measured attempts
+across 10 blocks after 10 warmups; all 3,000 attempts were successful,
+consistent, and within 12 seconds.
+
+| Batch | p50 (ms) | p95 (ms) | p99 (ms) | p99 95% order-statistic CI (ms) | Maximum (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 299.452 | 323.761 | 539.382 | 462.668--682.491 | 823.162 |
+| 32 | 517.925 | 627.276 | 1,039.952 | 894.720--1,311.271 | 1,441.935 |
+| 128 | 2,016.202 | 2,238.784 | 3,131.810 | 3,045.863--3,416.407 | 4,404.565 |
+
+The original post-destroy cleanup event failed only while serializing valid
+per-region JSON: Bash appended an extra closing brace before `jq --argjson`.
+The regression-first adapter correction does not change source, images,
+configuration, corpus, measurement, or protocol semantics. A fresh
+authenticated replay found empty regional EC2/network/key categories, empty IAM
+role/profile categories, and empty Terraform state. Final cleanup and phase
+validators pass; the accepted manifest is complete, while the lifecycle retains
+both the original failure and successful replay events. No live measurement was
+rerun.
+
 #### Local Distributed-Campaign Preflight
 
 Issue #8 runs the final VM configuration space locally without producing a

@@ -142,7 +142,10 @@ final_topology_verify_absent() {
   roles="$(final_three_region_query_array "Roles[?RoleName=='$FINAL_EXPERIMENT_ID-ec2-ecr-readonly'].RoleName" iam list-roles --profile "$FINAL_AWS_PROFILE")" || ok=false
   profiles="$(final_three_region_query_array "InstanceProfiles[?InstanceProfileName=='$FINAL_EXPERIMENT_ID-ec2-ecr-readonly'].InstanceProfileName" iam list-instance-profiles --profile "$FINAL_AWS_PROFILE")" || ok=false
   state="$(terraform -chdir="$work" state list 2>/dev/null | jq -R -s 'split("\n")|map(select(length>0))')" || ok=false
-  jq -n --argjson primary "${primary:-{}}" --argjson secondary "${secondary:-{}}" --argjson tertiary "${tertiary:-{}}" \
+  [[ -n "$primary" ]] || primary='{}'
+  [[ -n "$secondary" ]] || secondary='{}'
+  [[ -n "$tertiary" ]] || tertiary='{}'
+  jq -n --argjson primary "$primary" --argjson secondary "$secondary" --argjson tertiary "$tertiary" \
     --argjson query_succeeded "$ok" --argjson roles "${roles:-[]}" --argjson instance_profiles "${profiles:-[]}" \
     --argjson terraform_state "${state:-[]}" \
     '{regions:{"us-east-1":$primary,"eu-west-1":$secondary,"eu-central-1":$tertiary},iam:{query_succeeded:$query_succeeded,roles:$roles,instance_profiles:$instance_profiles},terraform_state:$terraform_state}' \

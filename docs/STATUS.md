@@ -409,8 +409,21 @@ release-candidate configuration contract are defined in
   queries are empty for all regional EC2/network/key categories, IAM
   role/profile categories, and Terraform state; final cleanup and phase
   validators pass, and replay events preserve the original failure and later
-  acceptance. The active execution priority is now the frozen n7 three-region
-  latency campaign only. Economic analysis remains deferred with issue #20.
+  acceptance. Issue #16's authorized n7 three-region latency run
+  `bloc-ec2-i16-tr-n7-latency-p1` is also accepted: all 3,000 measured attempts
+  were successful, consistent, and within 12 seconds across 10 balanced blocks,
+  and all 30 durable controller jobs exited zero. Type-7 p50/p95/p99 was
+  366.012/457.844/654.747 ms for batch 8,
+  745.101/876.041/1,384.713 ms for batch 32, and
+  2,183.349/2,954.622/3,800.734 ms for batch 128. The complete manifest binds
+  the same frozen source and immutable images, the n7 BMax-128 corpus, seed,
+  deadline, and sampler-off latency contract. Measurement, recovery, destroy,
+  and cleanup lifecycle events all passed. The final phase and cleanup
+  validators pass; all regional EC2/network/key categories, IAM role/profile
+  categories, and Terraform state are empty both in the retained cleanup
+  artifact and in independent authenticated API queries. Issue #16's amended
+  latency-only scope is complete. Resource collection remains paused under
+  issue #15, and extension and economic analysis remain deferred.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
@@ -436,20 +449,16 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Refresh issue #16's exact frozen n7 three-region latency `--validate-only`
-   contract. Keep
-   source `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, both image digests,
-   cluster-specific corpora, batches `8/32/128`, 10 warmups, 1,000 measured
-   attempts per cell, 10 balanced blocks, seed `20260621`, and the 12-second
-   completion boundary unchanged.
-2. After separate live-run authorization, collect and validate three-region n7
-   latency and require authenticated cleanup. Do not start a resource phase,
-   extension pilot, or economic-analysis task.
-3. Leave issue #15 open and paused for resource collection. Do not admit any
+1. Close issue #16 after recording the accepted n7 three-region latency
+   evidence and its authenticated cleanup; keep its explicitly deferred
+   resource, extension, and economic-analysis work outside the completed scope.
+2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
-4. Do not combine measurements from different source, image, corpus,
+3. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
+4. Obtain explicit direction before selecting or launching the next milestone
+   task or any further billable VM campaign.
 5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next

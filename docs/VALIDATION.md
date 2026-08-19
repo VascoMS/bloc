@@ -643,6 +643,40 @@ validators pass; the accepted manifest is complete, while the lifecycle retains
 both the original failure and successful replay events. No live measurement was
 rerun.
 
+#### Accepted Issue #16 n7 Three-Region Latency
+
+Campaign `bloc-ec2-i16-tr-n7-latency-p1` is accepted primary three-region
+latency evidence for `n=7,t=5`. It binds frozen source
+`cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`, the same immutable BLOC and
+mempool image digests as the accepted n4 campaign, the n7 BMax-128 encrypted
+corpus, seven `t3.small` operators placed 3/2/2 in `us-east-1a`,
+`eu-west-1a`, and `eu-central-1a`, and the fixed sampler-off latency schedule.
+Each batch retained exactly 1,000 measured attempts, split as 100 attempts in
+each of 10 balanced blocks after 10 warmups. All 3,000 attempts were successful,
+consistent, and within 12 seconds; all 30 durable controller jobs exited zero.
+
+| Batch | p50 (ms) | p95 (ms) | p99 (ms) | p99 95% order-statistic CI (ms) | Maximum (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 366.012 | 457.844 | 654.747 | 608.808--798.036 | 959.149 |
+| 32 | 745.101 | 876.041 | 1,384.713 | 1,246.767--1,650.390 | 2,033.775 |
+| 128 | 2,183.349 | 2,954.622 | 3,800.734 | 3,654.752--4,233.361 | 5,427.838 |
+
+The repository's Type-7/order-statistic implementation reports every cell as
+p99-eligible. Every empirical p99 is below the 12-second boundary, and every
+attempt completed successfully and consistently, so all three cells satisfy the
+positive timing conclusion gate. The final manifest is complete; lifecycle
+events record successful measurement, recovery, destroy of all 42 Terraform
+resources, regional key deletion, and authenticated cleanup verification. Both
+final phase and cleanup validators pass. The retained cleanup artifact and a
+separate direct API audit find no scoped instances, volumes, VPCs, subnets,
+security groups, route tables, key pairs, active peering connections, IAM
+roles/profiles, or Terraform resources.
+
+Together, the accepted n4 and n7 campaigns complete issue #16's explicitly
+amended latency-only scope. Resource collection remains paused under issue #15;
+the scale extension and economic analysis are deferred and are not implied by
+this acceptance.
+
 #### Local Distributed-Campaign Preflight
 
 Issue #8 runs the final VM configuration space locally without producing a

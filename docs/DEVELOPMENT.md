@@ -62,6 +62,8 @@
 - `deploy/*/README.md`: environment-specific operational runbooks
 - `docs/DECISIONS.md`: major design decisions
 - `docs/CHANGELOG.md`: implementation-level history
+- `docs/PROFESSOR_MEETINGS.md`: concise, append-only professor meeting prep
+  and notes
 
 ## Planning And Task Tracking
 

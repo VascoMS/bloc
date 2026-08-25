@@ -68,6 +68,8 @@ Tests are colocated as `*_test.go`.
 - `docs/DECISIONS.md`: major design and workflow decisions
 - `docs/CHANGELOG.md`: implementation-level history
 - `docs/ROADMAP.md`: milestone objectives and done criteria
+- `docs/PROFESSOR_MEETINGS.md`: concise, append-only professor meeting prep
+  and notes
 - `docs/archive/`: intentional historical evidence records that remain useful
 
 Do not create a parallel explanation when one of these owners already exists.

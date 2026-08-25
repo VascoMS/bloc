@@ -9,8 +9,9 @@ the implemented solution, the evidence produced, and any remaining boundary.
 
 Over the past month, the project moved from evaluation preparation to accepted
 large-sample WAN latency evidence. We made the campaign statistically defensible,
-froze its inputs, verified the complete configuration matrix locally, and then
-collected 6,000 successful three-region measurements.
+froze its inputs, prepared consistent cryptographic material for every operator,
+verified the complete configuration matrix locally, and then collected 6,000
+successful three-region measurements.
 
 ### Closed Issues: Problem → Solution
 
@@ -22,6 +23,18 @@ collected 6,000 successful three-region measurements.
 | [#14](https://github.com/VascoMS/bloc/issues/14) | Results could become incomparable if campaigns mixed code or configuration versions. | Validated and froze an evaluation baseline with recorded source, image, configuration, and artifact identities. |
 | [#8](https://github.com/VascoMS/bloc/issues/8) | A live cloud campaign could fail after resources were allocated because a configuration had never been exercised. | Ran the complete local campaign contract as validation-only evidence before starting final cloud measurements. |
 | [#16](https://github.com/VascoMS/bloc/issues/16) | We still lacked statistically strong end-to-end latency evidence across geographically distributed operators. | Collected matched three-region `n=4,t=3` and `n=7,t=5` campaigns for batches `8/32/128`, with 1,000 accepted observations per configuration. |
+
+### Major Supporting Work Still Formally Open
+
+Most of [Issue #15](https://github.com/VascoMS/bloc/issues/15) is complete. We
+created the fixed BMax-128 CRS and public cluster configuration, generated a
+separate private bundle for every operator containing its threshold-decryption
+share and libp2p identity, and bound the source, images, corpus, configuration,
+and bundles with checksums. We also corrected container paths, read-only public
+mounts, and non-root secret ownership so every node starts with compatible
+cryptographic material without runtime key generation. This setup enabled the
+accepted Issue #16 runs; Issue #15 remains open for the separate live resource
+collection phase.
 
 ### Evidence to Show
 

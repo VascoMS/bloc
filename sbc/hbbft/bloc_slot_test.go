@@ -176,3 +176,46 @@ func TestSlotACSPostAgreementHook(t *testing.T) {
 	require.NotNil(t, output)
 	assert.NotNil(t, output.DecryptionResult)
 }
+
+func TestSlotACSTraceSeparatesCoreDecodeAndBlockBuild(t *testing.T) {
+	base := time.Unix(900, 0)
+	now := base
+	engine := NewSlotACS(SlotConfig{
+		Config: Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)},
+		Slot:   5,
+		Trace:  TraceOptions{Enabled: true, Now: func() time.Time { return now }},
+		BlockBuilder: func(slot uint64, batches []AcceptedBatch) ([]byte, error) {
+			now = base.Add(30 * time.Microsecond)
+			return EncodeSlotBlockBody(slot, batches)
+		},
+	})
+	t.Cleanup(engine.Close)
+	engine.BeginTrace(base)
+
+	encodedBatch, err := encodeCandidateBatch([]byte("trace-batch"))
+	require.NoError(t, err)
+	now = base.Add(10 * time.Microsecond)
+	engine.trace.recordAggregate(traceACSCoreDecision)
+	engine.trace.recordRBC(0, traceRBCProofAccepted)
+	engine.acs.output = map[uint64][]byte{0: encodedBatch}
+	now = base.Add(20 * time.Microsecond)
+	require.NoError(t, engine.maybeBuildOutput())
+
+	output := engine.Output()
+	require.NotNil(t, output)
+	got := output.ACSTrace
+	if got.Aggregate.CoreDecision.OffsetUS != 10 ||
+		got.Adapter.CommonSubsetDecoded.OffsetUS != 20 ||
+		got.Adapter.BlockBodyBuilt.OffsetUS != 30 {
+		t.Fatalf("slot trace boundaries: %+v", got)
+	}
+	output.ACSTrace.RBC[0] = RBCTrace{}
+	if !engine.Trace().RBC[0].ProofAccepted.Recorded {
+		t.Fatal("output trace aliases the live recorder")
+	}
+	now = base.Add(40 * time.Microsecond)
+	engine.MarkNodeOutputReceived()
+	if got := engine.Trace().Adapter.NodeOutputReceived.OffsetUS; got != 40 {
+		t.Fatalf("node output receipt offset = %d", got)
+	}
+}

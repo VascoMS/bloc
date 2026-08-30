@@ -42,6 +42,7 @@ type SlotOutput struct {
 	OrderedBatches   []AcceptedBatch
 	BlockBody        []byte
 	DecryptionResult interface{}
+	ACSTrace         ACSTrace
 }
 
 // SlotProgress is a read-only diagnostic snapshot of the slot-scoped ACS
@@ -123,6 +124,14 @@ func (s *SlotACS) Trace() ACSTrace {
 		return ACSTrace{}
 	}
 	return s.trace.snapshot()
+}
+
+// MarkNodeOutputReceived records the local handoff from SlotACS to its owner.
+func (s *SlotACS) MarkNodeOutputReceived() {
+	if s == nil || s.trace == nil {
+		return
+	}
+	s.trace.recordAdapter(traceNodeOutputReceived)
 }
 
 // Slot returns the slot identifier handled by this adapter instance.
@@ -213,6 +222,7 @@ func (s *SlotACS) maybeBuildOutput() error {
 	if err != nil {
 		return err
 	}
+	s.trace.recordAdapter(traceCommonSubsetDecoded)
 	ordered := orderedBatches(decodedSubset)
 	builder := s.blockBuilder
 	if builder == nil {
@@ -222,11 +232,13 @@ func (s *SlotACS) maybeBuildOutput() error {
 	if err != nil {
 		return err
 	}
+	s.trace.recordAdapter(traceBlockBodyBuilt)
 	output := &SlotOutput{
 		Slot:           s.slot,
 		CommonSubset:   decodedSubset,
 		OrderedBatches: ordered,
 		BlockBody:      blockBody,
+		ACSTrace:       s.trace.snapshot(),
 	}
 	if s.postAgreement != nil {
 		decryptionResult, err := s.postAgreement(output)

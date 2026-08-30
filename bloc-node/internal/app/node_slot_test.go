@@ -8,12 +8,22 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthdm/hbbft"
 )
 
 type blockingSlotTransport struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
+}
+
+type discardSlotTransport struct{}
+
+func (discardSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
+func (discardSlotTransport) Close() error                                 { return nil }
+func (discardSlotTransport) Send(context.Context, uint64, WireEnvelope) (int, error) {
+	return 1, nil
 }
 
 func (t *blockingSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
@@ -58,6 +68,46 @@ func TestPrepareSlotRequiresCompletedIncreasingSlot(t *testing.T) {
 	}
 	if err := n.prepareSlot(2); err == nil {
 		t.Fatal("accepted a non-increasing slot id")
+	}
+}
+
+func TestACSTraceLifecycleBeginsAtProposalReady(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.cfg.Limits = defaultResourceLimits()
+	n.slotState = n.newSlotState(1)
+	n.transport = discardSlotTransport{}
+
+	if err := n.startConsensus(); err != nil {
+		t.Fatal(err)
+	}
+	trace := n.slot.Trace()
+	if !trace.Enabled || !trace.Aggregate.InputStarted.Recorded {
+		t.Fatalf("trace did not begin with ACS input: %+v", trace)
+	}
+	if n.metricTimes.proposalReady.IsZero() {
+		t.Fatal("proposal-ready metric origin was not captured")
+	}
+}
+
+func TestACSTraceLifecycleCapturesNodeReceiptAndResult(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+	out := &hbbft.SlotOutput{Slot: 1}
+
+	n.captureACSTrace(out)
+	if !out.ACSTrace.Adapter.NodeOutputReceived.Recorded ||
+		!n.acsTrace.Adapter.NodeOutputReceived.Recorded {
+		t.Fatalf("node receipt was not captured: output=%+v state=%+v", out.ACSTrace, n.acsTrace)
+	}
+	now := time.Now()
+	n.finishEmptyMaterializedSet(now, now, now, now, now, AgreedInclusionSet{}, MergedEncryptedSet{})
+	if n.result == nil || !n.result.ACSTrace.Adapter.NodeOutputReceived.Recorded {
+		t.Fatalf("result omitted ACS trace: %+v", n.result)
 	}
 }
 

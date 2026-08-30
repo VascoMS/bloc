@@ -148,6 +148,50 @@ func TestReadConfigRejectsV2CiphertextContract(t *testing.T) {
 	}
 }
 
+func TestConfigAcceptsOptionalACSTraceDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4",
+		"--threshold", "3",
+		"--bmax", "8",
+		"--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+
+	legacy, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Diagnostics.ACSTrace {
+		t.Fatal("omitted diagnostics enabled ACS tracing")
+	}
+	raw, err := os.ReadFile(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["diagnostics"] = map[string]any{"acs_trace": true}
+	raw, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clusterPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Diagnostics.ACSTrace {
+		t.Fatal("ACS trace diagnostics were not enabled")
+	}
+}
+
 func TestGenConfigRejectsNegativeMempoolTimeout(t *testing.T) {
 	err := genConfig([]string{
 		"--nodes", "4",

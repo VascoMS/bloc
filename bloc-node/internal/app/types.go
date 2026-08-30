@@ -31,21 +31,27 @@ const (
 // cluster. Operator-local BTE shares and libp2p private keys live separately in
 // NodeSecretConfig files.
 type ConfigFile struct {
-	Version      string           `json:"version"`
-	ClusterID    string           `json:"cluster_id"`
-	BMax         int              `json:"bmax"`
-	N            int              `json:"n"`
-	Threshold    int              `json:"threshold"`
-	Slot         uint64           `json:"slot"`
-	CRSFile      string           `json:"crs_file"`
-	CRSSHA256    string           `json:"crs_sha256"`
-	Nodes        []NodeConfig     `json:"nodes"`
-	PublicKeyHex string           `json:"public_key_hex"`
-	Blockspace   BlockspaceConfig `json:"blockspace,omitempty"`
-	Provider     ProviderConfig   `json:"provider,omitempty"`
-	Network      NetworkConfig    `json:"network,omitempty"`
-	Limits       ResourceLimits   `json:"limits,omitempty"`
-	CRSBytes     []byte           `json:"-"`
+	Version      string            `json:"version"`
+	ClusterID    string            `json:"cluster_id"`
+	BMax         int               `json:"bmax"`
+	N            int               `json:"n"`
+	Threshold    int               `json:"threshold"`
+	Slot         uint64            `json:"slot"`
+	CRSFile      string            `json:"crs_file"`
+	CRSSHA256    string            `json:"crs_sha256"`
+	Nodes        []NodeConfig      `json:"nodes"`
+	PublicKeyHex string            `json:"public_key_hex"`
+	Blockspace   BlockspaceConfig  `json:"blockspace,omitempty"`
+	Provider     ProviderConfig    `json:"provider,omitempty"`
+	Network      NetworkConfig     `json:"network,omitempty"`
+	Limits       ResourceLimits    `json:"limits,omitempty"`
+	Diagnostics  DiagnosticsConfig `json:"diagnostics,omitempty"`
+	CRSBytes     []byte            `json:"-"`
+}
+
+// DiagnosticsConfig enables bounded, opt-in protocol diagnostics.
+type DiagnosticsConfig struct {
+	ACSTrace bool `json:"acs_trace,omitempty"`
 }
 
 // ResourceLimits bounds attacker-influenced protocol memory and cryptographic
@@ -212,6 +218,7 @@ type slotState struct {
 	failure             *SlotFailure
 	metrics             Metrics
 	metricTimes         metricTimes
+	acsTrace            hbbft.ACSTrace
 }
 
 type operatorShareCandidates struct {
@@ -279,6 +286,7 @@ type Result struct {
 	Materialized MaterializedTransactionSet `json:"materialized_transaction_set"`
 	LatencyMS    int64                      `json:"latency_ms"`
 	Metrics      Metrics                    `json:"metrics"`
+	ACSTrace     hbbft.ACSTrace             `json:"acs_trace,omitempty"`
 }
 
 // FaultConfig enables deterministic local fault injection for evaluator runs.

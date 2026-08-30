@@ -328,6 +328,26 @@ func (r *traceRecorder) recordBBA(proposerID uint64, event bbaTraceEvent, value 
 	r.trace.BBA[proposerID] = entry
 }
 
+func (r *traceRecorder) recordAdapter(event adapterTraceEvent) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var point *TracePoint
+	switch event {
+	case traceCommonSubsetDecoded:
+		point = &r.trace.Adapter.CommonSubsetDecoded
+	case traceBlockBodyBuilt:
+		point = &r.trace.Adapter.BlockBodyBuilt
+	case traceNodeOutputReceived:
+		point = &r.trace.Adapter.NodeOutputReceived
+	default:
+		return
+	}
+	r.pointLocked(point)
+}
+
 func (r *traceRecorder) transitionWait(reason string) {
 	if r == nil || !r.enabled || !validTraceWaitReason(reason) {
 		return

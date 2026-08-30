@@ -136,6 +136,7 @@ func (n *Node) newSlotStateWithLimit(slotID uint64, proposalLimit int) *slotStat
 		slot: hbbft.NewSlotACS(hbbft.SlotConfig{
 			Config: hbbft.Config{N: n.cfg.N, F: (n.cfg.N - 1) / 3, ID: n.self.ID, Nodes: n.nodeIDs, BatchSize: n.cfg.BMax},
 			Slot:   slotID,
+			Trace:  hbbft.TraceOptions{Enabled: n.cfg.Diagnostics.ACSTrace},
 		}),
 	}
 	if n.observability != nil {
@@ -507,6 +508,7 @@ func (n *Node) startConsensus() error {
 		n.metrics.ProposalHash = list.Hash
 		n.refreshMetricsLocked()
 		n.mu.Unlock()
+		n.slot.BeginTrace(proposalReady)
 		log.Printf("event=slot_start node_id=%d slot=%d proposal_hash=%s proposal_txs=%d", n.self.ID, n.id, list.Hash, len(list.Items))
 		output, stepErr := n.stepACS(func() error {
 			return n.slot.InputBatch(encodedList)
@@ -639,6 +641,7 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 		return
 	}
 	decisionAt := time.Now()
+	n.captureACSTrace(out)
 	lists, err := decodeAcceptedLists(n.id, out.OrderedBatches)
 	if err != nil {
 		log.Printf("%v", err)
@@ -754,6 +757,18 @@ func (n *Node) handleACSOutput(out *hbbft.SlotOutput) {
 	n.tryCombine()
 }
 
+func (n *Node) captureACSTrace(out *hbbft.SlotOutput) {
+	if out == nil || n.slot == nil {
+		return
+	}
+	n.slot.MarkNodeOutputReceived()
+	trace := n.slot.Trace()
+	out.ACSTrace = trace
+	n.mu.Lock()
+	n.acsTrace = trace
+	n.mu.Unlock()
+}
+
 func decodeAcceptedLists(expectedSlot uint64, batches []hbbft.AcceptedBatch) ([]InclusionList, error) {
 	lists := make([]InclusionList, 0, len(batches))
 	for _, accepted := range batches {
@@ -826,6 +841,7 @@ func (n *Node) finishEmptyMaterializedSet(decisionAt, decodedAt, agreedAt, merge
 		Materialized: n.material,
 		LatencyMS:    n.metrics.TotalSlotMS,
 		Metrics:      n.metrics.snapshot(),
+		ACSTrace:     n.acsTrace,
 	}
 	n.phase = slotCompleted
 	n.completedSlots++
@@ -903,6 +919,7 @@ func (n *Node) tryCombine() {
 		n.refreshMetricsLocked()
 		result.LatencyMS = n.metrics.TotalSlotMS
 		result.Metrics = n.metrics.snapshot()
+		result.ACSTrace = n.acsTrace
 		n.result = result
 		n.phase = slotCompleted
 		n.completedSlots++

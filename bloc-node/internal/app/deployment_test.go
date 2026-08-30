@@ -183,6 +183,19 @@ func TestReadRemoteEvalConfigSupportsEndpointShortcut(t *testing.T) {
 	if cfg.Threshold != 3 || cfg.BMax != 16 {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
+	if cfg.StreamMode != streamModeFresh {
+		t.Fatalf("legacy remote stream mode = %q, want fresh", cfg.StreamMode)
+	}
+}
+
+func TestReadRemoteEvalConfigRejectsUnknownStreamMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remote.json")
+	if err := os.WriteFile(path, []byte(`{"endpoints":["http://node-a"],"stream_mode":"reuse"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRemoteEvalConfig(path); err == nil || !strings.Contains(err.Error(), "stream_mode") {
+		t.Fatalf("unknown remote stream mode error = %v", err)
+	}
 }
 
 func TestWaitForRemoteHTTPReportsMissingNodes(t *testing.T) {
@@ -204,6 +217,7 @@ func TestRemoteManifestRecordsDeploymentFields(t *testing.T) {
 	manifest := suiteManifest{
 		ExperimentID:    "distributed-smoke",
 		ExecutionMode:   "remote",
+		StreamMode:      streamModePersistent,
 		Deployment:      map[string]string{"environment": "compose"},
 		RemoteEndpoints: []remoteEvalNode{{ID: 0, URL: "http://node-0:8000", Region: "local"}},
 		ImageTag:        "bloc:test",
@@ -214,7 +228,7 @@ func TestRemoteManifestRecordsDeploymentFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(data)
-	for _, want := range []string{`"experiment_id":"distributed-smoke"`, `"execution_mode":"remote"`, `"remote_endpoints"`, `"image_tag":"bloc:test"`, `"git_commit":"abc123"`} {
+	for _, want := range []string{`"experiment_id":"distributed-smoke"`, `"execution_mode":"remote"`, `"stream_mode":"persistent"`, `"remote_endpoints"`, `"image_tag":"bloc:test"`, `"git_commit":"abc123"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("manifest missing %s: %s", want, body)
 		}
@@ -246,6 +260,7 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 		HTTPHostMode:  "private-ip",
 		P2PHostMode:   "private-ip",
 		ProviderMode:  "direct",
+		StreamMode:    streamModePersistent,
 		DefaultTxGas:  21000,
 		PrometheusURL: "http://controller:9090",
 		GrafanaURL:    "http://controller:3000",
@@ -279,11 +294,27 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	if remote.NodeCount != 4 || remote.Threshold != 3 || remote.InitialSlot != 7 {
 		t.Fatalf("unexpected remote metadata: %+v", remote)
 	}
+	if cluster.Network.StreamMode != streamModePersistent || remote.StreamMode != streamModePersistent {
+		t.Fatalf("stream mode not retained: cluster=%q remote=%q", cluster.Network.StreamMode, remote.StreamMode)
+	}
 	if len(remote.Nodes) != 4 || remote.Nodes[2].URL != "http://10.0.1.12:8000" || remote.Nodes[2].Zone != "us-east-1b" {
 		t.Fatalf("unexpected remote nodes: %+v", remote.Nodes)
 	}
 	if remote.Deployment["environment"] != "ec2" || remote.Deployment["region"] != "us-east-1" || remote.Deployment["controller"] != "controller" {
 		t.Fatalf("unexpected deployment metadata: %+v", remote.Deployment)
+	}
+}
+
+func TestParseEC2ConfigStreamModeDefaultsAndRejectsUnknown(t *testing.T) {
+	options, err := parseEC2ConfigOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.StreamMode != streamModeFresh {
+		t.Fatalf("default EC2 stream mode = %q, want fresh", options.StreamMode)
+	}
+	if _, err := parseEC2ConfigOptions([]string{"--stream-mode", "reuse"}); err == nil {
+		t.Fatal("unknown EC2 stream mode was accepted")
 	}
 }
 

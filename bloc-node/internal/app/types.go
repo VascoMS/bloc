@@ -25,6 +25,9 @@ const (
 	absoluteMaxEnvelopeBytes                    = 64 << 20
 	absoluteMaxCombineAttemptsPerSubBatch       = 4096
 	minimumEnvelopeHeadroomBytes                = 64 << 10
+
+	streamModeFresh      = "fresh"
+	streamModePersistent = "persistent"
 )
 
 // ConfigFile is the public JSON configuration shared by all BLOC nodes in a
@@ -111,7 +114,8 @@ type ProviderConfig struct {
 // NetworkConfig records the node-to-node transport schema. libp2p is the only
 // supported operator transport.
 type NetworkConfig struct {
-	Mode string `json:"mode,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	StreamMode string `json:"stream_mode,omitempty"`
 }
 
 // WireEnvelope is the internal message envelope passed between BLOC nodes.

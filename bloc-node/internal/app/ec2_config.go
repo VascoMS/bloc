@@ -29,6 +29,7 @@ type ec2ConfigOptions struct {
 	HTTPHostMode     string
 	P2PHostMode      string
 	ProviderMode     string
+	StreamMode       string
 	MempoolURL       string
 	MempoolTimeoutMS int64
 	MaxDecryptedGas  uint64
@@ -110,6 +111,7 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.StringVar(&options.HTTPHostMode, "http-host-mode", "private-ip", "HTTP advertised host: private-ip, private-dns, public-ip, or public-dns")
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "libp2p advertised host: private-ip, private-dns, public-ip, or public-dns")
 	fs.StringVar(&options.ProviderMode, "provider", "direct", "inclusion-list provider: direct or mempool-http")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
 	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for provider=mempool-http")
 	fs.Int64Var(&options.MempoolTimeoutMS, "mempool-timeout-ms", defaultMempoolTimeoutMS, "mempool-il request timeout in milliseconds; 0 uses the 2000 ms default")
 	fs.Uint64Var(&options.MaxDecryptedGas, "max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
@@ -139,6 +141,9 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	if err := validateProviderConfig(ProviderConfig{MempoolTimeoutMS: options.MempoolTimeoutMS}); err != nil {
 		return ec2ConfigOptions{}, err
 	}
+	if err := validateNetworkConfig(NetworkConfig{Mode: "libp2p", StreamMode: options.StreamMode}); err != nil {
+		return ec2ConfigOptions{}, err
+	}
 	if _, err := validateEC2HostMode(options.HTTPHostMode); err != nil {
 		return ec2ConfigOptions{}, fmt.Errorf("http-host-mode: %w", err)
 	}
@@ -166,6 +171,11 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		options.Limits = defaultResourceLimits()
 	}
 	if err := validateResourceLimits(options.Limits); err != nil {
+		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
+	}
+	network := NetworkConfig{Mode: "libp2p", StreamMode: options.StreamMode}
+	normalizeNetworkConfig(&network)
+	if err := validateNetworkConfig(network); err != nil {
 		return ConfigFile{}, nil, nil, remoteEvalConfig{}, err
 	}
 	provider := ProviderConfig{
@@ -238,7 +248,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 			DefaultTxGas:    options.DefaultTxGas,
 		},
 		Provider: provider,
-		Network:  NetworkConfig{Mode: "libp2p"},
+		Network:  network,
 		Limits:   options.Limits,
 	}
 	secrets := make([]NodeSecretConfig, 0, nodes)
@@ -247,6 +257,7 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 		Threshold:   threshold,
 		BMax:        options.BMax,
 		Network:     "libp2p",
+		StreamMode:  network.StreamMode,
 		InitialSlot: options.Slot,
 		Deployment: map[string]string{
 			"environment": "ec2",

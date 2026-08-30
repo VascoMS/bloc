@@ -51,6 +51,36 @@ func TestNormalizeConfigDefaultsToLibP2P(t *testing.T) {
 	}
 }
 
+func TestNormalizeNetworkConfigDefaultsStreamModeToFresh(t *testing.T) {
+	cfg := NetworkConfig{Mode: "libp2p"}
+	normalizeNetworkConfig(&cfg)
+	if cfg.StreamMode != streamModeFresh {
+		t.Fatalf("stream mode = %q, want fresh", cfg.StreamMode)
+	}
+}
+
+func TestValidateNetworkConfigAcceptsSupportedStreamModes(t *testing.T) {
+	for _, mode := range []string{"fresh", "persistent"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := NetworkConfig{Mode: "libp2p", StreamMode: mode}
+			if err := validateNetworkConfig(cfg); err != nil {
+				t.Fatalf("supported stream mode %q rejected: %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestValidateNetworkConfigRejectsUnknownStreamMode(t *testing.T) {
+	for _, mode := range []string{"reuse", " ", "Fresh", "PERSISTENT"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := NetworkConfig{Mode: "libp2p", StreamMode: mode}
+			if err := validateNetworkConfig(cfg); err == nil {
+				t.Fatalf("unknown stream mode %q was accepted", mode)
+			}
+		})
+	}
+}
+
 func TestNewNodeRejectsLegacyTCPMode(t *testing.T) {
 	_, err := newNode(ConfigFile{
 		Network: NetworkConfig{Mode: "tcp"},

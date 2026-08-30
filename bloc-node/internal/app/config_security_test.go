@@ -210,6 +210,54 @@ func TestGenConfigEnablesACSTraceOnlyWhenRequested(t *testing.T) {
 	}
 }
 
+func TestGenConfigRetainsRequestedStreamMode(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4", "--threshold", "3", "--bmax", "8",
+		"--stream-mode", "persistent", "--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+	cfg, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Network.StreamMode != streamModePersistent {
+		t.Fatalf("generated stream mode = %q, want persistent", cfg.Network.StreamMode)
+	}
+}
+
+func TestReadConfigRejectsUnknownStreamMode(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4", "--threshold", "3", "--bmax", "8",
+		"--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+	raw, err := os.ReadFile(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["network"] = map[string]any{"mode": "libp2p", "stream_mode": "reuse"}
+	raw, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clusterPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readConfig(clusterPath); err == nil || !strings.Contains(err.Error(), "network.stream_mode") {
+		t.Fatalf("unknown stream mode error = %v", err)
+	}
+}
+
 func TestGenConfigRejectsNegativeMempoolTimeout(t *testing.T) {
 	err := genConfig([]string{
 		"--nodes", "4",

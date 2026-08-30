@@ -58,6 +58,9 @@ func readConfig(path string) (ConfigFile, error) {
 	if err := validateProviderConfig(cfg.Provider); err != nil {
 		return ConfigFile{}, err
 	}
+	if err := validateNetworkConfig(cfg.Network); err != nil {
+		return ConfigFile{}, err
+	}
 	return cfg, nil
 }
 
@@ -194,9 +197,7 @@ func normalizeConfig(cfg *ConfigFile) {
 		cfg.Blockspace.DefaultTxGas = 21000
 	}
 	normalizeProviderConfig(&cfg.Provider)
-	if cfg.Network.Mode == "" {
-		cfg.Network.Mode = "libp2p"
-	}
+	normalizeNetworkConfig(&cfg.Network)
 	defaults := defaultResourceLimits()
 	if cfg.Limits.MaxProposalBytes == 0 && !cfg.Limits.explicitZeroProposal {
 		cfg.Limits.MaxProposalBytes = defaults.MaxProposalBytes
@@ -209,6 +210,27 @@ func normalizeConfig(cfg *ConfigFile) {
 	}
 	for i := range cfg.Nodes {
 		normalizeNodeConfig(&cfg.Nodes[i])
+	}
+}
+
+func normalizeNetworkConfig(network *NetworkConfig) {
+	if network.Mode == "" {
+		network.Mode = "libp2p"
+	}
+	if network.StreamMode == "" {
+		network.StreamMode = streamModeFresh
+	}
+}
+
+func validateNetworkConfig(network NetworkConfig) error {
+	if network.Mode != "libp2p" {
+		return fmt.Errorf("unsupported network mode %q: only libp2p is supported", network.Mode)
+	}
+	switch network.StreamMode {
+	case streamModeFresh, streamModePersistent:
+		return nil
+	default:
+		return fmt.Errorf("network.stream_mode must be %q or %q, got %q", streamModeFresh, streamModePersistent, network.StreamMode)
 	}
 }
 

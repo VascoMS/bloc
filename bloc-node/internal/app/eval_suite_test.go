@@ -98,6 +98,26 @@ func TestEvalSuiteOptionsEnableACSTrace(t *testing.T) {
 	}
 }
 
+func TestEvalSuiteStreamModeDefaultsAndOverrides(t *testing.T) {
+	defaults, err := parseEvalSuiteOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.StreamMode != streamModeFresh {
+		t.Fatalf("default stream mode = %q, want fresh", defaults.StreamMode)
+	}
+	persistent, err := parseEvalSuiteOptions([]string{"--stream-mode", "persistent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistent.StreamMode != streamModePersistent {
+		t.Fatalf("explicit stream mode = %q, want persistent", persistent.StreamMode)
+	}
+	if _, err := parseEvalSuiteOptions([]string{"--stream-mode", "reuse"}); err == nil {
+		t.Fatal("unknown evaluator stream mode was accepted")
+	}
+}
+
 func TestPersistentScheduleHasExactGroupedM1Samples(t *testing.T) {
 	options, err := parseEvalSuiteOptions([]string{"--profile", "m1-baseline"})
 	if err != nil {
@@ -150,6 +170,7 @@ func TestM1BaselineProfileAllowsExplicitOverrides(t *testing.T) {
 func TestSuiteManifestRecordsResolvedCampaignConfiguration(t *testing.T) {
 	manifest := suiteManifest{
 		SchemaVersion: suiteSchemaVersion, Profile: "m1-baseline", Seed: 77,
+		StreamMode:       streamModePersistent,
 		RepetitionBlocks: 10, PlannedRuns: 9090,
 		PlannedScenarioRuns: map[string]int{"n4-b8-libp2p": 1000},
 		RunOrder:            []string{"measured/block-1/block-iteration-1/n4-b8-libp2p/slot-1/generation-1"},
@@ -169,6 +190,7 @@ func TestSuiteManifestRecordsResolvedCampaignConfiguration(t *testing.T) {
 		"seed": float64(77), "repetition_blocks": float64(10),
 		"planned_runs": float64(9090), "bmax": float64(512), "tx_size": float64(256),
 		"tx_gas": float64(21000), "timeout": "30s", "deadline": "12s",
+		"stream_mode": streamModePersistent,
 	} {
 		if got := decoded[name]; got != want {
 			t.Fatalf("manifest %s = %v, want %v", name, got, want)

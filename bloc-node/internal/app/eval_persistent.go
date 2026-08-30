@@ -262,7 +262,7 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 			measurement.Error = err.Error()
 			return nil, measurement, err
 		}
-		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--out", configPath}
+		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--stream-mode", options.StreamMode, "--out", configPath}
 		if options.ACSTrace {
 			args = append(args, "--acs-trace")
 		}

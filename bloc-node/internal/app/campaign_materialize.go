@@ -25,6 +25,7 @@ type campaignMaterializeOptions struct {
 	HTTPHostMode  string
 	P2PHostMode   string
 	ACSTrace      bool
+	StreamMode    string
 }
 
 func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Inventory, options campaignMaterializeOptions) (ConfigFile, []byte, remoteEvalConfig, error) {
@@ -45,6 +46,11 @@ func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Invent
 	}
 	if strings.TrimSpace(options.MempoolURL) == "" {
 		return ConfigFile{}, nil, remoteEvalConfig{}, fmt.Errorf("campaign mempool URL is required")
+	}
+	network := NetworkConfig{Mode: "libp2p", StreamMode: options.StreamMode}
+	normalizeNetworkConfig(&network)
+	if err := validateNetworkConfig(network); err != nil {
+		return ConfigFile{}, nil, remoteEvalConfig{}, err
 	}
 	nodes := append([]ec2InventoryHost(nil), inventory.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
@@ -77,7 +83,7 @@ func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Invent
 		BMax: bundle.Identity.BMax, N: bundle.Identity.N, Threshold: bundle.Identity.Threshold, Slot: 1,
 		CRSFile: filepath.ToSlash(crsRelative), CRSSHA256: bundle.Identity.CRSSHA256,
 		PublicKeyHex: bundle.Identity.PublicKeyHex, Blockspace: bundle.Identity.Blockspace,
-		Limits: bundle.Identity.Limits, Network: NetworkConfig{Mode: "libp2p"},
+		Limits: bundle.Identity.Limits, Network: network,
 		Diagnostics: DiagnosticsConfig{ACSTrace: options.ACSTrace},
 		Provider: ProviderConfig{
 			Mode: "mempool-http", MempoolURL: options.MempoolURL, MempoolTimeoutMS: defaultMempoolTimeoutMS,
@@ -89,7 +95,7 @@ func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Invent
 	}
 	remote := remoteEvalConfig{
 		NodeCount: bundle.Identity.N, Threshold: bundle.Identity.Threshold, BMax: bundle.Identity.BMax,
-		Network: "libp2p", InitialSlot: 1, Corpus: bundle.Corpus,
+		Network: "libp2p", StreamMode: network.StreamMode, InitialSlot: 1, Corpus: bundle.Corpus,
 		Deployment: map[string]string{
 			"environment": "ec2", "topology": options.Topology,
 			"prometheus": options.PrometheusURL, "grafana": options.GrafanaURL,
@@ -192,6 +198,7 @@ func materializeCampaignConfig(args []string) error {
 	fs.StringVar(&options.HTTPHostMode, "http-host-mode", "private-ip", "inventory HTTP host field")
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "inventory P2P host field")
 	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

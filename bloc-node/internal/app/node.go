@@ -35,6 +35,9 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 	if err := validateProviderConfig(cfg.Provider); err != nil {
 		return nil, err
 	}
+	if err := validateNetworkConfig(cfg.Network); err != nil {
+		return nil, err
+	}
 	if secrets.ClusterID != cfg.ClusterID {
 		return nil, fmt.Errorf("node secrets cluster %q does not match config cluster %q", secrets.ClusterID, cfg.ClusterID)
 	}
@@ -55,9 +58,6 @@ func newNode(cfg ConfigFile, secrets NodeSecretConfig, id uint64, faults FaultCo
 	}
 	if !foundSelf {
 		return nil, fmt.Errorf("node id %d not found in config", id)
-	}
-	if cfg.Network.Mode != "libp2p" {
-		return nil, fmt.Errorf("unsupported network mode %q: only libp2p is supported", cfg.Network.Mode)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	suite := newSuite()

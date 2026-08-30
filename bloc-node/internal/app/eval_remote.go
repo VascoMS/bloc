@@ -47,6 +47,7 @@ type remoteEvalConfig struct {
 	Threshold   int               `json:"threshold,omitempty"`
 	BMax        int               `json:"bmax,omitempty"`
 	Network     string            `json:"network,omitempty"`
+	StreamMode  string            `json:"stream_mode,omitempty"`
 	Deployment  map[string]string `json:"deployment,omitempty"`
 	InitialSlot uint64            `json:"initial_slot,omitempty"`
 	Corpus      corpusProvenance  `json:"corpus,omitempty"`
@@ -145,6 +146,7 @@ func evalRemote(args []string) error {
 		Deadline:            options.Deadline.String(),
 		Scenarios:           []evalScenario{scenario},
 		ExecutionMode:       "remote",
+		StreamMode:          cfg.StreamMode,
 		Schedule:            "sequential-remote-slots",
 		Deployment:          cfg.Deployment,
 		RemoteEndpoints:     cfg.Nodes,
@@ -339,6 +341,13 @@ func readRemoteEvalConfig(path string) (remoteEvalConfig, error) {
 	if len(cfg.Nodes) == 0 {
 		return remoteEvalConfig{}, fmt.Errorf("remote config requires nodes or endpoints")
 	}
+	network := NetworkConfig{Mode: cfg.Network, StreamMode: cfg.StreamMode}
+	normalizeNetworkConfig(&network)
+	if err := validateNetworkConfig(network); err != nil {
+		return remoteEvalConfig{}, err
+	}
+	cfg.Network = network.Mode
+	cfg.StreamMode = network.StreamMode
 	sort.Slice(cfg.Nodes, func(i, j int) bool { return cfg.Nodes[i].ID < cfg.Nodes[j].ID })
 	for i := range cfg.Nodes {
 		if cfg.Nodes[i].URL == "" {

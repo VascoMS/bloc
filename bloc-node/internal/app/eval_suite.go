@@ -32,6 +32,7 @@ type evalScenario struct {
 type suiteManifest struct {
 	SchemaVersion       string                       `json:"schema_version"`
 	ACSTraceSchema      string                       `json:"acs_trace_schema,omitempty"`
+	StreamMode          string                       `json:"stream_mode"`
 	ExperimentID        string                       `json:"experiment_id"`
 	Profile             string                       `json:"profile,omitempty"`
 	Status              string                       `json:"status"`
@@ -93,6 +94,7 @@ type suiteOptions struct {
 	OutDir           string
 	ExperimentID     string
 	ExecutionMode    string
+	StreamMode       string
 	MaxRestarts      int
 	ACSTrace         bool
 }
@@ -241,6 +243,7 @@ func evalSuite(args []string) error {
 		Deadline:            options.Deadline.String(),
 		Scenarios:           scenarios,
 		ExecutionMode:       options.ExecutionMode,
+		StreamMode:          options.StreamMode,
 		Schedule:            "seeded-global-interleave",
 	}
 	if options.ExecutionMode == "persistent" {
@@ -298,7 +301,7 @@ func evalSuite(args []string) error {
 					orderIndex++
 					runID := fmt.Sprintf("%s-r%03d-%s", phase.name, iteration, scenario.ID)
 					runDir := filepath.Join(options.OutDir, "runs", runID)
-					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "", options.ACSTrace)
+					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "", options.ACSTrace, options.StreamMode)
 					run.ScenarioID, run.Phase, run.Iteration, run.OrderIndex = scenario.ID, phase.name, iteration, orderIndex
 					run.ScheduleSeed = options.Seed
 					run.PlannedScenarioRuns = options.Repetitions
@@ -431,6 +434,7 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.StringVar(&options.OutDir, "out-dir", "", "experiment directory; defaults below results/m1-local")
 	fs.StringVar(&options.ExperimentID, "experiment-id", "", "stable experiment label")
 	fs.StringVar(&options.ExecutionMode, "execution-mode", "isolated", "cluster lifecycle: isolated or persistent")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
 	fs.IntVar(&options.MaxRestarts, "max-restarts", 3, "maximum consecutive persistent-cluster recovery attempts")
 	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
 	if err := fs.Parse(args); err != nil {
@@ -484,6 +488,9 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	}
 	if options.ExecutionMode != "isolated" && options.ExecutionMode != "persistent" {
 		return suiteOptions{}, fmt.Errorf("execution-mode must be isolated or persistent")
+	}
+	if err := validateNetworkConfig(NetworkConfig{Mode: "libp2p", StreamMode: options.StreamMode}); err != nil {
+		return suiteOptions{}, err
 	}
 	if options.MaxRestarts < 1 {
 		return suiteOptions{}, fmt.Errorf("max-restarts must be >= 1")

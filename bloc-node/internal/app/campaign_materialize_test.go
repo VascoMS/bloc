@@ -73,13 +73,17 @@ func TestMaterializeCampaignConfigEnablesACSTraceOnlyWhenRequested(t *testing.T)
 		ClusterOut: "cluster.json", CRSOut: "cluster.crs", Topology: "T0-same-az",
 		MempoolURL: "http://mempool-il:8080", HTTPPort: 8000, P2PPort: 9000,
 		HTTPHostMode: "private-ip", P2PHostMode: "private-ip",
+		StreamMode: streamModePersistent,
 	}
-	legacy, _, _, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("same-az"), options)
+	legacy, _, legacyRemote, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("same-az"), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if legacy.Diagnostics.ACSTrace {
 		t.Fatal("legacy campaign unexpectedly enabled ACS tracing")
+	}
+	if legacy.Network.StreamMode != streamModePersistent || legacyRemote.StreamMode != streamModePersistent {
+		t.Fatalf("stream mode not retained: cluster=%q remote=%q", legacy.Network.StreamMode, legacyRemote.StreamMode)
 	}
 	options.ACSTrace = true
 	diagnostic, _, _, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("same-az"), options)

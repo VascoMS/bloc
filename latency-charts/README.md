@@ -43,6 +43,24 @@ The stage stack excludes `share_generation_us` and
 `commit_to_plaintext_us` because those intervals overlap the sequential
 critical path.
 
+For matched Issue #23 ACS diagnostics, validate and summarize one same-AZ root
+against its three-region counterpart with:
+
+```sh
+python -m bloc_latency_charts.acs_attribution \
+  <same-az-phase-root> <three-region-phase-root> \
+  --output <acs-summary-directory>
+```
+
+The loader fails if source, image, corpus, public configuration, trace schema,
+node count, or schedule identities differ. It retains failed and timed-out
+attempt records but excludes them from latency distributions. The lean
+pre-campaign output is `acs-milestone-summary.csv`, `acs-wait-summary.csv`,
+`acs-message-summary.csv`, and `acs-critical-node-summary.csv`. Milestones are
+monotonic offsets and are not added across concurrent RBC/BBA instances; p99 is
+not published for the 30-observation diagnostic contract. Thesis report prose
+and PNG/SVG rendering are intentionally deferred until matched evidence exists.
+
 For an accepted M3 three-region campaign, generate the thesis-facing report
 with:
 

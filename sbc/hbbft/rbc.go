@@ -73,6 +73,7 @@ type RBC struct {
 	inputCh   chan rbcInputTuple
 	messageCh chan rbcMessageTuple
 	closeOnce sync.Once
+	trace     *traceRecorder
 }
 
 type (
@@ -96,8 +97,15 @@ type (
 // NewRBC returns a new instance of the ReliableBroadcast configured
 // with the given config
 func NewRBC(cfg Config, proposerID uint64) *RBC {
+	return newRBC(cfg, proposerID, newTraceRecorder(cfg.Nodes, false, nil))
+}
+
+func newRBC(cfg Config, proposerID uint64, trace *traceRecorder) *RBC {
 	if cfg.F == 0 {
 		cfg.F = (cfg.N - 1) / 3
+	}
+	if trace == nil {
+		trace = newTraceRecorder(cfg.Nodes, false, nil)
 	}
 	var (
 		parityShards = 2 * cfg.F
@@ -119,6 +127,7 @@ func NewRBC(cfg Config, proposerID uint64) *RBC {
 		closeCh:         make(chan struct{}),
 		inputCh:         make(chan rbcInputTuple),
 		messageCh:       make(chan rbcMessageTuple),
+		trace:           trace,
 	}
 	go rbc.run()
 	return rbc

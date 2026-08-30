@@ -95,6 +95,29 @@ func TestSlotACSCloseIsIdempotent(t *testing.T) {
 	slot.Close()
 }
 
+func TestSlotACSBeginTraceUsesOneRecorderAcrossChildren(t *testing.T) {
+	base := time.Unix(200, 0)
+	now := base
+	slot := NewSlotACS(SlotConfig{
+		Config: Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)},
+		Slot:   9,
+		Trace:  TraceOptions{Enabled: true, Now: func() time.Time { return now }},
+	})
+	t.Cleanup(slot.Close)
+
+	slot.BeginTrace(base)
+	if slot.trace == nil || slot.acs.trace != slot.trace ||
+		slot.acs.rbcInstances[0].trace != slot.trace ||
+		slot.acs.bbaInstances[0].trace != slot.trace {
+		t.Fatal("ACS children do not share the slot recorder")
+	}
+	now = base.Add(12 * time.Microsecond)
+	slot.trace.recordAggregate(traceACSInputStarted)
+	if got := slot.Trace().Aggregate.InputStarted.OffsetUS; got != 12 {
+		t.Fatalf("shared recorder offset = %d", got)
+	}
+}
+
 func TestSlotACSRejectsWrongSlotMessage(t *testing.T) {
 	engine := NewSlotACS(SlotConfig{
 		Config: Config{

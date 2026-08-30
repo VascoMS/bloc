@@ -37,6 +37,7 @@ type AuxRequest struct {
 type BBA struct {
 	// Config holds the BBA configuration.
 	Config
+	proposerID uint64
 	// Current epoch.
 	epoch uint32
 	//  Bval requests we accepted this epoch.
@@ -68,15 +69,24 @@ type BBA struct {
 	messageCh chan bbaMessageTuple
 	msgCount  int
 	closeOnce sync.Once
+	trace     *traceRecorder
 }
 
 // NewBBA returns a new instance of the Binary Byzantine Agreement.
 func NewBBA(cfg Config) *BBA {
+	return newBBA(cfg, 0, newTraceRecorder(cfg.Nodes, false, nil))
+}
+
+func newBBA(cfg Config, proposerID uint64, trace *traceRecorder) *BBA {
 	if cfg.F == 0 {
 		cfg.F = (cfg.N - 1) / 3
 	}
+	if trace == nil {
+		trace = newTraceRecorder(cfg.Nodes, false, nil)
+	}
 	bba := &BBA{
 		Config:          cfg,
+		proposerID:      proposerID,
 		recvBval:        newBvalSet(),
 		recvAux:         make(map[uint64]bool),
 		sentBvals:       []bool{},
@@ -86,6 +96,7 @@ func NewBBA(cfg Config) *BBA {
 		messageCh:       make(chan bbaMessageTuple),
 		messages:        []*AgreementMessage{},
 		delayedMessages: []delayedMessage{},
+		trace:           trace,
 	}
 	go bba.run()
 	return bba

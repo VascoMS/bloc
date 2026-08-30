@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // SlotMessage is the slot-scoped top-level message used by the BLOC adapter.
@@ -59,12 +60,19 @@ type BlockBuilder func(slot uint64, batches []AcceptedBatch) ([]byte, error)
 // It exists to keep decryption/materialization outside the ACS core.
 type PostAgreementHook func(*SlotOutput) (interface{}, error)
 
+// TraceOptions controls the optional process-local ACS diagnostic recorder.
+type TraceOptions struct {
+	Enabled bool
+	Now     func() time.Time
+}
+
 // SlotConfig configures the slot-scoped BLOC adapter built on top of ACS.
 type SlotConfig struct {
 	Config
 	Slot          uint64
 	BlockBuilder  BlockBuilder
 	PostAgreement PostAgreementHook
+	Trace         TraceOptions
 }
 
 // SlotACS adapts ACS into a single-slot block-building primitive for BLOC.
@@ -75,6 +83,7 @@ type SlotACS struct {
 	blockBuilder  BlockBuilder
 	postAgreement PostAgreementHook
 	output        *SlotOutput
+	trace         *traceRecorder
 }
 
 // Close terminates the slot ACS and all of its child protocol goroutines.
@@ -89,13 +98,31 @@ func (s *SlotACS) Close() {
 // NewSlotACS returns a slot-scoped adapter that reuses the existing ACS
 // implementation without the epoch/mempool HoneyBadger driver.
 func NewSlotACS(cfg SlotConfig) *SlotACS {
+	trace := newTraceRecorder(cfg.Config.Nodes, cfg.Trace.Enabled, cfg.Trace.Now)
 	return &SlotACS{
 		Config:        cfg.Config,
 		slot:          cfg.Slot,
-		acs:           NewACS(cfg.Config),
+		acs:           newACS(cfg.Config, trace),
 		blockBuilder:  cfg.BlockBuilder,
 		postAgreement: cfg.PostAgreement,
+		trace:         trace,
 	}
+}
+
+// BeginTrace sets proposal readiness as the process-local trace origin.
+func (s *SlotACS) BeginTrace(proposalReady time.Time) {
+	if s == nil || s.trace == nil {
+		return
+	}
+	s.trace.begin(proposalReady)
+}
+
+// Trace returns a detached snapshot of the slot's ACS diagnostics.
+func (s *SlotACS) Trace() ACSTrace {
+	if s == nil || s.trace == nil {
+		return ACSTrace{}
+	}
+	return s.trace.snapshot()
 }
 
 // Slot returns the slot identifier handled by this adapter instance.

@@ -56,6 +56,7 @@ type ACS struct {
 	messageCh  chan acsMessageTuple
 	progressCh chan acsProgressTuple
 	closeOnce  sync.Once
+	trace      *traceRecorder
 }
 
 // Control flow structure for internal channel communication. Allowing us to
@@ -126,8 +127,15 @@ type BBAProgress struct {
 // NewACS returns a new ACS instance configured with the given Config and node
 // ids.
 func NewACS(cfg Config) *ACS {
+	return newACS(cfg, newTraceRecorder(cfg.Nodes, false, nil))
+}
+
+func newACS(cfg Config, trace *traceRecorder) *ACS {
 	if cfg.F == 0 {
 		cfg.F = (cfg.N - 1) / 3
+	}
+	if trace == nil {
+		trace = newTraceRecorder(cfg.Nodes, false, nil)
 	}
 	acs := &ACS{
 		Config:       cfg,
@@ -140,11 +148,12 @@ func NewACS(cfg Config) *ACS {
 		inputCh:      make(chan acsInputTuple),
 		messageCh:    make(chan acsMessageTuple),
 		progressCh:   make(chan acsProgressTuple),
+		trace:        trace,
 	}
 	// Create all the instances for the participating nodes
 	for _, id := range cfg.Nodes {
-		acs.rbcInstances[id] = NewRBC(cfg, id)
-		acs.bbaInstances[id] = NewBBA(cfg)
+		acs.rbcInstances[id] = newRBC(cfg, id, trace)
+		acs.bbaInstances[id] = newBBA(cfg, id, trace)
 	}
 	go acs.run()
 	return acs

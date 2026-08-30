@@ -98,6 +98,25 @@ func TestNewACS(t *testing.T) {
 	assert.Equal(t, id, acs.ID)
 }
 
+func TestNewACSPreservesTraceDisabledCompatibility(t *testing.T) {
+	acs := NewACS(Config{N: 4, ID: 0, Nodes: makeids(4)})
+	t.Cleanup(acs.stop)
+	if acs.trace == nil {
+		t.Fatal("legacy constructor did not supply a disabled recorder")
+	}
+	if got := acs.trace.snapshot(); got.Enabled {
+		t.Fatalf("legacy constructor enabled tracing: %+v", got)
+	}
+	for id, rbc := range acs.rbcInstances {
+		if rbc.trace != acs.trace {
+			t.Fatalf("RBC %d does not share the ACS recorder", id)
+		}
+	}
+	if acs.bbaInstances[0].trace != acs.trace {
+		t.Fatal("BBA does not share the ACS recorder")
+	}
+}
+
 func TestACSOutputIsNilAfterConsuming(t *testing.T) {
 	acs := NewACS(Config{N: 4})
 	output := map[uint64][]byte{

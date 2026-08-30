@@ -19,6 +19,7 @@ test = ["pytest>=8"]
 [project.scripts]
 bloc-latency-charts = "bloc_latency_charts.cli:main"
 bloc-acs-attribution = "bloc_latency_charts.acs_attribution:main"
+bloc-transport-attribution = "bloc_latency_charts.transport_attribution:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

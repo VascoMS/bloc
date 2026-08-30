@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .charts import generate_all
 from .data import ExperimentData, load_experiment
+from .transport_attribution import main as transport_attribution_main
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +43,10 @@ def output_directory(experiment: ExperimentData, explicit: Path | None = None) -
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "transport-attribution":
+        return transport_attribution_main(argv[1:])
     args = build_parser().parse_args(argv)
     try:
         experiment = load_experiment(args.result_dir)

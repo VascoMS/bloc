@@ -68,7 +68,8 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #23 attribution is accepted; optimization experiments remain:** the
+- **Issue #23 attribution and phase-one local stream experiment are accepted;
+  distributed canaries remain:** the
   matched n4 same-AZ and three-region latency phases are complete on source
   `d6bf2c0d62d5e4e039952ace117a6ab9a08b8cc0` and immutable BLOC image
   `sha256:ab4bf84da397f379ba5e22820ddd53ba532702b1bc7da3d709e3c847e1e5eaf1`.
@@ -94,9 +95,25 @@ release-candidate configuration contract are defined in
   and the three peering records are `deleted`. Retained roots are
   `results/ec2/bloc-ec2-i23-sa-n4-c4/`,
   `results/ec2/bloc-ec2-i23-tr-n4-c2/`, and
-  `results/analysis/issue-23-acs-n4-c4-c2/`. The next action is to define and
-  run narrow transport/RBC optimization experiments without expanding the
-  diagnostic matrix or publishing p99 from 30 observations.
+  `results/analysis/issue-23-acs-n4-c4-c2/`. Phase one on source
+  `857d5024b9db6d6a9ec78b726ca5af921181f197` keeps v1 fresh streams as the
+  compatibility arm and adds opt-in v2 persistent framed streams with one
+  capacity-one writer per peer, prewarm/readiness gates, bounded deadlines,
+  reset-without-replay failure handling, and `bloc-acs-trace/v2` transport
+  phases. The matched local n4 experiment retained 30/30 successful,
+  consistent measurements for each mode and batch. Persistent streams reduced
+  ACS p50 from `4.363/4.463/5.197 ms` to `1.798/2.002/2.943 ms` for batches
+  `8/32/128`; p50 and p95 confidence intervals were non-overlapping in every
+  cell, ACS send failures stayed zero, and median persistent queue wait was
+  `0.211/0.240/0.384 ms`. The analyzer classified all three cells and the
+  cross-batch result as `acs-signal`. This is accepted local mechanism evidence,
+  not proof of the WAN effect. Ignored roots are
+  `bloc-node/results/phase1-streams/local-fresh/`,
+  `bloc-node/results/phase1-streams/local-persistent/`, and
+  `bloc-node/results/phase1-streams/local-comparison/`. The next action is to
+  prepare the smallest matched n4 same-AZ and three-region persistent-stream
+  canaries under separate cloud authorization; do not expand to n7 or publish
+  p99 from 30 observations.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent

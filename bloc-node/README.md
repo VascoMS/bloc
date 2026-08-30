@@ -87,6 +87,14 @@ multiplexed libp2p streams. The generated bindings live in
 `proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
 local multiaddresses use TCP underneath; libp2p is not gRPC.
 
+`network.stream_mode` selects the envelope-stream lifecycle. Omission and
+`fresh` retain the compatibility path: protocol `/bloc/envelope/1.0.0`, one
+logical stream per envelope, and one protobuf message terminated by the stream
+boundary. `persistent` selects `/bloc/envelope/2.0.0`, prewarms one outbound
+stream per peer, and carries repeated length-delimited protobuf frames on it.
+The underlying libp2p peer connections are persistent in both modes; this
+experiment isolates reuse of the logical envelope streams.
+
 The v2 defaults are 8 MiB per encoded proposal, 16 MiB per inbound/outbound
 envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
 are restricted to authenticated configured operators, one batch identity, and
@@ -127,10 +135,13 @@ go run ./cmd/bloc-node eval-local \
 ```
 
 For a bounded ACS diagnostic artifact, use `eval-suite --acs-trace`. The flag
-is opt-in and propagates to generated isolated and persistent configs; the
-evaluator writes validated `bloc-acs-trace/v1` records to `acs_trace.jsonl`.
-See the ACS trace diagnostic gate in [docs/VALIDATION.md](../docs/VALIDATION.md)
-before interpreting or comparing those offsets.
+is opt-in and propagates to generated isolated and persistent configs; new
+evaluator runs write validated `bloc-acs-trace/v2` records to
+`acs_trace.jsonl`. Version 2 adds successful-send phase aggregates for encode,
+queue wait, stream open, write, and finalization plus stream open/reuse counts;
+the reader remains compatible with historical v1 artifacts. See the ACS trace
+diagnostic gate in [docs/VALIDATION.md](../docs/VALIDATION.md) before
+interpreting or comparing those offsets.
 
 Run the professor-facing demo flow:
 
@@ -218,6 +229,24 @@ short smoke command.
 
 Use `--execution-mode isolated` when validating process startup and teardown on
 every sample. Custom suites remain isolated unless persistent mode is requested.
+
+For the phase-one envelope-stream experiment, run matched `n=4` suites with
+`--execution-mode persistent --acs-trace` and set `--stream-mode fresh` or
+`--stream-mode persistent` explicitly. Each evidence cell uses batches
+`8/32/128`, 5 warmups, 30 measured repetitions, and seed `640`. Compare the
+two complete roots with:
+
+```sh
+cd latency-charts
+.venv/bin/python -m bloc_latency_charts transport-attribution \
+  --fresh-root ../bloc-node/results/phase1-streams/local-fresh \
+  --persistent-root ../bloc-node/results/phase1-streams/local-persistent \
+  --out-dir ../bloc-node/results/phase1-streams/local-comparison
+```
+
+The analyzer rejects mode, schedule, trace, failure, consistency, and retained
+provenance mismatches. Its p50/p95 confidence-interval classifications are
+diagnostic rather than a causal proof; 30 observations do not support p99.
 
 ## Frozen Campaign Bundles
 

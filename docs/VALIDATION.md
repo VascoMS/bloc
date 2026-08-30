@@ -216,10 +216,11 @@ go run ./cmd/bloc-node eval-suite \
 ```
 
 Acceptance requires a successful and consistent measured run, manifest schema
-`bloc-acs-trace/v1`, and exactly one validated `acs_trace.jsonl` record per
-node. Local listener-based evaluation may need to run outside a restricted
-network sandbox; preserve any failed environmental attempt rather than
-rewriting it as protocol evidence.
+`bloc-acs-trace/v2` for new artifacts, and exactly one validated
+`acs_trace.jsonl` record per node. Historical v1 artifacts remain readable but
+cannot support transport-phase attribution. Local listener-based evaluation may
+need to run outside a restricted network sandbox; preserve any failed
+environmental attempt rather than rewriting it as protocol evidence.
 
 Measure observer overhead from `sbc/hbbft` with:
 
@@ -234,6 +235,52 @@ delivery schedules for trace-off and trace-on. Retain raw output under ignored
 cell's trace-on median local ACS time exceeds its trace-off median by more than
 2%. Report allocation and byte deltas as observer-cost context; do not promote
 these local benchmark timings to VM or topology evidence.
+
+## Persistent Envelope-Stream Experiment Gate
+
+Issue #23 phase 1 tests whether reusing logical libp2p envelope streams changes
+the accepted n4 ACS latency signal. It does not change the persistent libp2p
+peer connection used by either arm. `fresh` uses `/bloc/envelope/1.0.0` with
+one stream per message; `persistent` uses `/bloc/envelope/2.0.0` with one
+prewarmed framed stream and a capacity-one writer queue per peer.
+
+Before collecting evidence, require the normal `bloc-node` and `hbbft` suites,
+the persistent-writer race stress, the complete chart suite, and a three-run
+smoke for each stream mode. The smoke proves correctness and artifact shape
+only. The matched local diagnostic uses `n=4,t=3`, batches `8/32/128`, five
+warmups, 30 measured repetitions, seed `640`, persistent evaluator processes,
+and ACS tracing. The two config bases must share the same identities, CRS, and
+BTE shares and differ only in `network.stream_mode`.
+
+Analyze complete roots with:
+
+```sh
+cd latency-charts
+.venv/bin/python -m bloc_latency_charts transport-attribution \
+  --fresh-root ../bloc-node/results/phase1-streams/local-fresh \
+  --persistent-root ../bloc-node/results/phase1-streams/local-persistent \
+  --out-dir ../bloc-node/results/phase1-streams/local-comparison
+```
+
+Acceptance requires exactly 30 successful, consistent measured attempts in
+every batch/mode cell, `bloc-acs-trace/v2`, zero ACS send failures, matching
+provenance and schedule fields, matching manifest/config material apart from
+the declared stream-mode difference, and open-plus-reuse counts equal to
+successful sends. Retain p50, p95, maximum, and confidence intervals; do not
+publish p99 from this sample.
+
+Interpret `encode`, `queue_wait`, `stream_open`, `write`, and `finalize` as
+sender-side durations. Fresh finalization is local stream closure, not remote
+receipt. Persistent queue wait is explicit serialization/backpressure, not a
+libp2p-provided delivery queue. The analyzer reports `acs-signal`,
+`sender-finalization-only`, `queue-regression`, or `null-or-mixed` per cell and
+requires a non-contradictory result in at least two of three batches for a
+stable local classification. The output tests a mechanism; it does not by
+itself prove the WAN root cause.
+
+Only after the local gate has no new failures, consistency errors, or stable
+queue regression should a separately authorized same-AZ/three-region canary be
+prepared. Cloud allocation is never implied by this gate.
 
 ## ACS Safety Gate
 

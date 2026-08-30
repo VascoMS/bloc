@@ -507,3 +507,36 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Related files: `scripts/lib/campaign_artifacts.py`,
   `scripts/tests/test_campaign_artifacts.py`, `docs/VALIDATION.md`,
   `docs/STATUS.md`
+
+## 0026. Isolate logical-stream reuse before migrating consensus messaging
+
+- Date: 2026-08-30
+- Status: Accepted
+- Context: Issue #23 attributed the n4 cross-region ACS increase to transport
+  and quorum waits, while the current direct-message path opens one logical
+  libp2p stream per envelope over already persistent peer connections. The
+  mechanism still needed an isolated experiment before the separately scoped
+  GossipSub migration.
+- Options considered: migrate ACS messaging directly to GossipSub; add an
+  unbounded shared transport queue; serialize stream writes with caller
+  mutexes; or compare the current path with one bounded persistent stream owner
+  per peer.
+- Decision: Keep `/bloc/envelope/1.0.0` as the fresh compatibility arm and add
+  `/bloc/envelope/2.0.0` as an opt-in persistent arm. Each peer has one worker,
+  a capacity-one request queue, one prewarmed length-delimited stream, and
+  synchronous send completion. On an uncertain write the stream is reset and
+  replaced for the next request without replay. Mixed modes fail readiness.
+- Rationale: A sole writer provides ordered framing without a stream mutex,
+  while the one-entry queue exposes rather than hides backpressure. Separate
+  protocol IDs prevent an accidental framing mismatch. The design uses
+  libp2p's persistent authenticated connections and streams directly; it does
+  not need an additional `go-msgio` dependency for a uvarint-bounded frame.
+- Consequences: ACS trace v2 separates encode, queue wait, stream open, write,
+  and fresh-stream finalization and retains open/reuse counts. Phase-one results
+  test whether logical-stream churn explains latency; they do not prove remote
+  receipt or replace the high-priority GossipSub phase. Cloud canaries remain a
+  separate, explicit authorization after the local gate.
+- Related files: `bloc-node/internal/app/transport_libp2p.go`,
+  `bloc-node/internal/app/transport_libp2p_persistent.go`,
+  `sbc/hbbft/trace.go`, `latency-charts/src/bloc_latency_charts/transport_attribution.py`,
+  `docs/VALIDATION.md`

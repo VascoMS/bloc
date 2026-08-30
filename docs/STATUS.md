@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-19`
+- Last reviewed: `2026-08-30`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -450,14 +450,17 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Leave issue #15 open and paused for resource collection. Do not admit any
+1. Start issue #23 as the next M5 implementation task: add bounded ACS
+   critical-path instrumentation and prove its local correctness and observer
+   overhead before selecting an optimization or requesting VM execution.
+2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
-2. Do not combine measurements from different source, image, corpus,
+3. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-3. Obtain explicit direction before selecting or launching the next milestone
-   task or any further billable VM campaign.
-4. Track granular work in the [BLOC Thesis Prototype GitHub
+4. Obtain explicit authorization before any billable same-AZ or three-region
+   diagnostic campaign under issue #23.
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

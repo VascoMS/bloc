@@ -66,6 +66,65 @@ func TestPersistentHandlerDeliversMultipleFrames(t *testing.T) {
 	}
 }
 
+func TestPersistentHandlerContinuesReadingWhileProtocolHandlerBlocks(t *testing.T) {
+	const frameCount = 32
+	handlerStarted := make(chan struct{})
+	handlerRelease := make(chan struct{})
+	deliveries := make(chan struct{}, frameCount)
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	pair := newLibP2PTransportPairWithHandler(t, streamModePersistent, streamModePersistent, true,
+		func(WireEnvelope, int) {
+			startedOnce.Do(func() { close(handlerStarted) })
+			<-handlerRelease
+			deliveries <- struct{}{}
+		})
+	defer releaseOnce.Do(func() { close(handlerRelease) })
+	pair.receiver.node.cfg.Limits.MaxEnvelopeBytes = 1 << 20
+
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	envelope := validPersistentTestEnvelope(pair.sender.node.self.ID, pair.receiver.node.self.ID, 1)
+	envelope.Share.PointHex = strings.Repeat("a", 512<<10)
+	data, err := (ProtoEnvelopeCodec{}).Encode(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnvelopeFrame(stream, data); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("protocol handler did not receive the first frame")
+	}
+	for index := 1; index < frameCount; index++ {
+		if err := writeEnvelopeFrame(stream, data); err != nil {
+			t.Fatalf("write frame %d while handler blocked: %v", index+1, err)
+		}
+	}
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	releaseOnce.Do(func() { close(handlerRelease) })
+	for index := 0; index < frameCount; index++ {
+		select {
+		case <-deliveries:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for dispatched frame %d", index+1)
+		}
+	}
+}
+
 func TestPersistentHandlerRejectsAuthenticatedEnvelopeViolations(t *testing.T) {
 	tests := []struct {
 		name   string

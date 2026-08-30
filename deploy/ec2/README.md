@@ -116,22 +116,24 @@ trace v2. It requires four separate immutable n4 latency runs from the same
 source, images, bundle, batches, seed, warmups, measurements, and block
 schedule: same-AZ fresh, same-AZ persistent, three-region fresh, then
 three-region persistent. Never switch an existing deployment in place. The
-first invalid artifact or unproven cleanup stops the sequence.
+first invalid artifact or unproven cleanup stops the sequence. Resolve
+`--bundle-root` to an absolute path before both validation and live execution;
+the lifecycle verifier runs from the `bloc-node` module directory.
 
 Use the matching topology wrapper and one of these mode/ID pairs with the same
 common arguments shown above:
 
 ```sh
 # Same AZ
---experiment-id bloc-ec2-i23-p1-sa-fr-c1 --stream-mode fresh \
+--experiment-id bloc-ec2-i23-p1-sa-fr-c3 --stream-mode fresh \
   --acs-trace-schema bloc-acs-trace/v2
---experiment-id bloc-ec2-i23-p1-sa-ps-c1 --stream-mode persistent \
+--experiment-id bloc-ec2-i23-p1-sa-ps-c3 --stream-mode persistent \
   --acs-trace-schema bloc-acs-trace/v2
 
 # Three regions
---experiment-id bloc-ec2-i23-p1-tr-fr-c1 --stream-mode fresh \
+--experiment-id bloc-ec2-i23-p1-tr-fr-c3 --stream-mode fresh \
   --acs-trace-schema bloc-acs-trace/v2
---experiment-id bloc-ec2-i23-p1-tr-ps-c1 --stream-mode persistent \
+--experiment-id bloc-ec2-i23-p1-tr-ps-c3 --stream-mode persistent \
   --acs-trace-schema bloc-acs-trace/v2
 ```
 
@@ -173,9 +175,10 @@ The fixed phases are `readiness-pilot` (n4 only: 1 warmup, 3 attempts, sampler
 off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and
 `resource` (0 warmups, 1,000 attempts, 10 blocks, sampler on). All use batches
 8/32/128, seed 20260621, and the 12-second boundary. The extension phase remains
-rejected until a later n10/batch-512 30-observation decision. The explicit
-`bloc-acs-trace/v1` latency diagnostic is the narrow exception: it uses the
-5-warmup/30-attempt/3-block contract above and does not run a resource phase.
+rejected until a later n10/batch-512 30-observation decision. An explicit
+`bloc-acs-trace/v1` or `bloc-acs-trace/v2` latency diagnostic is the narrow
+exception: it uses the 5-warmup/30-attempt/3-block contract above and does not
+run a resource phase.
 
 ## Manual Deployment Recipe
 

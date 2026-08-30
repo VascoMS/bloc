@@ -111,11 +111,27 @@ release-candidate configuration contract are defined in
   `bloc-node/results/phase1-streams/local-fresh/`,
   `bloc-node/results/phase1-streams/local-persistent/`, and
   `bloc-node/results/phase1-streams/local-comparison/`. The phase-one cloud
-  campaign is explicitly authorized. Its fail-closed order is same-AZ fresh,
-  same-AZ persistent, three-region fresh, then three-region persistent, using
-  one newly frozen source/image/bundle and trace v2 throughout. Each run must
-  validate and prove authenticated empty cleanup before the next allocation.
-  Do not expand to n7 or publish p99 from 30 observations.
+  campaign is explicitly authorized. Source
+  `fbebd778c76cd0c8e3a16a5673cb1803bec2f090` and private ECR image
+  `sha256:730771174d5cd6a79ff19271c65fddf7fd28a6da2f74698cd4ad08ce9ab70a50`
+  passed the four-arm no-allocation contract. Same-AZ fresh attempt
+  `bloc-ec2-i23-p1-sa-fr-c2` is accepted: all nine cells completed, retaining
+  90/90 measured runs and 420 trace-v2 records. Terraform destroyed all 15
+  resources and retained plus independent authenticated cleanup checks are
+  empty. Same-AZ persistent attempt `bloc-ec2-i23-p1-sa-ps-c1` is rejected:
+  slot 1 timed out with zero node results, its prewarmed streams reset at the
+  ten-second write deadlines, and later slots returned `409 Conflict` because
+  slot 1 remained active. Its 0/90 completed measured runs are not evidence.
+  The materializer marked the phase invalid, Terraform destroyed all 15
+  resources, and retained plus independent cleanup checks are empty. The
+  campaign remains halted before multi-region. A bounded 32-frame FIFO handoff
+  now keeps each persistent stream's read loop draining while one dispatcher
+  invokes the protocol handler in order. The failure was reproduced before the
+  change, and the regression, focused/full/race transport checks, a four-slot
+  smoke run, and the exact 105-slot local matrix now pass: 90/90 measured runs,
+  420 trace-v2 records, zero send failures, and no recovery. Freeze a new
+  source/image/bundle and rerun the matched same-AZ pair before allocating
+  multi-region. Do not expand to n7 or publish p99 from 30 observations.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -499,17 +515,17 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain explicit live authorization for issue #23's smallest matched n4
-   same-AZ and three-region diagnostic canaries. Validate and compare that pair
-   before scaling to n7 or the full campaign. Do not start live infrastructure
-   or select an optimization before that authorization and matched evidence.
+1. Freeze the corrected issue #23 source/image/bundle, rerun same-AZ fresh then
+   persistent, and advance to the authorized multi-region pair only if both
+   same-AZ arms and their independent cleanup checks are accepted.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
 3. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-4. Obtain explicit authorization before any billable same-AZ or three-region
-   diagnostic campaign under issue #23.
+4. Keep the existing issue #23 live authorization scoped to the fail-closed n4
+   four-arm campaign; do not advance to multi-region until the corrected
+   same-AZ pair is accepted and cleanup is independently empty.
 5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next

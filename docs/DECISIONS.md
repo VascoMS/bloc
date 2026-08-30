@@ -524,18 +524,26 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Keep `/bloc/envelope/1.0.0` as the fresh compatibility arm and add
   `/bloc/envelope/2.0.0` as an opt-in persistent arm. Each peer has one worker,
   a capacity-one request queue, one prewarmed length-delimited stream, and
-  synchronous send completion. On an uncertain write the stream is reset and
-  replaced for the next request without replay. Mixed modes fail readiness.
+  synchronous send completion. Each authenticated inbound v2 stream drains
+  frames into one ordered dispatcher through a bounded 32-frame handoff. On an
+  uncertain write the stream is reset and replaced for the next request without
+  replay. Mixed modes fail readiness.
 - Rationale: A sole writer provides ordered framing without a stream mutex,
   while the one-entry queue exposes rather than hides backpressure. Separate
   protocol IDs prevent an accidental framing mismatch. The design uses
   libp2p's persistent authenticated connections and streams directly; it does
-  not need an additional `go-msgio` dependency for a uvarint-bounded frame.
+  not need an additional `go-msgio` dependency for a uvarint-bounded frame. The
+  bounded inbound handoff preserves per-peer FIFO while preventing ACS handler
+  contention from immediately stopping the stream read loop; saturation still
+  propagates to the existing bounded write deadline instead of hiding pressure
+  in an unbounded queue.
 - Consequences: ACS trace v2 separates encode, queue wait, stream open, write,
   and fresh-stream finalization and retains open/reuse counts. Phase-one results
   test whether logical-stream churn explains latency; they do not prove remote
-  receipt or replace the high-priority GossipSub phase. Cloud canaries remain a
-  separate, explicit authorization after the local gate.
+  receipt or replace the high-priority GossipSub phase. The first AWS persistent
+  arm exposed the missing read/dispatch separation by timing out slot 1 and is
+  rejected evidence; the corrected transport requires a new immutable freeze
+  and matched same-AZ pair before multi-region collection.
 - Related files: `bloc-node/internal/app/transport_libp2p.go`,
   `bloc-node/internal/app/transport_libp2p_persistent.go`,
   `sbc/hbbft/trace.go`, `latency-charts/src/bloc_latency_charts/transport_attribution.py`,

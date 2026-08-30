@@ -199,14 +199,22 @@ next request to open a replacement. This preserves the existing application
 ordering and accounting while making any queue pressure explicit; it is not a
 general-purpose transport queue or delivery acknowledgement.
 
+Each authenticated inbound v2 stream has one FIFO dispatcher behind a bounded
+32-frame handoff. The stream reader can therefore continue draining a normal
+n4 ACS burst while the node's serialized ACS state machine handles an earlier
+frame. The bound prevents an unbounded application queue; if it fills, normal
+stream flow control reaches the sender and the existing write deadline exposes
+the pressure. Shutdown closes the handoff, drains admitted frames in order, and
+waits for that dispatcher before returning.
+
 Lower-ID peers repeatedly connect to higher-ID peers in both modes. Fresh-mode
 health becomes ready once every configured peer is connected. Persistent-mode
 health additionally requires peerstore support for protocol v2 and a cached
 prewarmed stream for every peer; prewarming never initiates a new peer dial.
 Shutdown stops admission, cancels prewarming, closes the host, drains/fails
-workers, and waits for active inbound handlers. Protocol v1 remains fresh-only
-and v2 persistent-only so mixed configurations fail readiness instead of
-silently changing framing.
+workers, and waits for active inbound streams plus their dispatchers. Protocol
+v1 remains fresh-only and v2 persistent-only so mixed configurations fail
+readiness instead of silently changing framing.
 
 Before reading an inbound stream, the handler maps
 `stream.Conn().RemotePeer()` through the unique configured peer-ID membership

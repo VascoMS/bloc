@@ -23,6 +23,7 @@ import (
 const (
 	blocEnvelopeProtocolFresh      = protocol.ID("/bloc/envelope/1.0.0")
 	blocEnvelopeProtocolPersistent = protocol.ID("/bloc/envelope/2.0.0")
+	persistentInboundQueueCapacity = 32
 )
 
 var errEnvelopeTooLarge = errors.New("protocol envelope exceeds configured maximum")
@@ -179,6 +180,22 @@ func (t *LibP2PTransport) handlePersistentStream(stream network.Stream) {
 		t.rejectPersistentStream(stream, "authentication", fmt.Errorf("unconfigured peer_id=%s", remotePeer))
 		return
 	}
+	type inboundEnvelope struct {
+		envelope     WireEnvelope
+		encodedBytes int
+	}
+	deliveries := make(chan inboundEnvelope, persistentInboundQueueCapacity)
+	dispatchDone := make(chan struct{})
+	go func() {
+		defer close(dispatchDone)
+		for delivery := range deliveries {
+			t.handler(delivery.envelope, delivery.encodedBytes)
+		}
+	}()
+	defer func() {
+		close(deliveries)
+		<-dispatchDone
+	}()
 	reader := bufio.NewReader(stream)
 	for {
 		data, err := readEnvelopeFrame(reader, t.node.cfg.Limits.MaxEnvelopeBytes)
@@ -206,7 +223,11 @@ func (t *LibP2PTransport) handlePersistentStream(stream network.Stream) {
 			t.rejectPersistentStream(stream, "authentication", err)
 			return
 		}
-		t.handler(envelope, len(data))
+		select {
+		case deliveries <- inboundEnvelope{envelope: envelope, encodedBytes: len(data)}:
+		case <-t.persistentStop:
+			return
+		}
 	}
 }
 

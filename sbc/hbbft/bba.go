@@ -227,6 +227,7 @@ func (b *BBA) inputValue(val bool) error {
 	if b.epoch != 0 || b.estimated != nil {
 		return nil
 	}
+	b.trace.recordBBA(b.proposerID, traceBBAInput, val, b.epoch)
 	b.estimated = val
 	b.sentBvals = append(b.sentBvals, val)
 	b.addMessage(NewAgreementMessage(int(b.epoch), &BvalRequest{val}))
@@ -275,6 +276,7 @@ func (b *BBA) handleBvalRequest(senderID uint64, val bool) error {
 	if lenBval == 2*b.F+1 {
 		wasEmptyBinValues := len(b.binValues) == 0
 		b.binValues = append(b.binValues, val)
+		b.trace.recordBBA(b.proposerID, traceBBAFirstBinValue, val, b.epoch)
 		// If inputs > 0 broadcast output(b) and handle the output ourselfs.
 		// Wait until binValues > 0, then broadcast AUX(b). The AUX(b) broadcast
 		// may only occure once per epoch.
@@ -299,6 +301,7 @@ func (b *BBA) handleBvalRequest(senderID uint64, val bool) error {
 }
 
 func (b *BBA) handleAuxRequest(senderID uint64, val bool) error {
+	b.trace.recordBBA(b.proposerID, traceBBAFirstAux, val, b.epoch)
 	b.lock.Lock()
 	b.recvAux[senderID] = val
 	b.lock.Unlock()
@@ -320,6 +323,7 @@ func (b *BBA) tryOutputAgreement() {
 	if lenOutputs < b.N-b.F {
 		return
 	}
+	b.trace.recordBBA(b.proposerID, traceBBAValidAuxQuorum, false, b.epoch)
 
 	// TODO: implement a real common coin algorithm.
 	coin := b.epoch%2 == 0
@@ -329,6 +333,7 @@ func (b *BBA) tryOutputAgreement() {
 	// - the value (coin r) = b for some round r' > r
 	if b.done || b.decision != nil && b.decision.(bool) == coin {
 		b.done = true
+		b.trace.recordBBA(b.proposerID, traceBBADone, false, b.epoch)
 		return
 	}
 
@@ -348,6 +353,7 @@ func (b *BBA) tryOutputAgreement() {
 		if b.decision == nil && values[0] == coin {
 			b.output = values[0]
 			b.decision = values[0]
+			b.trace.recordBBA(b.proposerID, traceBBADecision, values[0], b.epoch-1)
 			log.Debugf("id (%d) outputed a decision (%v) after (%d) msgs", b.ID, values[0], b.msgCount)
 			b.msgCount = 0
 		}
@@ -377,6 +383,7 @@ func (b *BBA) advanceEpoch() {
 	b.recvAux = make(map[uint64]bool)
 	b.recvBval = newBvalSet()
 	b.epoch++
+	b.trace.recordBBA(b.proposerID, traceBBAEpoch, false, b.epoch)
 }
 
 // countOutputs returns the number of received (aux) messages, the corresponding

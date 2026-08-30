@@ -86,3 +86,22 @@ func TestTraceRecorderIgnoresEventsBeforeItsOrigin(t *testing.T) {
 		t.Fatalf("negative offset was recorded: %+v", got)
 	}
 }
+
+func TestTraceWaitTransitionsAreExclusive(t *testing.T) {
+	base := time.Unix(450, 0)
+	now := base
+	recorder := newTraceRecorder([]uint64{0, 1, 2, 3}, true, func() time.Time { return now })
+	recorder.begin(base)
+	recorder.transitionWait("waiting_for_n_minus_f_true_bba_results")
+	now = base.Add(50 * time.Microsecond)
+	recorder.transitionWait("waiting_for_all_bba_results")
+	now = base.Add(80 * time.Microsecond)
+	recorder.transitionWait("waiting_for_truthy_rbc_outputs")
+	now = base.Add(100 * time.Microsecond)
+	recorder.finishWait()
+
+	got := recorder.snapshot().Wait
+	if got.TrueBBAQuorumUS != 50 || got.AllBBAUS != 30 || got.TruthyRBCUS != 20 {
+		t.Fatalf("wait attribution = %+v", got)
+	}
+}

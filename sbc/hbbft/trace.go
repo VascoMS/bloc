@@ -146,6 +146,7 @@ const (
 	traceBBAValidAuxQuorum
 	traceBBADecision
 	traceBBADone
+	traceBBAEpoch
 )
 
 type adapterTraceEvent uint8
@@ -157,12 +158,14 @@ const (
 )
 
 type traceRecorder struct {
-	mu      sync.Mutex
-	enabled bool
-	now     func() time.Time
-	base    time.Time
-	started bool
-	trace   ACSTrace
+	mu          sync.Mutex
+	enabled     bool
+	now         func() time.Time
+	base        time.Time
+	started     bool
+	waitReason  string
+	waitStarted time.Time
+	trace       ACSTrace
 }
 
 func newTraceRecorder(nodes []uint64, enabled bool, now func() time.Time) *traceRecorder {
@@ -203,16 +206,17 @@ func (r *traceRecorder) begin(base time.Time) {
 	r.started = true
 }
 
-func (r *traceRecorder) pointLocked(point *TracePoint) {
+func (r *traceRecorder) pointLocked(point *TracePoint) bool {
 	if point.Recorded || !r.started {
-		return
+		return false
 	}
 	offset := r.now().Sub(r.base).Microseconds()
 	if offset < 0 {
-		return
+		return false
 	}
 	point.Recorded = true
 	point.OffsetUS = offset
+	return true
 }
 
 func (r *traceRecorder) recordAggregate(event aggregateTraceEvent) {
@@ -278,6 +282,110 @@ func (r *traceRecorder) recordRBC(proposerID uint64, event rbcTraceEvent) {
 	}
 	r.pointLocked(point)
 	r.trace.RBC[proposerID] = entry
+}
+
+func (r *traceRecorder) recordBBA(proposerID uint64, event bbaTraceEvent, value bool, epoch uint32) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started {
+		return
+	}
+	entry, ok := r.trace.BBA[proposerID]
+	if !ok {
+		return
+	}
+	if epoch > entry.MaxEpoch {
+		entry.MaxEpoch = epoch
+	}
+	switch event {
+	case traceBBAInput:
+		if r.pointLocked(&entry.Input) {
+			entry.InputValue = value
+		}
+	case traceBBAFirstBinValue:
+		if r.pointLocked(&entry.FirstBinValue) {
+			entry.FirstBin = value
+		}
+	case traceBBAFirstAux:
+		if r.pointLocked(&entry.FirstAux) {
+			entry.FirstAuxValue = value
+		}
+	case traceBBAValidAuxQuorum:
+		r.pointLocked(&entry.ValidAuxQuorum)
+	case traceBBADecision:
+		if r.pointLocked(&entry.Decision) {
+			entry.DecisionValue = value
+		}
+	case traceBBADone:
+		r.pointLocked(&entry.Done)
+	case traceBBAEpoch:
+	default:
+		return
+	}
+	r.trace.BBA[proposerID] = entry
+}
+
+func (r *traceRecorder) transitionWait(reason string) {
+	if r == nil || !r.enabled || !validTraceWaitReason(reason) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started || r.waitReason == reason {
+		return
+	}
+	now := r.now()
+	if now.Before(r.base) || (!r.waitStarted.IsZero() && now.Before(r.waitStarted)) {
+		return
+	}
+	r.finishWaitLocked(now)
+	r.waitReason = reason
+	r.waitStarted = now
+}
+
+func (r *traceRecorder) finishWait() {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started || r.waitReason == "" {
+		return
+	}
+	now := r.now()
+	if now.Before(r.waitStarted) {
+		return
+	}
+	r.finishWaitLocked(now)
+}
+
+func (r *traceRecorder) finishWaitLocked(now time.Time) {
+	if r.waitReason == "" {
+		return
+	}
+	durationUS := now.Sub(r.waitStarted).Microseconds()
+	switch r.waitReason {
+	case waitForTrueBBAResults:
+		r.trace.Wait.TrueBBAQuorumUS += durationUS
+	case waitForAllBBAResults:
+		r.trace.Wait.AllBBAUS += durationUS
+	case waitForTruthyRBCOutputs:
+		r.trace.Wait.TruthyRBCUS += durationUS
+	}
+	r.waitReason = ""
+	r.waitStarted = time.Time{}
+}
+
+func validTraceWaitReason(reason string) bool {
+	switch reason {
+	case waitForTrueBBAResults, waitForAllBBAResults, waitForTruthyRBCOutputs:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *traceRecorder) snapshot() ACSTrace {

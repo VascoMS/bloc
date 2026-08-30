@@ -6,6 +6,12 @@ import (
 	"sync"
 )
 
+const (
+	waitForTrueBBAResults   = "waiting_for_n_minus_f_true_bba_results"
+	waitForAllBBAResults    = "waiting_for_all_bba_results"
+	waitForTruthyRBCOutputs = "waiting_for_truthy_rbc_outputs"
+)
+
 // ACSMessage represents a message sent between nodes in the ACS protocol.
 type ACSMessage struct {
 	// Unique identifier of the "proposing" node.
@@ -237,6 +243,8 @@ func (a *ACS) Done() bool {
 // inputValue sets the input value for broadcast and returns an initial set of
 // Broadcast and ACS Messages to be broadcasted in the network.
 func (a *ACS) inputValue(data []byte) error {
+	a.trace.recordAggregate(traceACSInputStarted)
+	a.trace.transitionWait(waitForTrueBBAResults)
 	rbc, ok := a.rbcInstances[a.ID]
 	if !ok {
 		return fmt.Errorf("could not find rbc instance (%d)", a.ID)
@@ -256,6 +264,7 @@ func (a *ACS) inputValue(data []byte) error {
 	}
 	if output := rbc.Output(); output != nil {
 		a.rbcResults[a.ID] = output
+		a.recordTraceState()
 		a.processAgreement(a.ID, func(bba *BBA) error {
 			if bba.AcceptInput() {
 				return bba.InputValue(true)
@@ -359,6 +368,7 @@ func (a *ACS) processBroadcast(pid uint64, fun func(rbc *RBC) error) error {
 	}
 	if output := rbc.Output(); output != nil {
 		a.rbcResults[pid] = output
+		a.recordTraceState()
 		err := a.processAgreement(pid, func(bba *BBA) error {
 			if bba.AcceptInput() {
 				return bba.InputValue(true)
@@ -393,11 +403,17 @@ func (a *ACS) processAgreement(pid uint64, fun func(bba *BBA) error) error {
 			return fmt.Errorf("multiple bba results for (%d)", pid)
 		}
 		a.bbaResults[pid] = output.(bool)
+		a.recordTraceState()
 		// When received 1 from at least (N - f) instances of BA, provide input 0.
 		// to each other instance of BBA that has not provided his input yet.
 		if output.(bool) && a.countTruthyAgreements() == a.N-a.F {
+			falseInputRecorded := false
 			for id, bba := range a.bbaInstances {
 				if bba.AcceptInput() {
+					if !falseInputRecorded {
+						a.trace.recordAggregate(traceACSFalseInputInjected)
+						falseInputRecorded = true
+					}
 					if err := bba.InputValue(false); err != nil {
 						return err
 					}
@@ -406,6 +422,7 @@ func (a *ACS) processAgreement(pid uint64, fun func(bba *BBA) error) error {
 					}
 					if output := bba.Output(); output != nil {
 						a.bbaResults[id] = output.(bool)
+						a.recordTraceState()
 					}
 				}
 			}
@@ -416,6 +433,8 @@ func (a *ACS) processAgreement(pid uint64, fun func(bba *BBA) error) error {
 }
 
 func (a *ACS) tryCompleteAgreement() {
+	a.recordTraceState()
+	a.trace.transitionWait(a.waitingReason())
 	if a.decided || a.countTruthyAgreements() < a.N-a.F {
 		return
 	}
@@ -440,6 +459,38 @@ func (a *ACS) tryCompleteAgreement() {
 	}
 	a.output = bcResults
 	a.decided = true
+	a.trace.recordAggregate(traceACSCoreDecision)
+	a.trace.finishWait()
+}
+
+func (a *ACS) recordTraceState() {
+	if len(a.rbcResults) > 0 {
+		a.trace.recordAggregate(traceACSFirstRBCOutput)
+	}
+	if len(a.rbcResults) >= a.N-a.F {
+		a.trace.recordAggregate(traceACSRBCOutputQuorum)
+	}
+	truthy := a.countTruthyAgreements()
+	if truthy > 0 {
+		a.trace.recordAggregate(traceACSFirstTrueBBA)
+	}
+	if truthy >= a.N-a.F {
+		a.trace.recordAggregate(traceACSTrueBBAQuorum)
+	}
+	if len(a.bbaResults) == a.N {
+		a.trace.recordAggregate(traceACSAllBBADecided)
+	}
+	if truthy < a.N-a.F || len(a.bbaResults) < a.N {
+		return
+	}
+	for id, result := range a.bbaResults {
+		if result {
+			if _, ok := a.rbcResults[id]; !ok {
+				return
+			}
+		}
+	}
+	a.trace.recordAggregate(traceACSTruthyRBCReady)
 }
 
 func (a *ACS) waitingReason() string {
@@ -447,15 +498,15 @@ func (a *ACS) waitingReason() string {
 		return ""
 	}
 	if a.countTruthyAgreements() < a.N-a.F {
-		return "waiting_for_n_minus_f_true_bba_results"
+		return waitForTrueBBAResults
 	}
 	if len(a.bbaResults) < a.N {
-		return "waiting_for_all_bba_results"
+		return waitForAllBBAResults
 	}
 	for id, result := range a.bbaResults {
 		if result {
 			if _, ok := a.rbcResults[id]; !ok {
-				return "waiting_for_truthy_rbc_outputs"
+				return waitForTruthyRBCOutputs
 			}
 		}
 	}

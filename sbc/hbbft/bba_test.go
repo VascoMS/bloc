@@ -2,9 +2,51 @@ package hbbft
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestBBATraceRecordsEpochAndDecisionMilestones(t *testing.T) {
+	base := time.Unix(700, 0)
+	now := base
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
+	recorder.begin(base)
+	bba := newBBA(Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)}, 3, recorder)
+	t.Cleanup(bba.stop)
+
+	now = base.Add(10 * time.Microsecond)
+	assert.NoError(t, bba.InputValue(true))
+
+	deliverEpoch := func(start time.Duration) {
+		t.Helper()
+		now = base.Add(start)
+		assert.NoError(t, bba.handleBvalRequest(1, true))
+		now = base.Add(start + 10*time.Microsecond)
+		assert.NoError(t, bba.handleBvalRequest(2, true))
+		now = base.Add(start + 20*time.Microsecond)
+		assert.NoError(t, bba.handleAuxRequest(1, true))
+		now = base.Add(start + 30*time.Microsecond)
+		assert.NoError(t, bba.handleAuxRequest(2, true))
+	}
+
+	deliverEpoch(20 * time.Microsecond)
+	deliverEpoch(60 * time.Microsecond)
+	deliverEpoch(100 * time.Microsecond)
+
+	got := bba.trace.snapshot().BBA[bba.proposerID]
+	if !got.Input.Recorded || !got.InputValue || !got.FirstBinValue.Recorded ||
+		!got.FirstBin || !got.FirstAux.Recorded || !got.FirstAuxValue ||
+		!got.ValidAuxQuorum.Recorded || !got.Decision.Recorded ||
+		!got.DecisionValue || !got.Done.Recorded {
+		t.Fatalf("incomplete BBA trace: %+v", got)
+	}
+	if got.Input.OffsetUS != 10 || got.FirstBinValue.OffsetUS != 30 ||
+		got.FirstAux.OffsetUS != 30 || got.ValidAuxQuorum.OffsetUS != 50 ||
+		got.Decision.OffsetUS != 50 || got.Done.OffsetUS != 130 || got.MaxEpoch != 2 {
+		t.Fatalf("BBA trace offsets: %+v", got)
+	}
+}
 
 // Testing BBA should cover all of the following specifications.
 //

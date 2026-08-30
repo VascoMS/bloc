@@ -117,6 +117,66 @@ func TestNewACSPreservesTraceDisabledCompatibility(t *testing.T) {
 	}
 }
 
+func TestACSTraceRecordsAggregateCompletionGates(t *testing.T) {
+	base := time.Unix(800, 0)
+	now := base
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
+	recorder.begin(base)
+	acs := newACS(Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)}, recorder)
+	t.Cleanup(acs.stop)
+
+	for index, id := range []uint64{0, 1, 2} {
+		now = base.Add(time.Duration(index+1) * 10 * time.Microsecond)
+		acs.bbaResults[id] = true
+		acs.tryCompleteAgreement()
+	}
+	now = base.Add(40 * time.Microsecond)
+	acs.bbaResults[3] = false
+	acs.tryCompleteAgreement()
+	for index, id := range []uint64{0, 1, 2} {
+		now = base.Add(time.Duration(index+5) * 10 * time.Microsecond)
+		acs.rbcResults[id] = []byte{byte(id)}
+		acs.tryCompleteAgreement()
+	}
+
+	got := acs.trace.snapshot().Aggregate
+	if got.FirstTrueBBA.OffsetUS != 10 || got.TrueBBAQuorum.OffsetUS != 30 ||
+		got.AllBBADecided.OffsetUS != 40 || got.FirstRBCOutput.OffsetUS != 50 ||
+		got.RBCOutputQuorum.OffsetUS != 70 || got.TruthyRBCReady.OffsetUS != 70 ||
+		got.CoreDecision.OffsetUS != 70 {
+		t.Fatalf("ACS aggregate gates: %+v", got)
+	}
+	if !acs.decided {
+		t.Fatal("ACS did not preserve completion behavior")
+	}
+}
+
+func TestACSTraceRecordsFalseInputInjection(t *testing.T) {
+	base := time.Unix(850, 0)
+	now := base
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
+	recorder.begin(base)
+	acs := newACS(Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)}, recorder)
+	t.Cleanup(acs.stop)
+
+	for index, id := range []uint64{0, 1, 2} {
+		now = base.Add(time.Duration(index+1) * 10 * time.Microsecond)
+		acs.bbaInstances[id].output = true
+		if err := acs.processAgreement(id, func(*BBA) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := acs.trace.snapshot()
+	if got.Aggregate.FalseInputInjected.OffsetUS != 30 {
+		t.Fatalf("false-input injection = %+v", got.Aggregate.FalseInputInjected)
+	}
+	remaining := got.BBA[3]
+	if !remaining.Input.Recorded || remaining.InputValue || remaining.Input.OffsetUS != 30 {
+		t.Fatalf("remaining BBA input = %+v", remaining)
+	}
+}
+
 func TestACSOutputIsNilAfterConsuming(t *testing.T) {
 	acs := NewACS(Config{N: 4})
 	output := map[uint64][]byte{

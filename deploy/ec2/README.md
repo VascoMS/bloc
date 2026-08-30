@@ -111,6 +111,39 @@ resource sampler off. Historical campaigns without `acs_trace_schema` remain
 valid and do not require trace artifacts. Live execution still requires the
 separate authorization described above.
 
+Issue #23 phase 1 compares fresh and persistent logical envelope streams under
+trace v2. It requires four separate immutable n4 latency runs from the same
+source, images, bundle, batches, seed, warmups, measurements, and block
+schedule: same-AZ fresh, same-AZ persistent, three-region fresh, then
+three-region persistent. Never switch an existing deployment in place. The
+first invalid artifact or unproven cleanup stops the sequence.
+
+Use the matching topology wrapper and one of these mode/ID pairs with the same
+common arguments shown above:
+
+```sh
+# Same AZ
+--experiment-id bloc-ec2-i23-p1-sa-fr-c1 --stream-mode fresh \
+  --acs-trace-schema bloc-acs-trace/v2
+--experiment-id bloc-ec2-i23-p1-sa-ps-c1 --stream-mode persistent \
+  --acs-trace-schema bloc-acs-trace/v2
+
+# Three regions
+--experiment-id bloc-ec2-i23-p1-tr-fr-c1 --stream-mode fresh \
+  --acs-trace-schema bloc-acs-trace/v2
+--experiment-id bloc-ec2-i23-p1-tr-ps-c1 --stream-mode persistent \
+  --acs-trace-schema bloc-acs-trace/v2
+```
+
+`--stream-mode` defaults to `fresh` for historical contracts. Persistent mode
+is accepted only with `bloc-acs-trace/v2`. Materialization and final acceptance
+require exact mode agreement across the public cluster config, remote evaluator
+config, phase manifest, evaluator manifests, and retained run/node rows. Phase
+v2 validation also reconciles encode, queue-wait, stream-open, write,
+finalization, and stream open/reuse aggregates. The comparison surface is
+p50/p95/max ACS and milestone/transport phases; 30 observations do not support
+p99.
+
 Evaluator invocations do not remain attached to a long-lived SSH session. The
 runner stages `run-final-remote-job.sh` on the controller, atomically claims one
 job identity per block/batch/first-slot tuple, starts that job at most once, and

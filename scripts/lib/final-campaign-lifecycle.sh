@@ -85,13 +85,13 @@ final_run_campaign_lifecycle() {
     --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
     --arg deadline "$FINAL_DEADLINE" --arg sampler "$FINAL_SAMPLER" --argjson warmups "$FINAL_WARMUPS" \
     --argjson repetitions "$FINAL_REPETITIONS" --argjson blocks "$FINAL_BLOCKS" --argjson seed "$FINAL_SEED" \
-    --arg acs_trace_schema "${FINAL_ACS_TRACE_SCHEMA:-}" \
+    --arg acs_trace_schema "${FINAL_ACS_TRACE_SCHEMA:-}" --arg stream_mode "${FINAL_STREAM_MODE:-fresh}" \
     --slurpfile bundle "$FINAL_BUNDLE_ROOT/bundle-manifest.json" \
     '{schema_version:"bloc-final-campaign-phase-v1",status:$status,phase:$phase,topology:$topology,node_count:$n,
       source_sha:$source,bloc_image:$bloc,mempool_image:$mempool,bundle_version:$bundle[0].version,
       public_config_id:$bundle[0].public_config_id,encrypted_corpus_id:$bundle[0].encrypted_corpus_id,
       batches:[8,32,128],seed:$seed,deadline:$deadline,warmups:$warmups,repetitions:$repetitions,blocks:$blocks,
-      sampler:$sampler,acs_trace_schema:$acs_trace_schema}' \
+      sampler:$sampler,acs_trace_schema:$acs_trace_schema,stream_mode:$stream_mode}' \
     >"$artifact_root/manifest.json"
   if [[ "$status" -eq 0 ]]; then
     python3 "$FINAL_REPO_ROOT/scripts/lib/campaign_artifacts.py" assert-final-phase \
@@ -220,6 +220,7 @@ final_materialize_public() {
     --cluster-out "$artifact_root/generated-public/cluster.json"
     --crs-out "$artifact_root/generated-public/cluster.crs"
     --remote-eval-out "$artifact_root/generated-public/remote-eval.json"
+    --stream-mode "${FINAL_STREAM_MODE:-fresh}"
   )
   [[ -z "${FINAL_ACS_TRACE_SCHEMA:-}" ]] || materialize_args+=(--acs-trace)
   (

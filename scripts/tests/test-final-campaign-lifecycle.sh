@@ -345,6 +345,12 @@ grep -Fq -- '--acs-trace' "$materialize_log" || {
   echo "diagnostic campaign materialization omitted ACS tracing" >&2
   exit 1
 }
+FINAL_STREAM_MODE=persistent FINAL_ACS_TRACE_SCHEMA=bloc-acs-trace/v2
+PATH="$materialize_bin:$PATH" final_materialize_public "$materialize_root"
+grep -Fq -- '--stream-mode persistent' "$materialize_log" || {
+  echo "persistent campaign materialization omitted its stream mode" >&2
+  exit 1
+}
 
 stage_root="$fixture/stage"
 mkdir -p "$stage_root/bundle/secrets" "$stage_root/generated-public"
@@ -629,6 +635,7 @@ install_fakes() {
   FINAL_SAMPLER=off FINAL_WARMUPS=10 FINAL_REPETITIONS=1000 FINAL_BLOCKS=10
   FINAL_SEED=20260621 FINAL_DEADLINE=12s
   FINAL_ACS_TRACE_SCHEMA=""
+  FINAL_STREAM_MODE=fresh
   FINAL_FAIL_STAGE=""
 
   final_topology_prepare() { printf 'prepare\n' >>"$FINAL_EVENT_LOG"; }
@@ -670,11 +677,11 @@ install_fakes() {
 }
 
 run_case() {
-  local name="$1" phase="$2" sampler="$3" fail_stage="$4" expected="$5" trace_schema="${6:-}"
+  local name="$1" phase="$2" sampler="$3" fail_stage="$4" expected="$5" trace_schema="${6:-}" stream_mode="${7:-fresh}"
   local root="$fixture/$name"
   make_fixture "$root"
   install_fakes "$root"
-  FINAL_PHASE="$phase" FINAL_SAMPLER="$sampler" FINAL_FAIL_STAGE="$fail_stage" FINAL_ACS_TRACE_SCHEMA="$trace_schema"
+  FINAL_PHASE="$phase" FINAL_SAMPLER="$sampler" FINAL_FAIL_STAGE="$fail_stage" FINAL_ACS_TRACE_SCHEMA="$trace_schema" FINAL_STREAM_MODE="$stream_mode"
   status=0
   final_run_campaign_lifecycle "$root/artifacts" || status=$?
   [[ "$status" -eq "$expected" ]] || { echo "$name status=$status, want $expected" >&2; exit 1; }
@@ -692,6 +699,12 @@ if task6_selected mandatory-validation; then
   diagnostic_root="$(run_case diagnostic latency off '' 0 bloc-acs-trace/v1)"
   jq -e '.acs_trace_schema == "bloc-acs-trace/v1"' "$diagnostic_root/artifacts/manifest.json" >/dev/null || {
     echo "diagnostic lifecycle manifest omitted its ACS trace schema" >&2
+    exit 1
+  }
+
+  diagnostic_v2_root="$(run_case diagnostic-v2 latency off '' 0 bloc-acs-trace/v2 persistent)"
+  jq -e '.acs_trace_schema == "bloc-acs-trace/v2" and .stream_mode == "persistent"' "$diagnostic_v2_root/artifacts/manifest.json" >/dev/null || {
+    echo "persistent diagnostic lifecycle manifest omitted mode/schema provenance" >&2
     exit 1
   }
 

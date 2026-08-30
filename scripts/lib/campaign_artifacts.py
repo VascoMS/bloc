@@ -670,7 +670,7 @@ def commands_json(records: Path) -> list[dict[str, Any]]:
 FINAL_ECR_IMAGE = re.compile(
     r"^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$"
 )
-ACS_TRACE_SCHEMA = "bloc-acs-trace/v1"
+ACS_TRACE_SCHEMAS = {"bloc-acs-trace/v1", "bloc-acs-trace/v2"}
 ACS_MESSAGE_SUBTYPES = {"proof", "echo", "ready", "bval", "aux"}
 
 
@@ -690,18 +690,22 @@ def _acs_trace_key(record: dict[str, Any]) -> tuple[int, str, int, int]:
     return (int(key["measurement_block"]), str(key["run_id"]), int(key["node_id"]), int(key["slot"]))
 
 
-def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: str) -> None:
-    if not trace_schema:
-        return
-    if trace_schema != ACS_TRACE_SCHEMA:
+def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: str, stream_mode: str) -> None:
+    if trace_schema and trace_schema not in ACS_TRACE_SCHEMAS:
         raise ValueError(f"unsupported ACS trace schema {trace_schema!r}")
     evaluator_manifest_path = scenario_root / "manifest.json"
     evaluator_manifest = json.loads(evaluator_manifest_path.read_text(encoding="utf-8-sig"))
-    if evaluator_manifest.get("acs_trace_schema") != trace_schema:
+    if evaluator_manifest.get("stream_mode") != stream_mode:
+        raise ValueError(f"{evaluator_manifest_path}: stream mode mismatch")
+    if str(evaluator_manifest.get("acs_trace_schema", "")) != trace_schema:
         raise ValueError(f"{evaluator_manifest_path}: ACS trace schema mismatch")
 
     run_path = scenario_root / "run_measurements.csv"
     run_rows = read_csv(run_path)
+    if any(row.get("stream_mode") != stream_mode for row in run_rows):
+        raise ValueError(f"{run_path}: stream mode mismatch")
+    if not trace_schema:
+        return
     slots: dict[tuple[int, str], int] = {}
     for row in run_rows:
         run_key = (int(row.get("measurement_block", 0)), row["run_id"])
@@ -721,6 +725,8 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
             raise ValueError(f"{node_path}: duplicate expected ACS trace key {key}")
         if row.get("acs_trace_schema") != trace_schema:
             raise ValueError(f"{node_path}: ACS trace schema mismatch")
+        if row.get("stream_mode") != stream_mode:
+            raise ValueError(f"{node_path}: stream mode mismatch")
         expected[key] = row
 
     trace_path = scenario_root / "acs_trace.jsonl"
@@ -773,6 +779,34 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
         }
         if any(int(expected[key].get(field, -1)) != value for field, value in totals.items()):
             raise ValueError(f"{trace_path}: aggregate/detail ACS message mismatch for {key}")
+        if trace_schema == "bloc-acs-trace/v2":
+            phase_fields = {
+                "encode": ("acs_encode_total_us", "acs_encode_max_us"),
+                "queue_wait": ("acs_queue_wait_total_us", "acs_queue_wait_max_us"),
+                "stream_open": ("acs_stream_open_total_us", "acs_stream_open_max_us"),
+                "write": ("acs_write_total_us", "acs_write_max_us"),
+                "finalize": ("acs_finalize_total_us", "acs_finalize_max_us"),
+            }
+            phase_totals: dict[str, int] = {}
+            for phase, (total_field, max_field) in phase_fields.items():
+                values = [item["trace"].get(phase) for item in messages]
+                if any(not isinstance(value, dict) for value in values):
+                    raise ValueError(f"{trace_path}: missing ACS send phase {phase} for {key}")
+                for item, value in zip(messages, values):
+                    send_count = int(item["trace"]["send_count"])
+                    count, total, maximum = int(value["count"]), int(value["total_us"]), int(value["max_us"])
+                    if count != send_count or min(total, maximum) < 0 or maximum > total:
+                        raise ValueError(f"{trace_path}: invalid ACS send phase {phase} for {key}")
+                phase_totals[total_field] = sum(int(value["total_us"]) for value in values)
+                phase_totals[max_field] = max(int(value["max_us"]) for value in values)
+            open_count = sum(int(item["trace"].get("stream_open_count", -1)) for item in messages)
+            reuse_count = sum(int(item["trace"].get("stream_reuse_count", -1)) for item in messages)
+            if open_count + reuse_count != totals["acs_send_count"]:
+                raise ValueError(f"{trace_path}: ACS stream open/reuse count mismatch for {key}")
+            phase_totals["acs_stream_open_count"] = open_count
+            phase_totals["acs_stream_reuse_count"] = reuse_count
+            if any(int(expected[key].get(field, -1)) != value for field, value in phase_totals.items()):
+                raise ValueError(f"{trace_path}: aggregate/detail ACS send phase mismatch for {key}")
 
 
 def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase: str) -> None:
@@ -791,8 +825,21 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if manifest.get("batches") != [8, 32, 128] or manifest.get("seed") != 20260621 or manifest.get("deadline") != "12s":
         raise ValueError(f"{manifest_path}: fixed schedule identity is invalid")
     trace_schema = str(manifest.get("acs_trace_schema", ""))
-    if trace_schema and trace_schema != ACS_TRACE_SCHEMA:
+    if trace_schema and trace_schema not in ACS_TRACE_SCHEMAS:
         raise ValueError(f"{manifest_path}: unsupported ACS trace schema {trace_schema!r}")
+    stream_mode = str(manifest.get("stream_mode", ""))
+    if stream_mode not in {"fresh", "persistent"}:
+        raise ValueError(f"{manifest_path}: missing or unsupported stream mode")
+    if stream_mode == "persistent" and trace_schema != "bloc-acs-trace/v2":
+        raise ValueError(f"{manifest_path}: persistent stream mode requires ACS trace schema bloc-acs-trace/v2")
+    cluster_path = phase_root / "generated-public" / "cluster.json"
+    remote_path = phase_root / "generated-public" / "remote-eval.json"
+    cluster = json.loads(cluster_path.read_text(encoding="utf-8-sig"))
+    remote = json.loads(remote_path.read_text(encoding="utf-8-sig"))
+    if cluster.get("network", {}).get("stream_mode") != stream_mode:
+        raise ValueError(f"{cluster_path}: stream mode mismatch")
+    if remote.get("stream_mode") != stream_mode:
+        raise ValueError(f"{remote_path}: stream mode mismatch")
     schedules = {
         "readiness-pilot": (4, 1, 3, 1, "off"),
         "latency": (None, 10, 1000, 10, "off"),
@@ -833,7 +880,7 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
         raise ValueError(f"{phase_root}: run measurements are missing")
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
     for path in run_paths:
-        assert_acs_trace_artifacts(path.parent, nodes, trace_schema)
+        assert_acs_trace_artifacts(path.parent, nodes, trace_schema, stream_mode)
     for batch in (8, 32, 128):
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
         attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}

@@ -2,6 +2,7 @@ import csv
 import importlib.util
 import json
 import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -376,7 +377,8 @@ class FinalCampaignArtifactTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_phase(self, phase="readiness-pilot", attempts=3, blocks_override=None, warmups_override=None):
+    def make_phase(self, phase="readiness-pilot", attempts=3, blocks_override=None, warmups_override=None,
+                   stream_mode="fresh"):
         root = self.root / phase
         root.mkdir(parents=True)
         blocks = blocks_override if blocks_override is not None else (1 if phase == "readiness-pilot" else 10)
@@ -394,15 +396,23 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             "deadline": "12s", "warmups": warmups_override if warmups_override is not None else (1 if phase == "readiness-pilot" else (0 if phase == "resource" else 10)),
             "repetitions": attempts, "blocks": blocks,
             "sampler": "on" if phase == "resource" else "off",
+            "stream_mode": stream_mode,
         })
+        generated = root / "generated-public"
+        generated.mkdir()
+        artifacts.write_json(generated / "cluster.json", {
+            "network": {"mode": "libp2p", "stream_mode": stream_mode},
+        })
+        artifacts.write_json(generated / "remote-eval.json", {"stream_mode": stream_mode})
         artifacts.write_json(root / "inventory.json", {"nodes": [
             {"id": i, "region": "us-east-1", "zone": "us-east-1a", "instance_type": "t3.small"}
             for i in range(4)
         ]})
         scenario = root / "scenarios/controller/results"
         scenario.mkdir(parents=True)
-        fields = ["run_id", "phase", "measurement_block", "planned_scenario_runs", "slot", "nodes", "batch_size",
+        fields = ["run_id", "phase", "measurement_block", "planned_scenario_runs", "slot", "nodes", "batch_size", "stream_mode",
                   "success", "consistent", "outcome", "timed_out", "selected_ciphertexts"]
+        artifacts.write_json(scenario / "manifest.json", {"stream_mode": stream_mode})
         with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
             for batch in (8, 32, 128):
@@ -411,19 +421,20 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                         writer.writerow({"run_id": f"measured-r{index:03d}-b{batch}", "phase": "measured",
                                          "measurement_block": str(block), "planned_scenario_runs": str(attempts),
                                          "slot": str((block - 1) * (attempts // blocks) + index),
-                                         "nodes": "4", "batch_size": str(batch), "success": "true",
+                                         "nodes": "4", "batch_size": str(batch), "stream_mode": stream_mode, "success": "true",
                                          "consistent": "true", "outcome": "completed", "timed_out": "false",
                                          "selected_ciphertexts": str(batch)})
         return root
 
-    def add_acs_trace_artifacts(self, root):
-        trace_schema = "bloc-acs-trace/v1"
+    def add_acs_trace_artifacts(self, root, trace_schema="bloc-acs-trace/v1"):
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         manifest["acs_trace_schema"] = trace_schema
         artifacts.write_json(root / "manifest.json", manifest)
         for run_path in root.glob("scenarios/**/run_measurements.csv"):
             scenario_root = run_path.parent
-            artifacts.write_json(scenario_root / "manifest.json", {"acs_trace_schema": trace_schema})
+            evaluator_manifest = json.loads((scenario_root / "manifest.json").read_text(encoding="utf-8"))
+            evaluator_manifest["acs_trace_schema"] = trace_schema
+            artifacts.write_json(scenario_root / "manifest.json", evaluator_manifest)
             node_rows = []
             trace_records = []
             for run in artifacts.read_csv(run_path):
@@ -431,11 +442,18 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                     node_rows.append({
                         "run_id": run["run_id"], "phase": run["phase"],
                         "measurement_block": run["measurement_block"], "node_id": str(node_id),
-                        "acs_trace_schema": trace_schema,
+                        "acs_trace_schema": trace_schema, "stream_mode": run["stream_mode"],
                         "acs_inbound_messages": "1", "acs_inbound_bytes": "10",
                         "acs_outbound_messages": "2", "acs_outbound_bytes": "20",
                         "acs_send_count": "2", "acs_send_total_us": "4",
                         "acs_send_max_us": "2", "acs_send_failures": "0",
+                        "acs_encode_total_us": "2", "acs_encode_max_us": "1",
+                        "acs_queue_wait_total_us": "0", "acs_queue_wait_max_us": "0",
+                        "acs_stream_open_total_us": "0", "acs_stream_open_max_us": "0",
+                        "acs_write_total_us": "2", "acs_write_max_us": "1",
+                        "acs_finalize_total_us": "0", "acs_finalize_max_us": "0",
+                        "acs_stream_open_count": "0" if run["stream_mode"] == "persistent" else "2",
+                        "acs_stream_reuse_count": "2" if run["stream_mode"] == "persistent" else "0",
                     })
                     point = lambda offset: {"recorded": True, "offset_us": offset}
                     trace_records.append({
@@ -466,12 +484,25 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                                 "outbound_count": 2, "outbound_bytes": 20,
                                 "send_count": 2, "send_total_us": 4,
                                 "send_max_us": 2, "send_failure_count": 0,
+                                "encode": {"count": 2, "total_us": 2, "max_us": 1},
+                                "queue_wait": {"count": 2, "total_us": 0, "max_us": 0},
+                                "stream_open": {"count": 2, "total_us": 0, "max_us": 0},
+                                "write": {"count": 2, "total_us": 2, "max_us": 1},
+                                "finalize": {"count": 2, "total_us": 0, "max_us": 0},
+                                "stream_open_count": 0 if run["stream_mode"] == "persistent" else 2,
+                                "stream_reuse_count": 2 if run["stream_mode"] == "persistent" else 0,
                             }},
                             *[{"subtype": subtype, "trace": {
                                 "inbound_count": 0, "inbound_bytes": 0,
                                 "outbound_count": 0, "outbound_bytes": 0,
                                 "send_count": 0, "send_total_us": 0,
                                 "send_max_us": 0, "send_failure_count": 0,
+                                "encode": {"count": 0, "total_us": 0, "max_us": 0},
+                                "queue_wait": {"count": 0, "total_us": 0, "max_us": 0},
+                                "stream_open": {"count": 0, "total_us": 0, "max_us": 0},
+                                "write": {"count": 0, "total_us": 0, "max_us": 0},
+                                "finalize": {"count": 0, "total_us": 0, "max_us": 0},
+                                "stream_open_count": 0, "stream_reuse_count": 0,
                             }} for subtype in ("echo", "ready", "bval", "aux")],
                         ],
                     })
@@ -518,6 +549,81 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         self.add_acs_trace_artifacts(root)
 
         artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_stream_diagnostic_accepts_v2_mode_provenance(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v2")
+
+        artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_stream_diagnostic_rejects_v1_trace(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v1")
+
+        with self.assertRaisesRegex(ValueError, "persistent stream mode requires ACS trace schema"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_phase_rejects_stream_mode_provenance_drift(self):
+        mutations = {
+            "missing phase": lambda root: self._remove_json_key(root / "manifest.json", "stream_mode"),
+            "phase": lambda root: self._change_json(root / "manifest.json", "stream_mode", "fresh"),
+            "cluster": lambda root: self._change_cluster_mode(root, "fresh"),
+            "remote": lambda root: self._change_json(root / "generated-public/remote-eval.json", "stream_mode", "fresh"),
+            "evaluator": lambda root: self._change_json(next(root.glob("scenarios/**/manifest.json")), "stream_mode", "fresh"),
+            "run": lambda root: self._change_csv_mode(next(root.glob("scenarios/**/run_measurements.csv")), "fresh"),
+            "node": lambda root: self._change_csv_mode(next(root.glob("scenarios/**/node_measurements.csv")), "fresh"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                candidate = self.root / "latency"
+                if candidate.exists():
+                    shutil.rmtree(candidate)
+                root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                                       stream_mode="persistent")
+                self.add_acs_trace_artifacts(root, "bloc-acs-trace/v2")
+                try:
+                    mutate(root)
+                    with self.assertRaisesRegex(ValueError, "stream mode"):
+                        artifacts.assert_final_phase(root, "same-az", "latency")
+                finally:
+                    shutil.rmtree(root)
+
+    @staticmethod
+    def _change_json(path, key, value):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload[key] = value
+        artifacts.write_json(path, payload)
+
+    @staticmethod
+    def _remove_json_key(path, key):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.pop(key, None)
+        artifacts.write_json(path, payload)
+
+    def test_final_persistent_stream_diagnostic_rejects_v1_v2_mixing(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v2")
+        evaluator = next(root.glob("scenarios/**/manifest.json"))
+        self._change_json(evaluator, "acs_trace_schema", "bloc-acs-trace/v1")
+
+        with self.assertRaisesRegex(ValueError, "ACS trace schema mismatch"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
+
+    @staticmethod
+    def _change_cluster_mode(root, value):
+        path = root / "generated-public/cluster.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["network"]["stream_mode"] = value
+        artifacts.write_json(path, payload)
+
+    @staticmethod
+    def _change_csv_mode(path, value):
+        rows = artifacts.read_csv(path)
+        rows[0]["stream_mode"] = value
+        artifacts.write_csv(path, rows, list(rows[0]))
 
     def test_final_diagnostic_phase_rejects_missing_node_trace(self):
         root = self.make_phase()

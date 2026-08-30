@@ -7,7 +7,8 @@ Usage: run-final-campaign.sh --topology same-az|three-region
   --bundle-root DIR --node-count 4|7 --source-sha SHA
   --bloc-image ECR@DIGEST --mempool-image ECR@DIGEST
   --experiment-id ID --admin-cidr CIDR --aws-profile PROFILE
-  [--acs-trace-schema bloc-acs-trace/v1]
+  [--stream-mode fresh|persistent]
+  [--acs-trace-schema bloc-acs-trace/v1|bloc-acs-trace/v2]
   [--validate-only | --execute-live]
 EOF
 }
@@ -25,7 +26,7 @@ final_parse_campaign_args() {
   FINAL_TOPOLOGY="" FINAL_PHASE="" FINAL_BUNDLE_ROOT="" FINAL_NODE_COUNT=""
   FINAL_SOURCE_SHA="" FINAL_BLOC_IMAGE="" FINAL_MEMPOOL_IMAGE=""
   FINAL_EXPERIMENT_ID="" FINAL_ADMIN_CIDR="" FINAL_AWS_PROFILE=""
-  FINAL_ACS_TRACE_SCHEMA=""
+  FINAL_ACS_TRACE_SCHEMA="" FINAL_STREAM_MODE=fresh
   FINAL_VALIDATE_ONLY=0 FINAL_EXECUTE_LIVE=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -39,6 +40,7 @@ final_parse_campaign_args() {
       --experiment-id) final_take_value "$1" "${2-}" || return; FINAL_EXPERIMENT_ID="$2"; shift 2 ;;
       --admin-cidr) final_take_value "$1" "${2-}" || return; FINAL_ADMIN_CIDR="$2"; shift 2 ;;
       --aws-profile) final_take_value "$1" "${2-}" || return; FINAL_AWS_PROFILE="$2"; shift 2 ;;
+      --stream-mode) final_take_value "$1" "${2-}" || return; FINAL_STREAM_MODE="$2"; shift 2 ;;
       --acs-trace-schema) final_take_value "$1" "${2-}" || return; FINAL_ACS_TRACE_SCHEMA="$2"; shift 2 ;;
       --validate-only) FINAL_VALIDATE_ONLY=1; shift ;;
       --execute-live) FINAL_EXECUTE_LIVE=1; shift ;;
@@ -63,7 +65,9 @@ final_validate_campaign_contract() {
   [[ ${#FINAL_EXPERIMENT_ID} -le 47 ]] || final_die "experiment id must be at most 47 characters" || return
   [[ "$FINAL_ADMIN_CIDR" == */* ]] || final_die "admin CIDR is required" || return
   [[ -n "$FINAL_AWS_PROFILE" ]] || final_die "AWS profile is required" || return
-  [[ -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v1 ]] || final_die "unsupported ACS trace schema" || return
+  [[ "$FINAL_STREAM_MODE" == fresh || "$FINAL_STREAM_MODE" == persistent ]] || final_die "stream mode must be fresh or persistent" || return
+  [[ -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v1 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 ]] || final_die "unsupported ACS trace schema" || return
+  [[ "$FINAL_STREAM_MODE" != persistent || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 ]] || final_die "persistent stream mode requires ACS trace schema bloc-acs-trace/v2" || return
   [[ -f "$manifest" ]] || final_die "bundle manifest is missing" || return
   [[ $((FINAL_VALIDATE_ONLY + FINAL_EXECUTE_LIVE)) -eq 1 ]] || final_die "choose exactly one of --validate-only and --execute-live" || return
   [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$FINAL_SOURCE_SHA" ]] || final_die "source SHA does not match local HEAD" || return
@@ -102,4 +106,5 @@ final_print_campaign_contract() {
   printf 'warmups=%s repetitions=%s blocks=%s sampler=%s batches=%s seed=%s deadline=%s\n' \
     "$FINAL_WARMUPS" "$FINAL_REPETITIONS" "$FINAL_BLOCKS" "$FINAL_SAMPLER" "$FINAL_BATCHES" "$FINAL_SEED" "$FINAL_DEADLINE"
   printf 'acs_trace_schema=%s\n' "${FINAL_ACS_TRACE_SCHEMA:-disabled}"
+  printf 'stream_mode=%s\n' "$FINAL_STREAM_MODE"
 }

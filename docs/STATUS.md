@@ -110,10 +110,12 @@ release-candidate configuration contract are defined in
   not proof of the WAN effect. Ignored roots are
   `bloc-node/results/phase1-streams/local-fresh/`,
   `bloc-node/results/phase1-streams/local-persistent/`, and
-  `bloc-node/results/phase1-streams/local-comparison/`. The next action is to
-  prepare the smallest matched n4 same-AZ and three-region persistent-stream
-  canaries under separate cloud authorization; do not expand to n7 or publish
-  p99 from 30 observations.
+  `bloc-node/results/phase1-streams/local-comparison/`. The phase-one cloud
+  campaign is explicitly authorized. Its fail-closed order is same-AZ fresh,
+  same-AZ persistent, three-region fresh, then three-region persistent, using
+  one newly frozen source/image/bundle and trace v2 throughout. Each run must
+  validate and prove authenticated empty cleanup before the next allocation.
+  Do not expand to n7 or publish p99 from 30 observations.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent

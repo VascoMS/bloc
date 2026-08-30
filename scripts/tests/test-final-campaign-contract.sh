@@ -65,6 +65,11 @@ expect_success "$runner" --topology same-az --phase latency --bundle-root "$fixt
   --acs-trace-schema bloc-acs-trace/v1 --validate-only
 grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
 grep -Fq 'acs_trace_schema=bloc-acs-trace/v1' "$fixture/stdout"
+grep -Fq 'stream_mode=fresh' "$fixture/stdout"
+expect_success "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" \
+  --stream-mode persistent --acs-trace-schema bloc-acs-trace/v2 --validate-only
+grep -Fq 'stream_mode=persistent' "$fixture/stdout"
+grep -Fq 'acs_trace_schema=bloc-acs-trace/v2' "$fixture/stdout"
 expect_success "$runner" --topology three-region --phase resource --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --validate-only
 grep -Fq 'warmups=0 repetitions=1000 blocks=10 sampler=on batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
 
@@ -89,6 +94,8 @@ expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixt
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only --execute-live
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --unknown value --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --acs-trace-schema bloc-acs-trace/v999 --validate-only
+expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode reuse --acs-trace-schema bloc-acs-trace/v2 --validate-only
+expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent --acs-trace-schema bloc-acs-trace/v1 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root
 
 [[ ! -s "$call_log" ]] || { echo "validate-only invoked lifecycle tools" >&2; cat "$call_log" >&2; exit 1; }

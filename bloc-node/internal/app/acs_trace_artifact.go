@@ -379,14 +379,10 @@ func validateBBARecords(records []acsBBATraceRecord, members map[uint64]struct{}
 		if err := validateTracePoints("BBA", []hbbft.TracePoint{record.Trace.Input, record.Trace.FirstBinValue, record.Trace.FirstAux, record.Trace.ValidAuxQuorum, record.Trace.Decision, record.Trace.Done}); err != nil {
 			return err
 		}
-		for _, earlier := range []hbbft.TracePoint{record.Trace.FirstBinValue, record.Trace.FirstAux} {
-			if earlier.Recorded && record.Trace.ValidAuxQuorum.Recorded && earlier.OffsetUS > record.Trace.ValidAuxQuorum.OffsetUS {
-				return fmt.Errorf("impossible BBA milestone ordering for proposer %d", record.ProposerID)
-			}
-		}
-		if record.Trace.ValidAuxQuorum.Recorded && record.Trace.Decision.Recorded && record.Trace.ValidAuxQuorum.OffsetUS > record.Trace.Decision.OffsetUS {
-			return fmt.Errorf("impossible BBA decision ordering for proposer %d", record.ProposerID)
-		}
+		// BIN, AUX, and valid-AUX quorum recur across epochs. If remote BBA
+		// progress predates the local proposal-ready trace origin, their first
+		// recorded occurrences can belong to different epochs and have no
+		// pairwise causal order in this epochless summary.
 		if record.Trace.Decision.Recorded && record.Trace.Done.Recorded && record.Trace.Decision.OffsetUS > record.Trace.Done.OffsetUS {
 			return fmt.Errorf("impossible BBA completion ordering for proposer %d", record.ProposerID)
 		}

@@ -126,6 +126,67 @@ func TestValidateACSTraceArtifactRejectsLocalRBCOutputBeforeLocalInput(t *testin
 	}
 }
 
+func TestValidateACSTraceArtifactAllowsCrossEpochBBAOffsetsAfterTraceOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*hbbft.BBATrace)
+	}{
+		{
+			name: "later epoch BIN follows recorded quorum",
+			mutate: func(trace *hbbft.BBATrace) {
+				trace.FirstBinValue.OffsetUS = 5
+				trace.FirstAux.OffsetUS = 1
+				trace.ValidAuxQuorum.OffsetUS = 2
+				trace.Decision.OffsetUS = 3
+			},
+		},
+		{
+			name: "later epoch AUX follows recorded quorum",
+			mutate: func(trace *hbbft.BBATrace) {
+				trace.FirstBinValue.OffsetUS = 1
+				trace.FirstAux.OffsetUS = 5
+				trace.ValidAuxQuorum.OffsetUS = 2
+				trace.Decision.OffsetUS = 3
+			},
+		},
+		{
+			name: "later epoch quorum follows recorded decision",
+			mutate: func(trace *hbbft.BBATrace) {
+				trace.FirstBinValue.OffsetUS = 1
+				trace.FirstAux.OffsetUS = 1
+				trace.ValidAuxQuorum.OffsetUS = 5
+				trace.Decision.OffsetUS = 3
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manifest, runs, _ := validACSTraceArtifactFixture()
+			trace := runs[0].Results[0].ACSTrace
+			bba := trace.BBA[1]
+			bba.Input = hbbft.TracePoint{}
+			bba.FirstBinValue.Recorded = true
+			bba.FirstAux.Recorded = true
+			bba.ValidAuxQuorum.Recorded = true
+			bba.Decision.Recorded = true
+			bba.MaxEpoch = 2
+			test.mutate(&bba)
+			trace.BBA[1] = bba
+			runs[0].Results[0].ACSTrace = trace
+			records := []acsTraceArtifactRecord{
+				newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+				newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+			}
+
+			path := writeACSTraceRecords(t, records)
+			if err := validateACSTraceArtifact(manifest, runs, path); err != nil {
+				t.Fatalf("valid cross-epoch BBA trace rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestWriteSuiteOutputsGatesACSTraceArtifactWithManifest(t *testing.T) {
 	manifest, runs, _ := validACSTraceArtifactFixture()
 	enabledDir := t.TempDir()
@@ -179,6 +240,13 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 			name: "core decision after node receipt", want: "core decision occurs after node output receipt",
 			mutate: func(_ *suiteManifest, _ []EvalRun, records *[]acsTraceArtifactRecord) {
 				(*records)[0].Aggregate.CoreDecision.OffsetUS = 11
+			},
+		},
+		{
+			name: "BBA decision after done", want: "impossible BBA completion ordering",
+			mutate: func(_ *suiteManifest, _ []EvalRun, records *[]acsTraceArtifactRecord) {
+				(*records)[0].BBA[0].Trace.Decision = hbbft.TracePoint{Recorded: true, OffsetUS: 4}
+				(*records)[0].BBA[0].Trace.Done = hbbft.TracePoint{Recorded: true, OffsetUS: 3}
 			},
 		},
 		{

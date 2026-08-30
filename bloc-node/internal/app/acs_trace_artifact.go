@@ -254,7 +254,6 @@ func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]st
 		rightName string
 		right     hbbft.TracePoint
 	}{
-		{"input start", record.Aggregate.InputStarted, "first RBC output", record.Aggregate.FirstRBCOutput},
 		{"first RBC output", record.Aggregate.FirstRBCOutput, "RBC output quorum", record.Aggregate.RBCOutputQuorum},
 		{"first RBC output", record.Aggregate.FirstRBCOutput, "first true BBA", record.Aggregate.FirstTrueBBA},
 		{"first true BBA", record.Aggregate.FirstTrueBBA, "true BBA quorum", record.Aggregate.TrueBBAQuorum},
@@ -289,6 +288,15 @@ func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]st
 
 	if err := validateRBCRecords(record.RBC, members); err != nil {
 		return err
+	}
+	for _, rbc := range record.RBC {
+		if rbc.ProposerID != record.Key.NodeID || !rbc.Trace.OutputStored.Recorded {
+			continue
+		}
+		if err := requireTracePointOrder("local input start", record.Aggregate.InputStarted, "local RBC output", rbc.Trace.OutputStored); err != nil {
+			return err
+		}
+		break
 	}
 	if err := validateBBARecords(record.BBA, members); err != nil {
 		return err

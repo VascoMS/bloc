@@ -85,6 +85,47 @@ func TestValidateACSTraceArtifactAcceptsCompleteArtifact(t *testing.T) {
 	}
 }
 
+func TestValidateACSTraceArtifactAllowsRemoteRBCOutputBeforeLocalInput(t *testing.T) {
+	manifest, runs, _ := validACSTraceArtifactFixture()
+	trace := runs[0].Results[0].ACSTrace
+	trace.Aggregate.InputStarted.OffsetUS = 2
+	trace.Aggregate.FirstRBCOutput.OffsetUS = 1
+	localRBC := trace.RBC[0]
+	localRBC.OutputStored = hbbft.TracePoint{Recorded: true, OffsetUS: 3}
+	trace.RBC[0] = localRBC
+	runs[0].Results[0].ACSTrace = trace
+	records := []acsTraceArtifactRecord{
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+
+	path := writeACSTraceRecords(t, records)
+	if err := validateACSTraceArtifact(manifest, runs, path); err != nil {
+		t.Fatalf("remote RBC output before local input rejected: %v", err)
+	}
+}
+
+func TestValidateACSTraceArtifactRejectsLocalRBCOutputBeforeLocalInput(t *testing.T) {
+	manifest, runs, _ := validACSTraceArtifactFixture()
+	trace := runs[0].Results[0].ACSTrace
+	trace.Aggregate.InputStarted.OffsetUS = 2
+	trace.Aggregate.FirstRBCOutput.OffsetUS = 1
+	localRBC := trace.RBC[0]
+	localRBC.OutputStored = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+	trace.RBC[0] = localRBC
+	runs[0].Results[0].ACSTrace = trace
+	records := []acsTraceArtifactRecord{
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+
+	path := writeACSTraceRecords(t, records)
+	err := validateACSTraceArtifact(manifest, runs, path)
+	if err == nil || !strings.Contains(err.Error(), "local input start occurs after local RBC output") {
+		t.Fatalf("validate error = %v, want local RBC causality failure", err)
+	}
+}
+
 func TestWriteSuiteOutputsGatesACSTraceArtifactWithManifest(t *testing.T) {
 	manifest, runs, _ := validACSTraceArtifactFixture()
 	enabledDir := t.TempDir()

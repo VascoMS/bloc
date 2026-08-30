@@ -4,12 +4,57 @@ import (
 	"log"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/reedsolomon"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRBCTraceRecordsThresholdAndReconstructionMilestones(t *testing.T) {
+	base := time.Unix(500, 0)
+	now := base
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
+	recorder.begin(base)
+	rbc := newRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
+	t.Cleanup(rbc.stop)
+
+	value := []byte("traceable-rbc-payload!")
+	shards, err := makeShards(rbc.enc, value)
+	require.NoError(t, err)
+	proofs, err := makeProofRequests(shards)
+	require.NoError(t, err)
+
+	now = base.Add(10 * time.Microsecond)
+	require.NoError(t, rbc.HandleMessage(0, &BroadcastMessage{Payload: proofs[0]}))
+	now = base.Add(15 * time.Microsecond)
+	require.Error(t, rbc.HandleMessage(0, &BroadcastMessage{Payload: proofs[0]}))
+	now = base.Add(20 * time.Microsecond)
+	require.NoError(t, rbc.HandleMessage(1, &BroadcastMessage{Payload: &EchoRequest{ProofRequest: *proofs[1]}}))
+	now = base.Add(30 * time.Microsecond)
+	require.NoError(t, rbc.HandleMessage(2, &BroadcastMessage{Payload: &EchoRequest{ProofRequest: *proofs[2]}}))
+	now = base.Add(40 * time.Microsecond)
+	require.NoError(t, rbc.HandleMessage(1, &BroadcastMessage{Payload: &ReadyRequest{RootHash: proofs[0].RootHash}}))
+	now = base.Add(50 * time.Microsecond)
+	require.NoError(t, rbc.HandleMessage(2, &BroadcastMessage{Payload: &ReadyRequest{RootHash: proofs[0].RootHash}}))
+
+	got := rbc.trace.snapshot().RBC[rbc.proposerID]
+	if !got.ProofAccepted.Recorded || !got.EchoSent.Recorded ||
+		!got.ReadySent.Recorded || !got.DecodeEligible.Recorded ||
+		!got.ReconstructionStarted.Recorded ||
+		!got.ReconstructionFinished.Recorded || !got.OutputStored.Recorded {
+		t.Fatalf("incomplete RBC trace: %+v", got)
+	}
+	if got.ProofAccepted.OffsetUS != 10 || got.EchoSent.OffsetUS != 10 || got.ReadySent.OffsetUS != 30 {
+		t.Fatalf("RBC threshold offsets: %+v", got)
+	}
+	if got.ReconstructionStarted.OffsetUS > got.ReconstructionFinished.OffsetUS ||
+		got.ReconstructionFinished.OffsetUS > got.OutputStored.OffsetUS {
+		t.Fatalf("RBC reconstruction order: %+v", got)
+	}
+	require.Equal(t, value, rbc.Output())
+}
 
 // Test RBC where 1 node will not provide its value. We use 4 nodes that will
 // tolerate 1 faulty node. The 3 good nodes should be able te reconstruct the
@@ -157,7 +202,11 @@ func TestMakeProofRequests(t *testing.T) {
 }
 
 func TestRBCRejectsMixedRootReconstruction(t *testing.T) {
-	rbc := NewRBC(Config{ID: 0, N: 4, F: 1}, 0)
+	base := time.Unix(600, 0)
+	now := base
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
+	recorder.begin(base)
+	rbc := newRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
 	t.Cleanup(rbc.stop)
 
 	valueA := []byte("root-A-payload!!")
@@ -194,16 +243,27 @@ func TestRBCRejectsMixedRootReconstruction(t *testing.T) {
 	handleEcho(2, proofsB[0])
 	handleReady(0, proofsA[0].RootHash)
 	handleReady(1, proofsA[0].RootHash)
+	now = base.Add(20 * time.Microsecond)
 	handleReady(2, proofsA[0].RootHash)
 
 	assert.Nil(t, rbc.Output())
 	assert.False(t, rbc.progress().OutputDecoded)
+	incomplete := rbc.trace.snapshot().RBC[rbc.proposerID]
+	assert.True(t, incomplete.DecodeEligible.Recorded)
+	assert.True(t, incomplete.ReconstructionStarted.Recorded)
+	assert.False(t, incomplete.ReconstructionFinished.Recorded)
+	assert.False(t, incomplete.OutputStored.Recorded)
 
 	// A second distinct root-A shard makes reconstruction valid and must still
 	// be accepted after the earlier incomplete attempt.
+	now = base.Add(40 * time.Microsecond)
 	handleEcho(3, proofsA[3])
 	assert.Equal(t, valueA, rbc.Output())
 	assert.True(t, rbc.progress().OutputDecoded)
+	completed := rbc.trace.snapshot().RBC[rbc.proposerID]
+	assert.Equal(t, int64(20), completed.ReconstructionStarted.OffsetUS)
+	assert.Equal(t, int64(40), completed.ReconstructionFinished.OffsetUS)
+	assert.Equal(t, int64(40), completed.OutputStored.OffsetUS)
 }
 
 func TestRBCRejectsReconstructionWithWrongRoot(t *testing.T) {

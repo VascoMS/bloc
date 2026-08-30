@@ -262,7 +262,9 @@ func (r *RBC) handleProofRequest(senderID uint64, req *ProofRequest) error {
 	if !validateProof(req) {
 		return fmt.Errorf("received invalid proof from (%d)", senderID)
 	}
+	r.trace.recordRBC(r.proposerID, traceRBCProofAccepted)
 	r.echoSent = true
+	r.trace.recordRBC(r.proposerID, traceRBCEchoSent)
 	echo := &EchoRequest{*req}
 	r.messages = append(r.messages, &BroadcastMessage{echo})
 	return r.handleEchoRequest(r.ID, echo)
@@ -291,6 +293,7 @@ func (r *RBC) handleEchoRequest(senderID uint64, req *EchoRequest) error {
 	}
 
 	r.readySent = true
+	r.trace.recordRBC(r.proposerID, traceRBCReadySent)
 	ready := &ReadyRequest{req.RootHash}
 	r.messages = append(r.messages, &BroadcastMessage{ready})
 	return r.handleReadyRequest(r.ID, ready)
@@ -310,6 +313,7 @@ func (r *RBC) handleReadyRequest(senderID uint64, req *ReadyRequest) error {
 
 	if r.countReadys(req.RootHash) == r.F+1 && !r.readySent {
 		r.readySent = true
+		r.trace.recordRBC(r.proposerID, traceRBCReadySent)
 		ready := &ReadyRequest{req.RootHash}
 		r.messages = append(r.messages, &BroadcastMessage{ready})
 	}
@@ -322,6 +326,7 @@ func (r *RBC) tryDecodeValue(hash []byte) error {
 	if r.outputDecoded || r.countReadys(hash) <= 2*r.F || r.countEchos(hash) <= r.F {
 		return nil
 	}
+	r.trace.recordRBC(r.proposerID, traceRBCDecodeEligible)
 	// At this point we can decode the shards. First we create a new slice of
 	// only sortable proof values committed to the selected root.
 	var prfs proofs
@@ -338,6 +343,7 @@ func (r *RBC) tryDecodeValue(hash []byte) error {
 	for _, p := range prfs {
 		shards[p.Index] = p.Proof[0]
 	}
+	r.trace.recordRBC(r.proposerID, traceRBCReconstructionStarted)
 	if err := r.enc.Reconstruct(shards); err != nil {
 		return nil
 	}
@@ -349,12 +355,14 @@ func (r *RBC) tryDecodeValue(hash []byte) error {
 		!bytes.Equal(hash, reconstructedProofs[0].RootHash) {
 		return nil
 	}
+	r.trace.recordRBC(r.proposerID, traceRBCReconstructionFinished)
 	var value []byte
 	for _, data := range shards[:r.numDataShards] {
 		value = append(value, data...)
 	}
 	r.output = value
 	r.outputDecoded = true
+	r.trace.recordRBC(r.proposerID, traceRBCOutputStored)
 	return nil
 }
 

@@ -68,62 +68,35 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #23 diagnostic campaign readiness:** the implementation and lean
-  pre-cloud gate are complete on commit
-  `87ae4099e3e72025142a4e9cdeb210baeb1b0c3c`. The proposal-ready paired
-  trace-off/on benchmark passed the 2% median observer threshold in all six
-  `n=4/7`, batch `8/32/128` cells; latency deltas were `-0.085%` to `+0.757%`,
-  byte deltas at most `+0.524%`, and allocation deltas at most `+0.767%`. A
-  local traced evaluator smoke retained four validated node records. The clean
-  ACS campaign passed repeated safety tests, the host race selection, the
-  100/100 sustained n4/batch-128 gate, the 180/180 n4/n7 compatibility matrix,
-  both module identity suites, and its benchmark; 1,509 validated node traces
-  were retained and no AWS resource was allocated. The separate
-  `Test(RBC|ACS|BBA|SlotACS)` race selection also passed in a network-disabled
-  Linux/ARM64 container with read-only source and module-cache mounts; its
-  manifest binds image ID, commits, protocol source hashes, and the retained
-  log. A `linux/amd64` diagnostic image was then frozen locally from source
-  commit `7a293290b4ab96363cd10dec271418cc88f4794e` as
-  `sha256:e1e8ba6d722d71bebd2568dece3e54e859375358b36d80ab4386fec44ecf0f83`;
-  its network-disabled smoke confirms the non-root runtime and `--acs-trace`
-  surface. Under separate publication authorization, that exact OCI index was
-  pushed to the immutable, scan-on-push private ECR repository as
-  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:e1e8ba6d722d71bebd2568dece3e54e859375358b36d80ab4386fec44ecf0f83`;
-  the remote digest equals the local digest and its runtime child is
-  `linux/amd64`. Reused n4/n7 identities and corpora were copied without prior
-  campaign keys into new private bundles, bound to that BLOC digest and the
-  existing immutable mempool digest, and reverified. Exact-source
-  `--validate-only` checks pass for same-AZ and three-region at both n4 and n7.
-  Live n4 execution is now authorized. The first same-AZ attempt used an
-  experiment ID outside the deployer's `bloc-ec2-*` IAM namespace and stopped
-  before instance creation; all partial network resources and its temporary key
-  were removed. The corrected retry passed provisioning, immutable-image
-  verification, service health, and all 90 protocol attempts, but its final
-  artifact was rejected because the evaluator incorrectly required local
-  proposal admission to precede every remote RBC output. One of 420 retained
-  node traces legitimately reconstructed a remote proposer before admitting
-  its own local input; every trace preserved local-input-before-own-RBC
-  causality. The evaluator now validates that narrower protocol invariant on
-  commit `4cb210446ce403f60c3fd5409611fde5d68e37a1`; focused red/green tests, replay
-  of the rejected 40-record scenario, and the complete `bloc-node` suite pass.
-  Both attempts remain rejected diagnostic evidence, all AWS and temporary-key
-  cleanup is independently empty, and three-region execution remains gated on
-  a clean from-zero same-AZ retry with a newly frozen immutable image. That
-  replacement was published from source
-  `35b50b627529d601e89a6b4621ea6e36bc457985` as
-  `sha256:759b81650cd5e94395a06dd6381ead276c5168b293c316563ec0e91f95fbde3c`,
-  rebound to a verified n4 bundle, and exercised from zero as
-  `bloc-ec2-i23-sa-n4-c3`. C3 again passed provisioning, digest checks, health,
-  and every executed protocol attempt, then failed closed on one remote BBA
-  whose first post-origin BIN offset belonged to a later epoch than its
-  recorded AUX/quorum/decision. The epochless detail cannot support those
-  cross-epoch ordering assertions; commit
-  `0afd1578cb5afd7f2b1f36d38c7759bf9962d452` removes only those invalid checks,
-  retains one-shot decision-before-done validation, replays the rejected
-  40-record scenario successfully, and passes the complete `bloc-node` suite.
-  C3 remains rejected diagnostic evidence; all 15 resources and its key were
-  removed, authenticated cleanup plus independent EC2/EBS/VPC/IAM checks are
-  empty, and three-region remains stopped pending another clean same-AZ retry.
+- **Issue #23 attribution is accepted; optimization experiments remain:** the
+  matched n4 same-AZ and three-region latency phases are complete on source
+  `d6bf2c0d62d5e4e039952ace117a6ab9a08b8cc0` and immutable BLOC image
+  `sha256:ab4bf84da397f379ba5e22820ddd53ba532702b1bc7da3d709e3c847e1e5eaf1`.
+  Each topology retained 90/90 successful, consistent measured attempts and
+  360 validated node traces for batches `8/32/128`; the matched-contract loader
+  accepted identical source, images, identities, corpus, seed, schedule, and
+  `bloc-acs-trace/v1` schema. ACS p50 changed from
+  `15.908/26.381/59.482 ms` same-AZ to `185.691/235.464/500.357 ms`
+  three-region. The post-BBA adapter handoff stayed below `1 ms` for batches 8
+  and 32 and near `4--5 ms` for batch 128, while per-message send maxima moved
+  from roughly `3--12 ms` to `70--422 ms`. Send failures remained zero, BBA
+  epoch depth stayed at median `1` and p95 `2`, and WAN BVAL/AUX counts did not
+  increase. The first RBC output is especially payload-sensitive at batch 128
+  (`30.581 ms` versus `389.078 ms` p50); at smaller batches, successive RBC and
+  BBA quorum waits account for the remaining WAN delay. This supports a core
+  ACS transport/round-trip attribution rather than adapter work, retries, or
+  extra agreement epochs. The transport mechanism is an inference to test:
+  each addressed ACS message opens a fresh libp2p logical stream over a
+  persistent peer connection, so stream setup, WAN RTT, write completion, and
+  backpressure may amplify the protocol's broadcast/quorum pattern. Both
+  campaigns completed recovery and cleanup; Terraform destroyed 15 and 39
+  resources respectively, all regional EC2/EBS/VPC/key/IAM checks are empty,
+  and the three peering records are `deleted`. Retained roots are
+  `results/ec2/bloc-ec2-i23-sa-n4-c4/`,
+  `results/ec2/bloc-ec2-i23-tr-n4-c2/`, and
+  `results/analysis/issue-23-acs-n4-c4-c2/`. The next action is to define and
+  run narrow transport/RBC optimization experiments without expanding the
+  diagnostic matrix or publishing p99 from 30 observations.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent

@@ -78,13 +78,14 @@ release-candidate configuration contract are defined in
   ACS campaign passed repeated safety tests, the host race selection, the
   100/100 sustained n4/batch-128 gate, the 180/180 n4/n7 compatibility matrix,
   both module identity suites, and its benchmark; 1,509 validated node traces
-  were retained and no AWS resource was allocated. This host is Darwin and its
-  Docker daemon is unavailable, so the separate Linux
-  `Test(RBC|ACS|BBA|SlotACS)` race evidence required by the ACS safety policy
-  remains outstanding. No ACS stage or optimization conclusion is supported
-  until matched VM evidence exists. Before a canary, bind the same clean
-  protocol source hashes to a Linux race result, freeze immutable diagnostic
-  images/bundles, and obtain separate live authorization.
+  were retained and no AWS resource was allocated. The separate
+  `Test(RBC|ACS|BBA|SlotACS)` race selection also passed in a network-disabled
+  Linux/ARM64 container with read-only source and module-cache mounts; its
+  manifest binds image ID, commits, protocol source hashes, and the retained
+  log. Local pre-cloud validation is therefore complete. No ACS stage or
+  optimization conclusion is supported until matched VM evidence exists.
+  Before a canary, freeze immutable diagnostic images/bundles and obtain
+  separate live authorization.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -468,10 +469,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Complete issue #23's remaining Linux race and immutable release-candidate
-   freeze, then request separate authorization for the smallest matched
-   same-AZ/three-region diagnostic canary. Do not start a live campaign or
-   select an optimization before those gates and matched evidence.
+1. Freeze issue #23's immutable diagnostic release candidate, then request
+   separate authorization for the smallest matched same-AZ/three-region
+   diagnostic canary. Do not start a live campaign or select an optimization
+   before that gate and matched evidence.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.

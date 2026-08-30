@@ -23,7 +23,8 @@ validation, p99-capable Type-7/order-statistic reporting, balanced seeded
 long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
 500-transaction balanced client corpus with one plaintext/encrypted measurement
 per target, a separate nested 512-target representative protocol corpus,
-Prometheus metrics, local evaluators, and VM/EC2 remote evaluation.
+Prometheus metrics, local evaluators, VM/EC2 remote evaluation, and opt-in
+bounded `bloc-acs-trace/v1` diagnostics with fail-closed evaluator artifacts.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -67,6 +68,23 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
+- **Issue #23 diagnostic campaign readiness:** the implementation and lean
+  pre-cloud gate are complete on commit
+  `87ae4099e3e72025142a4e9cdeb210baeb1b0c3c`. The proposal-ready paired
+  trace-off/on benchmark passed the 2% median observer threshold in all six
+  `n=4/7`, batch `8/32/128` cells; latency deltas were `-0.085%` to `+0.757%`,
+  byte deltas at most `+0.524%`, and allocation deltas at most `+0.767%`. A
+  local traced evaluator smoke retained four validated node records. The clean
+  ACS campaign passed repeated safety tests, the host race selection, the
+  100/100 sustained n4/batch-128 gate, the 180/180 n4/n7 compatibility matrix,
+  both module identity suites, and its benchmark; 1,509 validated node traces
+  were retained and no AWS resource was allocated. This host is Darwin and its
+  Docker daemon is unavailable, so the separate Linux
+  `Test(RBC|ACS|BBA|SlotACS)` race evidence required by the ACS safety policy
+  remains outstanding. No ACS stage or optimization conclusion is supported
+  until matched VM evidence exists. Before a canary, bind the same clean
+  protocol source hashes to a Linux race result, freeze immutable diagnostic
+  images/bundles, and obtain separate live authorization.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -450,9 +468,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Start issue #23 as the next M5 implementation task: add bounded ACS
-   critical-path instrumentation and prove its local correctness and observer
-   overhead before selecting an optimization or requesting VM execution.
+1. Complete issue #23's remaining Linux race and immutable release-candidate
+   freeze, then request separate authorization for the smallest matched
+   same-AZ/three-region diagnostic canary. Do not start a live campaign or
+   select an optimization before those gates and matched evidence.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.

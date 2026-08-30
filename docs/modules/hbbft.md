@@ -190,6 +190,12 @@ disabled recorder returns an empty trace and avoids its clock, mutex, map, and
 snapshot work. Trace snapshots are detached copies and never feed a protocol
 transition.
 
+`input_started` records admission of this node's local proposal, not a
+cluster-wide ACS start barrier. Because evaluators trigger nodes concurrently,
+the node can process and even output another proposer's RBC before its own local
+input is admitted. Local causality still requires `input_started` to precede
+the RBC output for the node's own proposer ID.
+
 RBC and BBA instances run concurrently. Per-proposer points are therefore
 diagnostic offsets, not durations that can be summed. Only the mutually
 exclusive completion waits (`N-F` true BBAs, all BBAs, and truthy RBC

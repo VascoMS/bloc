@@ -94,10 +94,21 @@ release-candidate configuration contract are defined in
   campaign keys into new private bundles, bound to that BLOC digest and the
   existing immutable mempool digest, and reverified. Exact-source
   `--validate-only` checks pass for same-AZ and three-region at both n4 and n7.
-  No EC2 or other campaign infrastructure was allocated. Pre-cloud readiness is
-  therefore complete. No ACS stage or optimization conclusion is supported
-  until matched VM evidence exists; live campaign execution remains separately
-  unauthorized.
+  Live n4 execution is now authorized. The first same-AZ attempt used an
+  experiment ID outside the deployer's `bloc-ec2-*` IAM namespace and stopped
+  before instance creation; all partial network resources and its temporary key
+  were removed. The corrected retry passed provisioning, immutable-image
+  verification, service health, and all 90 protocol attempts, but its final
+  artifact was rejected because the evaluator incorrectly required local
+  proposal admission to precede every remote RBC output. One of 420 retained
+  node traces legitimately reconstructed a remote proposer before admitting
+  its own local input; every trace preserved local-input-before-own-RBC
+  causality. The evaluator now validates that narrower protocol invariant on
+  commit `4cb210446ce403f60c3fd5409611fde5d68e37a1`; focused red/green tests, replay
+  of the rejected 40-record scenario, and the complete `bloc-node` suite pass.
+  Both attempts remain rejected diagnostic evidence, all AWS and temporary-key
+  cleanup is independently empty, and three-region execution remains gated on
+  a clean from-zero same-AZ retry with a newly frozen immutable image.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent

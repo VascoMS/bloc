@@ -88,6 +88,16 @@ func TestExecutionModeDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestEvalSuiteOptionsEnableACSTrace(t *testing.T) {
+	options, err := parseEvalSuiteOptions([]string{"--acs-trace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.ACSTrace {
+		t.Fatal("--acs-trace did not enable local diagnostic configs")
+	}
+}
+
 func TestPersistentScheduleHasExactGroupedM1Samples(t *testing.T) {
 	options, err := parseEvalSuiteOptions([]string{"--profile", "m1-baseline"})
 	if err != nil {

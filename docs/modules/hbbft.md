@@ -181,6 +181,22 @@ output IDs, all known BBA results, truthy proposer IDs, per-instance compact
 state, queued-message count, and one waiting reason. `SlotProgress` adds the
 slot. These snapshots are diagnostic and do not drive protocol transitions.
 
+`SlotConfig.Trace.Enabled` opts one slot into the bounded
+`bloc-acs-trace/v1` recorder. Its process-local monotonic offsets share the
+proposal-ready origin used by the node's legacy ACS timer. The recorder stores
+fixed aggregate milestones, one RBC and BBA entry per configured proposer, and
+one message counter entry for each of PROOF, ECHO, READY, BVAL, and AUX. A
+disabled recorder returns an empty trace and avoids its clock, mutex, map, and
+snapshot work. Trace snapshots are detached copies and never feed a protocol
+transition.
+
+RBC and BBA instances run concurrently. Per-proposer points are therefore
+diagnostic offsets, not durations that can be summed. Only the mutually
+exclusive completion waits (`N-F` true BBAs, all BBAs, and truthy RBC
+availability) are additive within the core wait interval. Adapter points split
+the core decision from common-subset decoding, block-body construction, and
+node receipt.
+
 ### 7. Slot adapter
 
 `SlotACS.InputBatch` gob-encodes the candidate `[]byte` before giving it to RBC.

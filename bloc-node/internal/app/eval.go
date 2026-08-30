@@ -101,7 +101,7 @@ func evalLocal(args []string) error {
 		if err := os.MkdirAll(runDir, 0755); err != nil {
 			return err
 		}
-		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *basePort+(idx*2000), *timeout, *faultRaw)
+		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *basePort+(idx*2000), *timeout, *faultRaw, false)
 		if err != nil {
 			run.Error = err.Error()
 		}
@@ -122,7 +122,7 @@ func evalLocal(args []string) error {
 	return nil
 }
 
-func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs int, basePort int, timeout time.Duration, faultRaw string) (EvalRun, error) {
+func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs int, basePort int, timeout time.Duration, faultRaw string, acsTrace bool) (EvalRun, error) {
 	run := EvalRun{
 		RunID:           runID,
 		Nodes:           nodes,
@@ -156,6 +156,9 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	defer os.RemoveAll(configRoot)
 	configPath := filepath.Join(configRoot, "cluster.json")
 	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--out", configPath}
+	if acsTrace {
+		args = append(args, "--acs-trace")
+	}
 	if out, err := exec.Command(self, args...).CombinedOutput(); err != nil {
 		return run, fmt.Errorf("gen-config: %w: %s", err, strings.TrimSpace(string(out)))
 	}

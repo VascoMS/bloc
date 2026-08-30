@@ -192,6 +192,24 @@ func TestConfigAcceptsOptionalACSTraceDiagnostics(t *testing.T) {
 	}
 }
 
+func TestGenConfigEnablesACSTraceOnlyWhenRequested(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4", "--threshold", "3", "--bmax", "8",
+		"--acs-trace", "--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+	cfg, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Diagnostics.ACSTrace {
+		t.Fatal("generated config did not enable ACS tracing")
+	}
+}
+
 func TestGenConfigRejectsNegativeMempoolTimeout(t *testing.T) {
 	err := genConfig([]string{
 		"--nodes", "4",

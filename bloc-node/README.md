@@ -126,6 +126,12 @@ go run ./cmd/bloc-node eval-local \
   --out-dir results/local
 ```
 
+For a bounded ACS diagnostic artifact, use `eval-suite --acs-trace`. The flag
+is opt-in and propagates to generated isolated and persistent configs; the
+evaluator writes validated `bloc-acs-trace/v1` records to `acs_trace.jsonl`.
+See the ACS trace diagnostic gate in [docs/VALIDATION.md](../docs/VALIDATION.md)
+before interpreting or comparing those offsets.
+
 Run the professor-facing demo flow:
 
 ```sh

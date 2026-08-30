@@ -28,6 +28,7 @@ bash bloc-node/scripts/run-acs-safety-campaign.sh --validate-only
 grep -Fq '"sbc/hbbft/rbc.go":$r' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC implementation" >&2; exit 1; }
 grep -Fq '"sbc/hbbft/rbc_test.go":$rt' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety manifest does not bind the RBC regression tests" >&2; exit 1; }
 grep -Fq "Test(RBC|ACS|BBA|SlotACS)" bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety race stage does not cover RBC tests" >&2; exit 1; }
+grep -Fq -- '--acs-trace' bloc-node/scripts/run-acs-safety-campaign.sh || { echo "ACS safety evaluator stages do not enable diagnostic traces" >&2; exit 1; }
 bash bloc-node/scripts/run-merge-plan-campaign.sh --phase baseline --campaign-id validate-only --validate-only
 bash deploy/ec2/run-a1-pilot.sh --admin-cidr 127.0.0.1/32 --validate-only
 bash deploy/ec2/run-a1-pilot.sh --admin-cidr 127.0.0.1/32 --node-count 10 \

@@ -94,6 +94,7 @@ type suiteOptions struct {
 	ExperimentID     string
 	ExecutionMode    string
 	MaxRestarts      int
+	ACSTrace         bool
 }
 
 type clusterMeasurement struct {
@@ -297,7 +298,7 @@ func evalSuite(args []string) error {
 					orderIndex++
 					runID := fmt.Sprintf("%s-r%03d-%s", phase.name, iteration, scenario.ID)
 					runDir := filepath.Join(options.OutDir, "runs", runID)
-					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "")
+					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "", options.ACSTrace)
 					run.ScenarioID, run.Phase, run.Iteration, run.OrderIndex = scenario.ID, phase.name, iteration, orderIndex
 					run.ScheduleSeed = options.Seed
 					run.PlannedScenarioRuns = options.Repetitions
@@ -431,6 +432,7 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.StringVar(&options.ExperimentID, "experiment-id", "", "stable experiment label")
 	fs.StringVar(&options.ExecutionMode, "execution-mode", "isolated", "cluster lifecycle: isolated or persistent")
 	fs.IntVar(&options.MaxRestarts, "max-restarts", 3, "maximum consecutive persistent-cluster recovery attempts")
+	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
 	if err := fs.Parse(args); err != nil {
 		return suiteOptions{}, err
 	}

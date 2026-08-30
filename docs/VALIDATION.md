@@ -201,6 +201,40 @@ M1 remains a historical local baseline. It is not an outstanding campaign
 requirement: final p99/scaling evidence is VM-only under M5, and issue #8 uses
 local evaluation only to validate the distributed-campaign contract.
 
+## ACS Trace Diagnostic Gate
+
+Use `eval-suite --acs-trace` only for diagnostic runs. A minimal local artifact
+smoke is:
+
+```sh
+cd bloc-node
+go run ./cmd/bloc-node eval-suite \
+  --execution-mode isolated --node-counts 4 --batch-sizes 8 --bmax 8 \
+  --warmups 0 --repetitions 1 --repetition-blocks 1 \
+  --timeout 30s --deadline 12s --acs-trace \
+  --experiment-id issue-23-trace-smoke --out-dir results/local/issue-23-trace-smoke
+```
+
+Acceptance requires a successful and consistent measured run, manifest schema
+`bloc-acs-trace/v1`, and exactly one validated `acs_trace.jsonl` record per
+node. Local listener-based evaluation may need to run outside a restricted
+network sandbox; preserve any failed environmental attempt rather than
+rewriting it as protocol evidence.
+
+Measure observer overhead from `sbc/hbbft` with:
+
+```sh
+go test -run '^$' -bench '^BenchmarkACSTrace$' -benchmem -count 10
+```
+
+The paired cases use the retained encoded proposal sizes 12,234, 50,982, and
+201,622 bytes for batch 8, 32, and 128 at `n=4/7`, with identical input and FIFO
+delivery schedules for trace-off and trace-on. Retain raw output under ignored
+`results/local/acs-latency-attribution/`. The VM gate remains closed if any
+cell's trace-on median local ACS time exceeds its trace-off median by more than
+2%. Report allocation and byte deltas as observer-cost context; do not promote
+these local benchmark timings to VM or topology evidence.
+
 ## ACS Safety Gate
 
 After ACS/BBA safety or liveness changes, run:
@@ -220,8 +254,10 @@ Acceptance requires:
   proposer IDs, and the ACS waiting reason.
 
 The gate includes mixed-root RBC rejection and post-decode Merkle commitment
-checks. It does not cover conflicting AUX equivocation or sufficiently delayed
-future-epoch messages.
+checks. Its evaluator stages enable `--acs-trace`, so a passing diagnostic
+campaign also proves complete per-node trace artifact retention. It does not
+cover conflicting AUX equivocation or sufficiently delayed future-epoch
+messages.
 
 The runner records its host OS in `manifest.json`. When the full campaign runs
 on a non-Linux host, retain a separate Linux execution of the same

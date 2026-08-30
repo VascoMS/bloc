@@ -345,6 +345,28 @@ selected gas, encrypted hashes, plaintext hashes/hex, and parsed Ethereum
 summaries. `Result` adds node ID, `BatchID`, ciphertext count, total latency,
 and the finalized metrics snapshot.
 
+## Opt-In ACS Diagnostic Evidence
+
+`diagnostics.acs_trace=true` enables the bounded hbbft trace for each new slot;
+omitting it preserves the legacy result shape and execution path. Local config
+generation accepts `--acs-trace`, and `eval-suite --acs-trace` propagates the
+flag to both isolated and generated persistent clusters. Final VM campaigns
+enable the same setting through topology materialization.
+
+Every traced node result carries `bloc-acs-trace/v1`. Evaluator output retains
+aggregate columns in `node_measurements.csv` and one deterministic JSONL record
+per `(measurement_block, run_id, node_id, slot)` in `acs_trace.jsonl`. The
+validator rejects missing or duplicate node records, unsupported schemas,
+negative or impossible offsets, proposer membership errors, incomplete message
+subtypes, aggregate/detail mismatches, and failure to reconcile node receipt
+with the existing `acs_us` interval. Failed attempts remain in raw artifacts
+but never enter successful latency distributions.
+
+Trace offsets are local to one process. They support within-node milestone and
+wait attribution; they do not support cross-host timestamp subtraction.
+Concurrent RBC/BBA instance offsets must not be presented as an additive stage
+stack.
+
 ## Fail-Closed And Empty-Slot Behavior
 
 Failures during proposal construction, ACS input, accepted-list decoding,

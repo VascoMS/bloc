@@ -82,10 +82,16 @@ release-candidate configuration contract are defined in
   `Test(RBC|ACS|BBA|SlotACS)` race selection also passed in a network-disabled
   Linux/ARM64 container with read-only source and module-cache mounts; its
   manifest binds image ID, commits, protocol source hashes, and the retained
-  log. Local pre-cloud validation is therefore complete. No ACS stage or
-  optimization conclusion is supported until matched VM evidence exists.
-  Before a canary, freeze immutable diagnostic images/bundles and obtain
-  separate live authorization.
+  log. A `linux/amd64` diagnostic image was then frozen locally from source
+  commit `7a293290b4ab96363cd10dec271418cc88f4794e` as
+  `sha256:e1e8ba6d722d71bebd2568dece3e54e859375358b36d80ab4386fec44ecf0f83`;
+  its network-disabled smoke confirms the non-root runtime and `--acs-trace`
+  surface. The commit-addressed ECR tag is prepared locally but has not been
+  pushed, no AWS API was called, and no AWS resource was allocated. Local
+  pre-cloud validation is therefore complete. No ACS stage or optimization
+  conclusion is supported until matched VM evidence exists. Before a canary,
+  separately authorize publication, record the remote digest, freeze the n4/n7
+  private bundles against it, and obtain live campaign authorization.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -469,10 +475,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Freeze issue #23's immutable diagnostic release candidate, then request
-   separate authorization for the smallest matched same-AZ/three-region
-   diagnostic canary. Do not start a live campaign or select an optimization
-   before that gate and matched evidence.
+1. Obtain explicit authorization to publish issue #23's locally frozen
+   diagnostic image to ECR, record the remote digest, and freeze the n4/n7
+   private bundles against it. Then obtain separate authorization for the
+   smallest matched same-AZ/three-region diagnostic canary. Do not start a live
+   campaign or select an optimization before that gate and matched evidence.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
@@ -501,6 +508,8 @@ release-candidate configuration contract are defined in
   `results/local/distributed-preflight-2bc8efc/`
 - Linux RBC/ACS/BBA race evidence:
   `results/release-candidate/2bc8efc9269798a7f7ab58021f8b9bda1012ae5d/validation/logs/hbbft-linux-amd64-race.log`
+- Issue #23 local image freeze:
+  `results/local/acs-common-subset-safety/issue-23-local-gate-87ae409/local-image-manifest.json`
 - Accepted distributed evidence:
   `results/ec2/m3-three-region-synthetic-accepted-20260718-1/`
 - Canonical validation commands and evidence semantics:

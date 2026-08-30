@@ -23,9 +23,19 @@ payload-sensitive at batch 128.
 
 The current transport opens, negotiates, writes, and closes one logical
 `/bloc/envelope/1.0.0` stream for every addressed envelope even though the
-underlying peer connection is persistent. The experiment tests the narrower
-hypothesis that removing repeated application-stream setup and close work
-reduces send duration and ACS latency over a WAN.
+underlying peer connection is persistent. In the steady-state go-libp2p path,
+protocol selection is lazy: the protocol header and first envelope are sent
+without waiting for the selection response. The current sender then closes the
+stream and waits for that response before `Send` returns. Because node sends
+run in goroutines, this can inflate sender-side send duration without placing
+the same full delay on the ACS critical path.
+
+The experiment therefore tests the narrower hypothesis that removing repeated
+application-stream control traffic, protocol-selection completion, handler
+churn, and mux scheduling reduces transport contention and ACS latency over a
+WAN. It must separately report queue, open, write, and finalization time so a
+lower `Send` duration is not mistaken for a lower receiver-delivery or ACS
+duration.
 
 This is a mechanism hypothesis, not an accepted causal claim. The fresh and
 persistent modes must be measured from the same candidate source before the
@@ -76,28 +86,40 @@ silently interpreting v2 framing with v1 EOF semantics.
 
 ## Outbound Data Path
 
-The transport owns one small writer state per recipient: a mutex and the
-currently usable outbound stream.
+The transport owns one writer worker per recipient. Each worker exclusively
+owns its current outbound stream and receives immutable encoded envelopes over
+a capacity-one channel. The channel is the only application transport queue:
+one envelope may be in progress and at most one may wait for that peer.
 
 `Send` keeps its synchronous completion contract:
 
 1. Validate the recipient, overwrite routing fields with authenticated local
    values, protobuf-encode the envelope, and enforce `max_envelope_bytes`.
-2. Lock the recipient's writer state. This serializes frames without adding a
-   transport queue or message priority.
-3. Reuse the cached stream, or open a v2 stream if none is usable.
-4. Write the unsigned-varint encoded length and then the complete envelope with
-   the existing short-write-safe behavior.
-5. Unlock only after the write succeeds or fails, and return the encoded
-   envelope byte count only on success.
+2. Enqueue one request on the recipient's capacity-one channel. Queue admission
+   is bounded by the caller deadline or a ten-second internal send deadline
+   when the caller supplies none.
+3. The dedicated worker drops an already-cancelled queued request, otherwise
+   reuses its current stream or opens a v2 replacement.
+4. The worker writes the unsigned-varint encoded length and then the complete
+   envelope with the existing short-write-safe behavior. It sets the stream
+   write deadline to the request's effective deadline.
+5. The worker publishes one buffered completion containing phase timings and
+   success or failure. `Send` returns only after that completion; successful
+   accounting still means the complete frame was accepted by the transport,
+   not acknowledged by the remote application.
 
-Because callers already execute sends concurrently, time waiting for the
-per-peer writer lock remains inside the existing per-message send duration.
-That makes any serialization cost visible rather than hiding it behind an
-asynchronous enqueue result. The lock provides serialization but makes no new
-cross-message ordering guarantee; ACS already accepts reordered delivery.
+Persistent sends record zero per-message finalization time because they do not
+half-close or close the reused stream. Worker result publication is local
+bookkeeping, not a wire phase.
 
-No new queue, batching, priority, compression, or automatic retry is added.
+The worker, rather than a mutex shared by arbitrary caller goroutines,
+serializes frame writes. This makes backlog explicit and bounded. Queue wait
+remains part of the existing per-message send duration. FIFO order applies only
+after concurrent callers have successfully entered the per-peer channel; ACS
+continues to tolerate delivery reordering across peers and competing callers.
+
+No priority, batching, compression, delivery acknowledgement, or automatic
+retry is added.
 
 ## Inbound Data Path
 
@@ -123,27 +145,32 @@ stream, but the invalid frame is never delivered.
 ## Startup, Readiness, And Shutdown
 
 Persistent mode asynchronously opens one outbound v2 stream to every configured
-peer after the underlying libp2p connection exists. Opening uses the same
-cancelable lifecycle and bounded per-attempt behavior already used for static
-peers.
+peer after the underlying libp2p connection exists and Identify reports that
+the peer supports v2. Opening uses the same cancelable lifecycle and bounded
+per-attempt behavior already used for static peers. The open sends the yamux
+stream-control frame before measurement; lazy multistream selection remains
+pipelined with the first framed write.
 
-`Ready` requires both the underlying connection and a cached outbound v2 stream
-for every remote operator. This moves initial stream negotiation before the
-evaluator's health barrier so the first measured ACS message does not pay the
-setup cost being removed by the experiment.
+`Ready` requires the underlying connection, advertised v2 support, and a cached
+outbound v2 stream for every remote operator. This moves yamux stream creation
+before the evaluator's health barrier and detects a mixed-mode cluster without
+inventing an application-level handshake. It does not claim that lazy protocol
+selection has completed before the first framed write.
 
-Manual starts remain safe if a send races readiness: `Send` may open the absent
-stream while holding that peer's writer lock. `Close` stops prewarming, closes
-cached streams, and then closes the libp2p host.
+Manual starts remain safe if a send races readiness: the recipient worker may
+open the absent stream for that request. `Close` stops admission, cancels
+prewarming, fails queued requests, interrupts active streams through host
+shutdown, and waits for workers and inbound readers to exit.
 
 ## Failure Semantics
 
 An open failure returns failure for the current envelope.
 
-On any frame write or close-related failure, the sender resets and removes the
-cached stream and returns failure for that envelope. It does not retry the
-envelope because a partial write creates an uncertain-delivery boundary. The
-next distinct send may open a replacement stream and write its own envelope.
+On any frame write, deadline, reset, or connection failure, the worker resets
+and removes the cached stream and returns failure for that envelope. It does not
+retry the envelope because a partial write creates an uncertain-delivery
+boundary. The next distinct queued send may open a replacement stream and write
+only its own envelope.
 
 This preserves the current fail-closed accounting rule: bytes and successful
 delivery are recorded only after the complete transport write succeeds. It
@@ -152,19 +179,23 @@ into application-level receipt confirmation.
 
 Initial opens and replacement opens emit bounded structured log events with
 the local node, remote operator, stream mode, and reason (`prewarm` or
-`replacement`). Resets emit the corresponding bounded reason. Existing ACS
-send duration, byte, and failure diagnostics remain the primary comparison
-metrics; this first iteration does not add a high-cardinality metric surface.
+`replacement`). Resets emit the corresponding bounded reason. The opt-in ACS
+diagnostic schema is versioned to `bloc-acs-trace/v2` and adds fixed per-subtype
+totals/maxima for encode, queue wait, stream open, frame write, and per-message
+finalization plus open/reuse counts. It adds no peer, slot, stream, or epoch
+labels and no high-cardinality Prometheus surface.
 
 ## Safety And Resource Invariants
 
 - The configured libp2p peer ID remains the authenticated operator identity.
 - `From`, `To`, and `Direct` remain transport-owned outbound fields.
 - Every frame independently enforces the existing envelope and payload bounds.
-- Only one writer can use a directed persistent stream at a time, preventing
-  byte interleaving.
-- There is no unbounded transport queue. Existing protocol sends may wait on
-  the per-peer writer lock, and that wait is visible in send duration.
+- Only the recipient's worker writes its directed persistent stream, preventing
+  byte interleaving without a writer mutex.
+- There is no unbounded transport queue. The capacity-one channel admits at
+  most one waiting envelope per peer, and its wait is visible in send duration.
+- A request that cannot enter the queue before its effective deadline fails
+  without writing any bytes.
 - No failed or uncertain write is silently replayed.
 - A malformed peer loses the current stream rather than allowing decoder state
   to continue after an invalid frame.
@@ -176,8 +207,11 @@ The expected implementation surface is:
 
 - `bloc-node/internal/app/types.go` and configuration validation/generators for
   `network.stream_mode`;
-- `bloc-node/internal/app/transport_libp2p.go` for v2 framing, directed stream
-  state, prewarming, readiness, replacement, and shutdown;
+- `bloc-node/internal/app/transport.go` for bounded per-send phase results;
+- focused libp2p transport files for v2 framing, the capacity-one directed
+  writer, prewarming, readiness, replacement, and shutdown;
+- the bounded ACS trace/evaluator surface for `bloc-acs-trace/v2` transport
+  phase aggregation and matched-mode analysis;
 - colocated configuration, framing, transport, authentication, resource, and
   lifecycle tests;
 - `bloc-node/README.md`, `docs/modules/bloc-node.md`, `docs/VALIDATION.md`,
@@ -185,9 +219,9 @@ The expected implementation surface is:
 - the relevant local and EC2 generator/runbook surfaces only when required to
   select and retain the experiment mode.
 
-No `sbc/hbbft` source, protobuf message schema, ACS trace schema, cryptographic
-code, mempool behavior, Terraform topology, or node-count configuration changes
-are in scope.
+No RBC/BBA/ACS transition, protobuf message schema, cryptographic code, mempool
+behavior, Terraform topology, or node-count configuration change is in scope.
+The only `sbc/hbbft` change is the bounded diagnostic value/aggregation surface.
 
 ## Validation Strategy
 
@@ -197,6 +231,8 @@ Implementation begins with failing tests for:
   unknown modes;
 - multiple valid envelopes delivered over one v2 stream;
 - concurrent sends producing complete, non-interleaved frames;
+- capacity-one backpressure, deadline expiry before admission, and cancellation
+  after admission without goroutine or stream leaks;
 - zero, oversized, overflowed, and truncated frame rejection before unsafe
   allocation or delivery;
 - authenticated-peer and per-envelope validation on a persistent stream;
@@ -205,7 +241,9 @@ Implementation begins with failing tests for:
 - write failure resetting the stream, reporting the current send as failed,
   and allowing a later distinct send to open a replacement without replay;
 - clean transport shutdown with active persistent readers and writers; and
-- unchanged v1 fresh-stream behavior.
+- unchanged v1 fresh-stream wire behavior; and
+- phase accounting proving fresh finalization is separated from receiver-facing
+  write time and persistent queue wait is not hidden.
 
 Run `cd bloc-node && go test ./...` and focused transport/configuration race
 coverage after the targeted tests pass. Run the existing local n4 protocol
@@ -214,7 +252,9 @@ with zero unexpected send failures or protocol rejections.
 
 The first performance comparison uses n4, batches `8/32/128`, the same corpus,
 identity material, schedule, diagnostics, and evaluator settings in both modes.
-It reports p50/p95 only. All retained provenance must match except the explicit
+It reports p50/p95 only. It compares ACS milestones as well as send phase
+totals/maxima; a reduction confined to finalization/send-return time is not an
+ACS improvement. All retained provenance must match except the explicit
 `network.stream_mode` and its derived public-config identity.
 
 Only after local correctness and a usable latency signal may the same matched
@@ -228,7 +268,10 @@ and is retained as evidence rather than prompting unmeasured tuning.
 - Fresh mode remains byte- and behavior-compatible with the current transport.
 - Persistent mode negotiates at most one active outbound v2 stream per directed
   peer during healthy operation and carries multiple validated envelopes on it.
-- Initial persistent stream negotiation completes before readiness.
+- Initial yamux stream creation and v2 support detection complete before
+  readiness; lazy protocol selection remains safe on the first framed write.
+- Each directed peer has one writer, one in-progress frame, and at most one
+  queued frame.
 - Complete writes preserve existing success accounting; failed or uncertain
   writes are not replayed.
 - Existing authentication and resource bounds apply independently to every
@@ -237,6 +280,8 @@ and is retained as evidence rather than prompting unmeasured tuning.
   consistency validation pass in both modes.
 - The matched comparison can attribute its only intended configuration change
   to `network.stream_mode`.
+- Diagnostic output separates encode, queue, open, write, and finalization time
+  and does not equate sender completion with receiver delivery.
 - Results determine whether to retain the mode, reject it, or design a measured
   follow-up for writer contention or large-frame interference.
 

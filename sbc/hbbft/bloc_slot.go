@@ -134,6 +134,24 @@ func (s *SlotACS) MarkNodeOutputReceived() {
 	s.trace.recordAdapter(traceNodeOutputReceived)
 }
 
+// RecordACSInbound adds one authenticated, decoded ACS envelope to its fixed
+// subtype summary.
+func (s *SlotACS) RecordACSInbound(subtype ACSMessageSubtype, size int) {
+	if s == nil || s.trace == nil {
+		return
+	}
+	s.trace.recordMessageInbound(subtype, size)
+}
+
+// RecordACSOutbound adds one transport completion to its fixed subtype
+// summary. Failed sends increment only the failure count.
+func (s *SlotACS) RecordACSOutbound(subtype ACSMessageSubtype, size int, duration time.Duration, sendErr error) {
+	if s == nil || s.trace == nil {
+		return
+	}
+	s.trace.recordMessageOutbound(subtype, size, duration, sendErr)
+}
+
 // Slot returns the slot identifier handled by this adapter instance.
 func (s *SlotACS) Slot() uint64 {
 	return s.slot

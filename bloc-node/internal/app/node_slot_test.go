@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -16,6 +17,8 @@ type blockingSlotTransport struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
+	size    int
+	err     error
 }
 
 type discardSlotTransport struct{}
@@ -31,7 +34,11 @@ func (t *blockingSlotTransport) Close() error                                 { 
 func (t *blockingSlotTransport) Send(context.Context, uint64, WireEnvelope) (int, error) {
 	t.once.Do(func() { close(t.started) })
 	<-t.release
-	return 17, nil
+	size := t.size
+	if size == 0 {
+		size = 17
+	}
+	return size, t.err
 }
 
 func lifecycleTestNode(t *testing.T) *Node {
@@ -363,6 +370,95 @@ func TestPrepareSlotWaitsForInflightSendAndResetsItsMetrics(t *testing.T) {
 	}
 	if len(n.metrics.OutboundMessages) != 0 {
 		t.Fatalf("prior-slot send contaminated new metrics: %+v", n.metrics.OutboundMessages)
+	}
+}
+
+func TestACSSubtypeInboundAccounting(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+
+	n.handleEnvelope(WireEnvelope{
+		From: 1,
+		To:   0,
+		Kind: "acs",
+		Slot: 1,
+		ACS: slotACSMessage(&hbbft.BroadcastMessage{
+			Payload: &hbbft.ReadyRequest{RootHash: []byte("root")},
+		}),
+	}, 123)
+
+	got := n.slot.Trace().Messages[hbbft.ACSMessageReady]
+	if got.InboundCount != 1 || got.InboundBytes != 123 {
+		t.Fatalf("READY inbound accounting = %+v", got)
+	}
+}
+
+func TestACSSubtypeOutboundAccountingAndSlotIsolation(t *testing.T) {
+	tests := []struct {
+		name        string
+		sendErr     error
+		wantSuccess uint64
+		wantFailure uint64
+	}{
+		{name: "success", wantSuccess: 1},
+		{name: "failure", sendErr: errors.New("send failed"), wantFailure: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			n := lifecycleTestNode(t)
+			n.slot.Close()
+			n.cfg.Diagnostics.ACSTrace = true
+			n.slotState = n.newSlotState(1)
+			n.slot.BeginTrace(time.Now())
+			oldSlot := n.slot
+			transport := &blockingSlotTransport{
+				started: make(chan struct{}),
+				release: make(chan struct{}),
+				size:    29,
+				err:     test.sendErr,
+			}
+			n.transport = transport
+			n.sendEnvelope(1, WireEnvelope{
+				Kind: "acs",
+				Slot: 1,
+				ACS: slotACSMessage(&hbbft.AgreementMessage{
+					Message: &hbbft.BvalRequest{Value: true},
+				}),
+			})
+			<-transport.started
+			n.mu.Lock()
+			n.phase = slotCompleted
+			n.mu.Unlock()
+			prepared := make(chan error, 1)
+			go func() { prepared <- n.prepareSlot(2) }()
+			select {
+			case err := <-prepared:
+				t.Fatalf("slot replacement did not wait for send accounting: %v", err)
+			case <-time.After(25 * time.Millisecond):
+			}
+			close(transport.release)
+			if err := <-prepared; err != nil {
+				t.Fatal(err)
+			}
+
+			got := oldSlot.Trace().Messages[hbbft.ACSMessageBVAL]
+			if got.OutboundCount != test.wantSuccess || got.SendCount != test.wantSuccess ||
+				got.SendFailureCount != test.wantFailure {
+				t.Fatalf("BVAL outbound accounting = %+v", got)
+			}
+			if test.wantSuccess == 1 && (got.OutboundBytes != 29 || got.SendMaxUS > got.SendTotalUS) {
+				t.Fatalf("successful BVAL accounting = %+v", got)
+			}
+			if test.wantFailure == 1 && (got.OutboundBytes != 0 || got.SendTotalUS != 0) {
+				t.Fatalf("failed BVAL counted as success: %+v", got)
+			}
+			if fresh := n.slot.Trace().Messages[hbbft.ACSMessageBVAL]; fresh != (hbbft.ACSMessageTrace{}) {
+				t.Fatalf("old send contaminated new slot: %+v", fresh)
+			}
+		})
 	}
 }
 

@@ -348,6 +348,60 @@ func (r *traceRecorder) recordAdapter(event adapterTraceEvent) {
 	r.pointLocked(point)
 }
 
+func (r *traceRecorder) recordMessageInbound(subtype ACSMessageSubtype, size int) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started {
+		return
+	}
+	entry, ok := r.trace.Messages[subtype]
+	if !ok {
+		return
+	}
+	entry.InboundCount++
+	if size > 0 {
+		entry.InboundBytes += uint64(size)
+	}
+	r.trace.Messages[subtype] = entry
+}
+
+func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, size int, duration time.Duration, sendErr error) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started {
+		return
+	}
+	entry, ok := r.trace.Messages[subtype]
+	if !ok {
+		return
+	}
+	if sendErr != nil {
+		entry.SendFailureCount++
+		r.trace.Messages[subtype] = entry
+		return
+	}
+	entry.OutboundCount++
+	if size > 0 {
+		entry.OutboundBytes += uint64(size)
+	}
+	entry.SendCount++
+	durationUS := duration.Microseconds()
+	if durationUS < 0 {
+		durationUS = 0
+	}
+	entry.SendTotalUS += durationUS
+	if durationUS > entry.SendMaxUS {
+		entry.SendMaxUS = durationUS
+	}
+	r.trace.Messages[subtype] = entry
+}
+
 func (r *traceRecorder) transitionWait(reason string) {
 	if r == nil || !r.enabled || !validTraceWaitReason(reason) {
 		return

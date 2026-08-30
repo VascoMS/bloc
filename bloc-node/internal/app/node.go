@@ -551,6 +551,9 @@ func (n *Node) handleEnvelope(env WireEnvelope, size int) {
 			log.Printf("nil acs message from %d", env.From)
 			return
 		}
+		if subtype, err := classifyACSMessage(env.ACS); err == nil {
+			n.slot.RecordACSInbound(subtype, size)
+		}
 		output, err := n.stepACS(func() error {
 			return n.slot.HandleMessage(env.From, env.ACS)
 		})
@@ -1188,7 +1191,21 @@ func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
 		env.From = n.self.ID
 		env.To = to
 		env.Direct = true
+		var (
+			acsSubtype   hbbft.ACSMessageSubtype
+			traceACSSend bool
+		)
+		if env.Kind == "acs" && env.ACS != nil {
+			var classifyErr error
+			acsSubtype, classifyErr = classifyACSMessage(env.ACS)
+			traceACSSend = classifyErr == nil
+		}
+		sendStarted := time.Now()
 		size, err := n.transport.Send(context.Background(), to, env)
+		sendDuration := time.Since(sendStarted)
+		if traceACSSend {
+			n.slot.RecordACSOutbound(acsSubtype, size, sendDuration, err)
+		}
 		if err != nil {
 			log.Printf("send %s to %d failed: %v", env.Kind, to, err)
 			return

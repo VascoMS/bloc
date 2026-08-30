@@ -428,11 +428,17 @@ def write_transport_attribution(fresh_root: Path, persistent_root: Path, output:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("fresh", type=Path)
-    parser.add_argument("persistent", type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("fresh", nargs="?", type=Path)
+    parser.add_argument("persistent", nargs="?", type=Path)
+    parser.add_argument("--fresh-root", type=Path)
+    parser.add_argument("--persistent-root", type=Path)
+    parser.add_argument("--output", "--out-dir", required=True, type=Path)
     args = parser.parse_args(argv)
-    print(write_transport_attribution(args.fresh, args.persistent, args.output))
+    fresh = args.fresh_root or args.fresh
+    persistent = args.persistent_root or args.persistent
+    if fresh is None or persistent is None:
+        parser.error("provide fresh and persistent roots as positionals or --fresh-root/--persistent-root")
+    print(write_transport_attribution(fresh, persistent, args.output))
     return 0
 
 

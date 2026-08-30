@@ -4,12 +4,369 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"bloc-node/internal/pb/blocv1"
+	network "github.com/libp2p/go-libp2p/core/network"
+	peer "github.com/libp2p/go-libp2p/core/peer"
+	protocol "github.com/libp2p/go-libp2p/core/protocol"
+	"google.golang.org/protobuf/proto"
 )
+
+func TestPersistentHandlerDeliversMultipleFrames(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	codec := ProtoEnvelopeCodec{}
+	var wantSizes []int
+	for slot := uint64(1); slot <= 3; slot++ {
+		envelope := validPersistentTestEnvelope(pair.sender.node.self.ID, pair.receiver.node.self.ID, slot)
+		data, err := codec.Encode(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantSizes = append(wantSizes, len(data))
+		if err := writeEnvelopeFrame(stream, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for index, wantSize := range wantSizes {
+		select {
+		case delivery := <-pair.deliveries:
+			if delivery.envelope.Slot != uint64(index+1) || delivery.encodedBytes != wantSize {
+				t.Fatalf("delivery %d = %+v, want slot=%d bytes=%d", index, delivery, index+1, wantSize)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for delivery %d", index)
+		}
+	}
+	select {
+	case extra := <-pair.deliveries:
+		t.Fatalf("unexpected extra delivery: %+v", extra)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if got := persistentRejectionCount(t, pair.receiver.node, "decode"); got != 0 {
+		t.Fatalf("clean EOF recorded %d decode rejections", got)
+	}
+}
+
+func TestPersistentHandlerRejectsAuthenticatedEnvelopeViolations(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*WireEnvelope)
+		reason string
+	}{
+		{name: "forged from", reason: "authentication", mutate: func(envelope *WireEnvelope) { envelope.From = 9 }},
+		{name: "wrong recipient", reason: "authentication", mutate: func(envelope *WireEnvelope) { envelope.To = 9 }},
+		{name: "not direct", reason: "authentication", mutate: func(envelope *WireEnvelope) { envelope.Direct = false }},
+		{name: "forged share operator", reason: "authentication", mutate: func(envelope *WireEnvelope) { envelope.Share.OperatorID = 9 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+			envelope := validPersistentTestEnvelope(pair.sender.node.self.ID, pair.receiver.node.self.ID, 1)
+			test.mutate(&envelope)
+			data, err := (ProtoEnvelopeCodec{}).Encode(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream := writePersistentTestFrames(t, pair, data)
+			waitForPersistentRejection(t, pair.receiver.node, test.reason, 1)
+			assertPersistentStreamReset(t, stream)
+			assertNoPersistentDelivery(t, pair.deliveries)
+		})
+	}
+}
+
+func TestPersistentHandlerRejectsInvalidPayloadUnion(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	data, err := proto.Marshal(&blocv1.Envelope{
+		Version: 1,
+		From:    pair.sender.node.self.ID,
+		To:      pair.receiver.node.self.ID,
+		Direct:  true,
+		Kind:    "acs",
+		Slot:    1,
+		Payload: &blocv1.Envelope_Share{Share: &blocv1.WireShare{OperatorId: pair.sender.node.self.ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := writePersistentTestFrames(t, pair, data)
+	waitForPersistentRejection(t, pair.receiver.node, "payload", 1)
+	assertPersistentStreamReset(t, stream)
+	assertNoPersistentDelivery(t, pair.deliveries)
+}
+
+func TestPersistentHandlerRejectsUnknownRemotePeer(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, false)
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (ProtoEnvelopeCodec{}).Encode(validPersistentTestEnvelope(0, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnvelopeFrame(stream, data); err != nil && !errors.Is(err, network.ErrReset) {
+		t.Fatal(err)
+	}
+	waitForPersistentRejection(t, pair.receiver.node, "authentication", 1)
+	assertPersistentStreamReset(t, stream)
+	assertNoPersistentDelivery(t, pair.deliveries)
+}
+
+func TestPersistentHandlerRejectsInvalidFrameAfterValidFrame(t *testing.T) {
+	tests := []struct {
+		name   string
+		tail   func(maximum int) []byte
+		reason string
+	}{
+		{name: "oversized", reason: "oversize", tail: func(maximum int) []byte {
+			return binary.AppendUvarint(nil, uint64(maximum+1))
+		}},
+		{name: "truncated", reason: "decode", tail: func(int) []byte {
+			return append(binary.AppendUvarint(nil, 3), 'a', 'b')
+		}},
+		{name: "undecodable", reason: "decode", tail: func(int) []byte {
+			var framed bytes.Buffer
+			if err := writeEnvelopeFrame(&framed, []byte{0xff, 0xff}); err != nil {
+				panic(err)
+			}
+			return framed.Bytes()
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+			valid, err := (ProtoEnvelopeCodec{}).Encode(validPersistentTestEnvelope(0, 1, 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeEnvelopeFrame(stream, valid); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeAll(stream, test.tail(pair.receiver.node.cfg.Limits.MaxEnvelopeBytes)); err != nil {
+				t.Fatal(err)
+			}
+			if test.name == "truncated" {
+				_ = stream.CloseWrite()
+			}
+			select {
+			case delivery := <-pair.deliveries:
+				if delivery.envelope.Slot != 1 || delivery.encodedBytes != len(valid) {
+					t.Fatalf("valid delivery = %+v, want bytes=%d", delivery, len(valid))
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("valid frame was not delivered before invalid frame")
+			}
+			waitForPersistentRejection(t, pair.receiver.node, test.reason, 1)
+			assertPersistentStreamReset(t, stream)
+			assertNoPersistentDelivery(t, pair.deliveries)
+		})
+	}
+}
+
+func TestFreshHandlerKeepsV1WireCompatibilityAndModeIsolation(t *testing.T) {
+	fresh := newLibP2PTransportPair(t, streamModeFresh, streamModeFresh, true)
+	if !transportAdvertisesProtocol(fresh.receiver, blocEnvelopeProtocolFresh) ||
+		transportAdvertisesProtocol(fresh.receiver, blocEnvelopeProtocolPersistent) {
+		t.Fatalf("fresh protocols = %v", fresh.receiver.host.Mux().Protocols())
+	}
+	stream, err := fresh.sender.host.NewStream(t.Context(), fresh.receiver.host.ID(), blocEnvelopeProtocolFresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (ProtoEnvelopeCodec{}).Encode(validPersistentTestEnvelope(0, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAll(stream, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case delivery := <-fresh.deliveries:
+		if delivery.envelope.Slot != 1 || delivery.encodedBytes != len(data) {
+			t.Fatalf("fresh delivery = %+v", delivery)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("fresh v1 envelope was not delivered")
+	}
+
+	persistent := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	if !transportAdvertisesProtocol(persistent.receiver, blocEnvelopeProtocolPersistent) ||
+		transportAdvertisesProtocol(persistent.receiver, blocEnvelopeProtocolFresh) {
+		t.Fatalf("persistent protocols = %v", persistent.receiver.host.Mux().Protocols())
+	}
+}
+
+func writePersistentTestFrames(t *testing.T, pair libP2PTransportPair, frames ...[]byte) network.Stream {
+	t.Helper()
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range frames {
+		if err := writeEnvelopeFrame(stream, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return stream
+}
+
+func waitForPersistentRejection(t *testing.T, node *Node, reason string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := persistentRejectionCount(t, node, reason); got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s rejection count = %d, want %d", reason, persistentRejectionCount(t, node, reason), want)
+}
+
+func persistentRejectionCount(t *testing.T, node *Node, reason string) int {
+	t.Helper()
+	body := scrapeNodeMetrics(t, node)
+	needle := `bloc_protocol_envelopes_rejected_total{cluster_id="persistent-handler-test",direction="inbound",node_id="1",reason="` + reason + `"} 1`
+	if strings.Contains(body, needle) {
+		return 1
+	}
+	return 0
+}
+
+func assertPersistentStreamReset(t *testing.T, stream network.Stream) {
+	t.Helper()
+	if err := stream.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var one [1]byte
+	if _, err := stream.Read(one[:]); !errors.Is(err, network.ErrReset) {
+		t.Fatalf("stream read error = %v, want reset", err)
+	}
+}
+
+func assertNoPersistentDelivery(t *testing.T, deliveries <-chan persistentTestDelivery) {
+	t.Helper()
+	select {
+	case delivery := <-deliveries:
+		t.Fatalf("invalid envelope was delivered: %+v", delivery)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+type persistentTestDelivery struct {
+	envelope     WireEnvelope
+	encodedBytes int
+}
+
+type libP2PTransportPair struct {
+	sender     *LibP2PTransport
+	receiver   *LibP2PTransport
+	deliveries chan persistentTestDelivery
+}
+
+func newLibP2PTransportPair(t *testing.T, senderMode, receiverMode string, receiverKnowsSender bool) libP2PTransportPair {
+	t.Helper()
+	senderPrivate, senderPeerID, err := generateLibP2PIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiverPrivate, receiverPeerID, err := generateLibP2PIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderConfig := NodeConfig{ID: 0, P2PListenAddr: "/ip4/127.0.0.1/tcp/0", P2PPeerID: senderPeerID}
+	receiverConfig := NodeConfig{ID: 1, P2PListenAddr: "/ip4/127.0.0.1/tcp/0", P2PPeerID: receiverPeerID}
+	senderPeers := map[uint64]NodeConfig{0: senderConfig, 1: receiverConfig}
+	receiverPeers := map[uint64]NodeConfig{1: receiverConfig}
+	if receiverKnowsSender {
+		receiverPeers[0] = senderConfig
+	}
+	senderNode := persistentTestNode(senderConfig, senderPeers, senderPrivate, senderMode)
+	receiverNode := persistentTestNode(receiverConfig, receiverPeers, receiverPrivate, receiverMode)
+	sender := newLibP2PTransport(senderNode, ProtoEnvelopeCodec{})
+	receiver := newLibP2PTransport(receiverNode, ProtoEnvelopeCodec{})
+	deliveries := make(chan persistentTestDelivery, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := receiver.Start(ctx, func(envelope WireEnvelope, encodedBytes int) {
+		deliveries <- persistentTestDelivery{envelope: envelope, encodedBytes: encodedBytes}
+	}); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if err := sender.Start(ctx, func(WireEnvelope, int) {}); err != nil {
+		_ = receiver.Close()
+		cancel()
+		t.Fatal(err)
+	}
+	if err := sender.host.Connect(ctx, peer.AddrInfo{ID: receiver.host.ID(), Addrs: receiver.host.Addrs()}); err != nil {
+		_ = sender.Close()
+		_ = receiver.Close()
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = sender.Close()
+		_ = receiver.Close()
+	})
+	return libP2PTransportPair{sender: sender, receiver: receiver, deliveries: deliveries}
+}
+
+func persistentTestNode(self NodeConfig, peers map[uint64]NodeConfig, privateKey, mode string) *Node {
+	return &Node{
+		cfg: ConfigFile{
+			ClusterID: "persistent-handler-test",
+			Network:   NetworkConfig{Mode: "libp2p", StreamMode: mode},
+			Limits:    ResourceLimits{MaxEnvelopeBytes: 1024},
+		},
+		self:             self,
+		peers:            peers,
+		p2pPrivateKeyHex: privateKey,
+		observability:    newNodeMetrics("persistent-handler-test", self.ID),
+	}
+}
+
+func validPersistentTestEnvelope(from, to, slot uint64) WireEnvelope {
+	return WireEnvelope{
+		From: from, To: to, Direct: true, Kind: "share", Slot: slot,
+		Share: &WireShare{OperatorID: int(from)},
+	}
+}
+
+func transportAdvertisesProtocol(transport *LibP2PTransport, want protocol.ID) bool {
+	for _, advertised := range transport.host.Mux().Protocols() {
+		if advertised == want {
+			return true
+		}
+	}
+	return false
+}
 
 func TestPeerStreamWriterSerializesFramesAndBoundsQueue(t *testing.T) {
 	stop := make(chan struct{})

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -18,7 +19,10 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-const blocEnvelopeProtocol = protocol.ID("/bloc/envelope/1.0.0")
+const (
+	blocEnvelopeProtocolFresh      = protocol.ID("/bloc/envelope/1.0.0")
+	blocEnvelopeProtocolPersistent = protocol.ID("/bloc/envelope/2.0.0")
+)
 
 var errEnvelopeTooLarge = errors.New("protocol envelope exceeds configured maximum")
 
@@ -30,6 +34,7 @@ type LibP2PTransport struct {
 	host          host.Host
 	peerOperators map[peer.ID]uint64
 	openStream    func(context.Context, uint64) (outboundStream, error)
+	handler       EnvelopeHandler
 }
 
 type outboundStream interface {
@@ -65,47 +70,104 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 		return err
 	}
 	t.host = h
-	h.SetStreamHandler(blocEnvelopeProtocol, func(s network.Stream) {
-		defer s.Close()
-		remotePeer := s.Conn().RemotePeer()
-		operatorID, known := t.peerOperators[remotePeer]
-		if !known {
-			log.Printf("reject libp2p stream from unconfigured peer_id=%s", remotePeer)
-			t.node.recordProtocolRejected("inbound", "authentication")
-			return
-		}
-		data, err := readBoundedEnvelope(s, t.node.cfg.Limits.MaxEnvelopeBytes)
-		if err != nil {
-			if errors.Is(err, errEnvelopeTooLarge) {
-				t.node.recordProtocolRejected("inbound", "oversize")
-				_ = s.Reset()
-				return
-			}
-			t.node.recordProtocolRejected("inbound", "decode")
-			log.Printf("read libp2p stream: %v", err)
-			return
-		}
-		env, err := t.codec.Decode(data)
-		if err != nil {
-			t.node.recordProtocolRejected("inbound", "decode")
-			log.Printf("decode libp2p stream envelope: %v", err)
-			return
-		}
-		if err := validateEnvelopePayload(env); err != nil {
-			t.node.recordProtocolRejected("inbound", "payload")
-			log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
-			return
-		}
-		if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, env); err != nil {
-			t.node.recordProtocolRejected("inbound", "authentication")
-			log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
-			return
-		}
-		handler(env, len(data))
-	})
+	t.handler = handler
+	switch t.node.cfg.Network.StreamMode {
+	case "", streamModeFresh:
+		h.SetStreamHandler(blocEnvelopeProtocolFresh, t.handleFreshStream)
+	case streamModePersistent:
+		h.SetStreamHandler(blocEnvelopeProtocolPersistent, t.handlePersistentStream)
+	default:
+		_ = h.Close()
+		t.host = nil
+		return fmt.Errorf("unsupported libp2p stream mode %q", t.node.cfg.Network.StreamMode)
+	}
 	log.Printf("event=libp2p_listen node_id=%d peer_id=%s listen_addrs=%v advertise_addr=%s", t.node.self.ID, h.ID(), h.Addrs(), t.node.self.p2pAdvertiseAddr())
 	t.connectStaticPeers(ctx)
 	return nil
+}
+
+func (t *LibP2PTransport) handleFreshStream(stream network.Stream) {
+	defer stream.Close()
+	remotePeer := stream.Conn().RemotePeer()
+	operatorID, known := t.peerOperators[remotePeer]
+	if !known {
+		log.Printf("reject libp2p stream from unconfigured peer_id=%s", remotePeer)
+		t.node.recordProtocolRejected("inbound", "authentication")
+		return
+	}
+	data, err := readBoundedEnvelope(stream, t.node.cfg.Limits.MaxEnvelopeBytes)
+	if err != nil {
+		if errors.Is(err, errEnvelopeTooLarge) {
+			t.node.recordProtocolRejected("inbound", "oversize")
+			_ = stream.Reset()
+			return
+		}
+		t.node.recordProtocolRejected("inbound", "decode")
+		log.Printf("read libp2p stream: %v", err)
+		return
+	}
+	envelope, err := t.codec.Decode(data)
+	if err != nil {
+		t.node.recordProtocolRejected("inbound", "decode")
+		log.Printf("decode libp2p stream envelope: %v", err)
+		return
+	}
+	if err := validateEnvelopePayload(envelope); err != nil {
+		t.node.recordProtocolRejected("inbound", "payload")
+		log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
+		return
+	}
+	if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, envelope); err != nil {
+		t.node.recordProtocolRejected("inbound", "authentication")
+		log.Printf("reject libp2p envelope peer_id=%s: %v", remotePeer, err)
+		return
+	}
+	t.handler(envelope, len(data))
+}
+
+func (t *LibP2PTransport) handlePersistentStream(stream network.Stream) {
+	defer stream.Close()
+	remotePeer := stream.Conn().RemotePeer()
+	operatorID, known := t.peerOperators[remotePeer]
+	if !known {
+		t.rejectPersistentStream(stream, "authentication", fmt.Errorf("unconfigured peer_id=%s", remotePeer))
+		return
+	}
+	reader := bufio.NewReader(stream)
+	for {
+		data, err := readEnvelopeFrame(reader, t.node.cfg.Limits.MaxEnvelopeBytes)
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			reason := "decode"
+			if errors.Is(err, errEnvelopeTooLarge) {
+				reason = "oversize"
+			}
+			t.rejectPersistentStream(stream, reason, err)
+			return
+		}
+		envelope, err := t.codec.Decode(data)
+		if err != nil {
+			t.rejectPersistentStream(stream, "decode", err)
+			return
+		}
+		if err := validateEnvelopePayload(envelope); err != nil {
+			t.rejectPersistentStream(stream, "payload", err)
+			return
+		}
+		if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, envelope); err != nil {
+			t.rejectPersistentStream(stream, "authentication", err)
+			return
+		}
+		t.handler(envelope, len(data))
+	}
+}
+
+func (t *LibP2PTransport) rejectPersistentStream(stream network.Stream, reason string, err error) {
+	t.node.recordProtocolRejected("inbound", reason)
+	log.Printf("reject persistent libp2p stream peer_id=%s reason=%s: %v", stream.Conn().RemotePeer(), reason, err)
+	_ = stream.Reset()
 }
 
 func readBoundedEnvelope(reader io.Reader, maxBytes int) ([]byte, error) {
@@ -279,7 +341,7 @@ func (t *LibP2PTransport) openOutboundStream(ctx context.Context, to uint64) (ou
 	if t.host == nil {
 		return nil, errors.New("libp2p transport is not started")
 	}
-	return t.host.NewStream(ctx, id, blocEnvelopeProtocol)
+	return t.host.NewStream(ctx, id, blocEnvelopeProtocolFresh)
 }
 
 func writeAll(writer io.Writer, data []byte) error {

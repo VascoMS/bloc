@@ -548,9 +548,18 @@ Use this file for major architecture, protocol, and workflow decisions.
   known-protocol libp2p stream does not itself complete its lazy multistream
   handshake: deployment staging outlasted the receiver's negotiation timeout,
   and every unconfirmed prewarmed stream reset on first use. That arm is also
-  rejected. Readiness now waits for negotiation confirmation. Because this
-  changes the frozen source, all four comparison arms require one replacement
-  immutable candidate rather than mixing revisions.
+  rejected. Readiness now waits for negotiation confirmation. The replacement
+  c4 campaign completed all four matched arms with 90/90 successful,
+  consistent measured runs per arm, zero send failures, and empty cleanup.
+  Persistent streams produced a stable `acs-signal` in same-AZ cells, reducing
+  p50 by 19.8--52.7%, but all three three-region cells classified
+  `sender-finalization-only` with overlapping p50 intervals and changes of
+  -0.3%, +9.3%, and +1.5%. Batch-128 persistent queue wait reached
+  545.796 ms p50 per node trace. Logical-stream churn is therefore not the
+  cross-region root cause, and further direct-stream queue tuning is not the
+  primary phase-two direction; the accepted baseline motivates testing
+  GossipSub dissemination while retaining phase one's failure and
+  backpressure lessons.
 - Related files: `bloc-node/internal/app/transport_libp2p.go`,
   `bloc-node/internal/app/transport_libp2p_persistent.go`,
   `sbc/hbbft/trace.go`, `latency-charts/src/bloc_latency_charts/transport_attribution.py`,

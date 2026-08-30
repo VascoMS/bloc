@@ -68,77 +68,56 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #23 attribution and phase-one local stream experiment are accepted;
-  distributed canaries remain:** the
-  matched n4 same-AZ and three-region latency phases are complete on source
-  `d6bf2c0d62d5e4e039952ace117a6ab9a08b8cc0` and immutable BLOC image
-  `sha256:ab4bf84da397f379ba5e22820ddd53ba532702b1bc7da3d709e3c847e1e5eaf1`.
-  Each topology retained 90/90 successful, consistent measured attempts and
-  360 validated node traces for batches `8/32/128`; the matched-contract loader
-  accepted identical source, images, identities, corpus, seed, schedule, and
-  `bloc-acs-trace/v1` schema. ACS p50 changed from
-  `15.908/26.381/59.482 ms` same-AZ to `185.691/235.464/500.357 ms`
-  three-region. The post-BBA adapter handoff stayed below `1 ms` for batches 8
-  and 32 and near `4--5 ms` for batch 128, while per-message send maxima moved
-  from roughly `3--12 ms` to `70--422 ms`. Send failures remained zero, BBA
-  epoch depth stayed at median `1` and p95 `2`, and WAN BVAL/AUX counts did not
-  increase. The first RBC output is especially payload-sensitive at batch 128
-  (`30.581 ms` versus `389.078 ms` p50); at smaller batches, successive RBC and
-  BBA quorum waits account for the remaining WAN delay. This supports a core
-  ACS transport/round-trip attribution rather than adapter work, retries, or
-  extra agreement epochs. The transport mechanism is an inference to test:
-  each addressed ACS message opens a fresh libp2p logical stream over a
-  persistent peer connection, so stream setup, WAN RTT, write completion, and
-  backpressure may amplify the protocol's broadcast/quorum pattern. Both
-  campaigns completed recovery and cleanup; Terraform destroyed 15 and 39
-  resources respectively, all regional EC2/EBS/VPC/key/IAM checks are empty,
-  and the three peering records are `deleted`. Retained roots are
-  `results/ec2/bloc-ec2-i23-sa-n4-c4/`,
-  `results/ec2/bloc-ec2-i23-tr-n4-c2/`, and
-  `results/analysis/issue-23-acs-n4-c4-c2/`. Phase one on source
-  `857d5024b9db6d6a9ec78b726ca5af921181f197` keeps v1 fresh streams as the
-  compatibility arm and adds opt-in v2 persistent framed streams with one
-  capacity-one writer per peer, prewarm/readiness gates, bounded deadlines,
-  reset-without-replay failure handling, and `bloc-acs-trace/v2` transport
-  phases. The matched local n4 experiment retained 30/30 successful,
-  consistent measurements for each mode and batch. Persistent streams reduced
-  ACS p50 from `4.363/4.463/5.197 ms` to `1.798/2.002/2.943 ms` for batches
-  `8/32/128`; p50 and p95 confidence intervals were non-overlapping in every
-  cell, ACS send failures stayed zero, and median persistent queue wait was
-  `0.211/0.240/0.384 ms`. The analyzer classified all three cells and the
-  cross-batch result as `acs-signal`. This is accepted local mechanism evidence,
-  not proof of the WAN effect. Ignored roots are
-  `bloc-node/results/phase1-streams/local-fresh/`,
-  `bloc-node/results/phase1-streams/local-persistent/`, and
-  `bloc-node/results/phase1-streams/local-comparison/`. The phase-one cloud
-  campaign is explicitly authorized. Corrected source
-  `e00569539303f9245c4bc95db7b3bb894d097a54` and private ECR image
-  `sha256:810f9e1996c6e5d0fc41cf793061299b19f5850ddcc822e94f57bd4614118908`
-  passed the four-arm no-allocation contract. Same-AZ fresh
-  `bloc-ec2-i23-p1-sa-fr-c3`, same-AZ persistent
-  `bloc-ec2-i23-p1-sa-ps-c3`, and three-region fresh
-  `bloc-ec2-i23-p1-tr-fr-c3` are accepted: each retained all 105 planned slots,
-  90/90 successful, consistent measured runs, and 420 trace-v2 records. The
-  same-AZ persistent arm had 12 first-use failures and replacement opens in its
-  first warmup only, then retained zero measured send failures and 24,190
-  measured stream reuses with no measured opens. Three-region persistent
-  `bloc-ec2-i23-p1-tr-ps-c3` is rejected: all twelve prewarmed streams were
-  still in libp2p's lazy protocol-negotiation state, exceeded the receiver's
-  ten-second negotiation timeout during deployment staging, and reset with
-  protocol code `0x1001` on first use. Slot 1 timed out with zero node results;
-  all later prepares returned `409 Conflict`, so 0/90 measured runs and no ACS
-  traces are admissible. The final validator marked the phase invalid. Every
-  attempt completed recovery and teardown: Terraform destroyed 15 resources
-  per same-AZ arm and 39 per three-region arm, and retained plus independent
-  authenticated cleanup checks for the three accepted arms are empty. The
-  persistent prewarmer now forces libp2p's lazy handshake to complete and waits
-  for negotiation confirmation before marking a writer ready. Its focused
-  regression failed before the change and now passes; the real libp2p pair
-  proves that the receiver's inbound v2 stream is negotiated before readiness,
-  the focused race check passes, `go vet ./...` is clean, and the complete
-  `bloc-node` suite passes. Because the source changed, freeze one replacement
-  source/image/bundle and repeat all four arms rather than mixing candidate
-  revisions. Do not expand to n7 or publish p99 from 30 observations.
+- **Issue #23 phase one is accepted; GossipSub phase two remains:** the final
+  n4 four-arm campaign used source
+  `7720b1f5bfce1997f611c1db95cead394b0349c4`, immutable BLOC image
+  `sha256:87da6c9a447f73b8090e3b257dce94c357d64b97d644ea57e1150d4137426a34`,
+  one identity/corpus bundle, batches `8/32/128`, five warmups, 30 measured
+  repetitions, three balanced blocks, seed `20260621`, a 12-second deadline,
+  and `bloc-acs-trace/v2`. Same-AZ fresh/persistent and three-region
+  fresh/persistent each retained all 105 planned slots, 90/90 successful,
+  consistent measured runs, and 420 node traces with zero ACS send failures.
+  Fresh mode opened 21,174 same-AZ and 16,366 three-region measured logical
+  streams; persistent mode recorded zero measured opens and 23,938/23,497
+  same-AZ/three-region reuses. The matched analyzer accepted provenance and
+  schedule identity in both topology pairs.
+
+  Persistent streams reduced same-AZ ACS p50 from
+  `17.534/27.715/63.439 ms` to `8.293/18.333/50.861 ms` for batches
+  `8/32/128` (`-52.7%/-33.9%/-19.8%`). All three cells classify
+  `acs-signal`; p50 intervals are non-overlapping, while the batch-128 p95
+  intervals overlap. In three-region, p50 changed only from
+  `233.209/237.621/515.948 ms` to `232.449/259.736/523.570 ms`
+  (`-0.3%/+9.3%/+1.5%`), with overlapping p50 intervals in every cell. All
+  three WAN cells and the cross-batch result classify
+  `sender-finalization-only`: persistent mode removes fresh stream-finalize
+  time, but does not produce an ACS latency signal. At batch 128 it also exposes
+  head-of-line backpressure from the one-stream-per-peer writer: median
+  per-node-trace queue wait rises to `545.796 ms`, versus
+  `0.220/0.224 ms` at batches 8/32.
+
+  Fresh logical-stream churn therefore contributes real same-AZ overhead but
+  does not explain the cross-region increase. The WAN critical path remains
+  RBC payload dissemination and successive RBC/BBA quorum dependencies:
+  persistent first-RBC-output p50 is
+  `72.434/144.454/428.540 ms`, and true-BBA-quorum p50 is
+  `209.100/235.958/508.608 ms`. Direct persistent streams neither reduce the
+  all-to-all message pattern nor remove those WAN-dependent rounds, and a
+  single per-peer stream can serialize large concurrent messages. This result
+  supports the separately scoped GossipSub dissemination phase, not further
+  direct-stream queue tuning as the primary latency solution. No n7 or p99
+  claim is made from this 30-observation diagnostic.
+
+  All four runs completed recovery and teardown. Terraform destroyed 15
+  resources per same-AZ arm and 39 per three-region arm; retained and
+  independent authenticated EC2/EBS/VPC/key/IAM checks are empty, with peering
+  records visible only as terminal `deleted` tombstones. Retained roots are
+  `results/ec2/bloc-ec2-i23-p1-sa-fr-c4/`,
+  `results/ec2/bloc-ec2-i23-p1-sa-ps-c4/`,
+  `results/ec2/bloc-ec2-i23-p1-tr-fr-c4/`, and
+  `results/ec2/bloc-ec2-i23-p1-tr-ps-c4/`; ignored flattened analysis views
+  and outputs are under
+  `results/local/acs-latency-attribution/issue-23-7720b1f/aws-analysis/`.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -522,18 +501,17 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Freeze the issue #23 lazy-negotiation correction into one source/image/bundle
-   and repeat same-AZ fresh, same-AZ persistent, three-region fresh, then
-   three-region persistent. Advance only after each prior arm and its cleanup
-   checks are accepted.
+1. Publish the accepted issue #23 c4 evidence and phase-one conclusion only
+   after explicit authorization for the new external payload, then close or
+   rescope phase one according to its acceptance criteria.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
 3. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-4. Keep the existing issue #23 live authorization scoped to the fail-closed n4
-   four-arm campaign; do not advance to multi-region until the corrected
-   same-AZ pair is accepted and cleanup is independently empty.
+4. Create and prioritize the separately scoped GossipSub phase-two issue before
+   implementation. Use the accepted c4 direct-stream evidence as its baseline;
+   do not extend phase one to n7 or publish p99 from 30 observations.
 5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next

@@ -384,7 +384,7 @@ func waitForRemoteHTTP(client *http.Client, nodes []remoteEvalNode, timeout time
 }
 
 func runRemoteSlot(client *http.Client, outDir, runID string, cfg remoteEvalConfig, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options remoteEvalOptions, prepare bool) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StreamMode: cfg.StreamMode, StartedAt: time.Now(), Results: []Result{}}
 	if options.TxSource == "mock-encrypted-corpus" {
 		identity := corpusIdentityForCount(cfg.Corpus, scenario.BatchSize)
 		run.Corpus = &identity

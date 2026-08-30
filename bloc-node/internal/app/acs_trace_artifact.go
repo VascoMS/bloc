@@ -94,6 +94,9 @@ func acsTraceSchemaForRuns(runs []EvalRun) (string, error) {
 			}
 		}
 	}
+	if schema != "" && schema != hbbft.ACSTraceSchemaV2 {
+		return "", fmt.Errorf("new evaluator runs require ACS trace schema %q, got %q", hbbft.ACSTraceSchemaV2, schema)
+	}
 	return schema, nil
 }
 
@@ -141,7 +144,7 @@ func validateACSTraceArtifact(manifest suiteManifest, runs []EvalRun, path strin
 	if manifest.ACSTraceSchema == "" {
 		return nil
 	}
-	if manifest.ACSTraceSchema != hbbft.ACSTraceSchemaVersion {
+	if !supportedACSTraceSchema(manifest.ACSTraceSchema) {
 		return fmt.Errorf("unsupported ACS trace schema %q", manifest.ACSTraceSchema)
 	}
 
@@ -301,11 +304,11 @@ func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]st
 	if err := validateBBARecords(record.BBA, members); err != nil {
 		return err
 	}
-	messages, err := validateMessageRecords(record.Messages)
+	messages, err := validateMessageRecords(record.Messages, record.SchemaVersion)
 	if err != nil {
 		return err
 	}
-	expectedMessages, err := validateMessageRecords(expected.record.Messages)
+	expectedMessages, err := validateMessageRecords(expected.record.Messages, expected.record.SchemaVersion)
 	if err != nil {
 		return fmt.Errorf("invalid source result messages: %w", err)
 	}
@@ -402,7 +405,7 @@ func validateTracePoints(kind string, points []hbbft.TracePoint) error {
 	return nil
 }
 
-func validateMessageRecords(records []acsMessageTraceRecord) (map[hbbft.ACSMessageSubtype]hbbft.ACSMessageTrace, error) {
+func validateMessageRecords(records []acsMessageTraceRecord, schema string) (map[hbbft.ACSMessageSubtype]hbbft.ACSMessageTrace, error) {
 	known := make(map[hbbft.ACSMessageSubtype]struct{}, len(orderedACSMessageSubtypes))
 	for _, subtype := range orderedACSMessageSubtypes {
 		known[subtype] = struct{}{}
@@ -418,6 +421,11 @@ func validateMessageRecords(records []acsMessageTraceRecord) (map[hbbft.ACSMessa
 		if record.Trace.SendTotalUS < 0 || record.Trace.SendMaxUS < 0 {
 			return nil, fmt.Errorf("negative send duration for ACS message subtype %q", record.Subtype)
 		}
+		if schema == hbbft.ACSTraceSchemaV2 {
+			if err := validateV2MessagePhases(record.Subtype, record.Trace); err != nil {
+				return nil, err
+			}
+		}
 		seen[record.Subtype] = record.Trace
 	}
 	for _, subtype := range orderedACSMessageSubtypes {
@@ -426,6 +434,28 @@ func validateMessageRecords(records []acsMessageTraceRecord) (map[hbbft.ACSMessa
 		}
 	}
 	return seen, nil
+}
+
+func validateV2MessagePhases(subtype hbbft.ACSMessageSubtype, trace hbbft.ACSMessageTrace) error {
+	for name, phase := range map[string]hbbft.ACSSendPhaseTrace{
+		"encode": trace.Encode, "queue_wait": trace.QueueWait, "stream_open": trace.StreamOpen,
+		"write": trace.Write, "finalize": trace.Finalize,
+	} {
+		if phase.Count != trace.SendCount {
+			return fmt.Errorf("ACS message subtype %q phase count for %s is %d, want send count %d", subtype, name, phase.Count, trace.SendCount)
+		}
+		if phase.TotalUS < 0 || phase.MaxUS < 0 || phase.MaxUS > phase.TotalUS {
+			return fmt.Errorf("invalid %s phase duration for ACS message subtype %q", name, subtype)
+		}
+	}
+	if trace.StreamOpenCount+trace.StreamReuseCount != trace.SendCount {
+		return fmt.Errorf("ACS message subtype %q open/reuse count %d does not match send count %d", subtype, trace.StreamOpenCount+trace.StreamReuseCount, trace.SendCount)
+	}
+	return nil
+}
+
+func supportedACSTraceSchema(schema string) bool {
+	return schema == hbbft.ACSTraceSchemaV1 || schema == hbbft.ACSTraceSchemaV2
 }
 
 func acsTraceKeyLess(left, right acsTraceArtifactKey) bool {

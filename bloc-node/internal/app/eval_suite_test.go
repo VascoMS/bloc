@@ -274,12 +274,22 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 			1: {MaxEpoch: 7},
 		},
 		Messages: map[hbbft.ACSMessageSubtype]hbbft.ACSMessageTrace{
-			hbbft.ACSMessageProof: {InboundCount: 2, InboundBytes: 20, OutboundCount: 3, OutboundBytes: 30, SendCount: 4, SendTotalUS: 40, SendMaxUS: 25, SendFailureCount: 1},
-			hbbft.ACSMessageEcho:  {InboundCount: 5, InboundBytes: 50, OutboundCount: 6, OutboundBytes: 60, SendCount: 7, SendTotalUS: 70, SendMaxUS: 35, SendFailureCount: 2},
+			hbbft.ACSMessageProof: {
+				InboundCount: 2, InboundBytes: 20, OutboundCount: 3, OutboundBytes: 30, SendCount: 4, SendTotalUS: 40, SendMaxUS: 25, SendFailureCount: 1,
+				Encode: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 40, MaxUS: 25}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 8, MaxUS: 5},
+				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 12, MaxUS: 6}, Write: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 16, MaxUS: 9},
+				Finalize: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 20, MaxUS: 11}, StreamOpenCount: 4,
+			},
+			hbbft.ACSMessageEcho: {
+				InboundCount: 5, InboundBytes: 50, OutboundCount: 6, OutboundBytes: 60, SendCount: 7, SendTotalUS: 70, SendMaxUS: 35, SendFailureCount: 2,
+				Encode: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 70, MaxUS: 35}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 14, MaxUS: 7},
+				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 21, MaxUS: 10}, Write: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 28, MaxUS: 12},
+				Finalize: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 35, MaxUS: 15}, StreamOpenCount: 1, StreamReuseCount: 6,
+			},
 		},
 	}
 	runs := []EvalRun{{
-		RunID: "run", MeasurementBlock: 4,
+		RunID: "run", MeasurementBlock: 4, StreamMode: streamModePersistent,
 		Results: []Result{{NodeID: 2, ACSTrace: trace}},
 	}}
 
@@ -295,6 +305,7 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		index[name] = i
 	}
 	want := map[string]string{
+		"stream_mode":                  streamModePersistent,
 		"acs_trace_schema":             hbbft.ACSTraceSchemaVersion,
 		"acs_input_started_us":         "0",
 		"acs_first_rbc_output_us":      "10",
@@ -319,6 +330,18 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		"acs_send_total_us":            "110",
 		"acs_send_max_us":              "35",
 		"acs_send_failures":            "3",
+		"acs_encode_total_us":          "110",
+		"acs_encode_max_us":            "35",
+		"acs_queue_wait_total_us":      "22",
+		"acs_queue_wait_max_us":        "7",
+		"acs_stream_open_total_us":     "33",
+		"acs_stream_open_max_us":       "10",
+		"acs_write_total_us":           "44",
+		"acs_write_max_us":             "12",
+		"acs_finalize_total_us":        "55",
+		"acs_finalize_max_us":          "15",
+		"acs_stream_open_count":        "5",
+		"acs_stream_reuse_count":       "6",
 		"acs_max_bba_epoch":            "7",
 	}
 	for name, expected := range want {
@@ -329,6 +352,30 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		if got := records[1][column]; got != expected {
 			t.Fatalf("%s = %q, want %q", name, got, expected)
 		}
+	}
+}
+
+func TestSuiteStreamModeAgreementFailsClosed(t *testing.T) {
+	runs := []EvalRun{{RunID: "run", StreamMode: streamModePersistent}}
+	if err := validateSuiteStreamMode(suiteManifest{StreamMode: streamModePersistent}, runs); err != nil {
+		t.Fatalf("matching stream mode rejected: %v", err)
+	}
+	runs[0].StreamMode = streamModeFresh
+	if err := validateSuiteStreamMode(suiteManifest{StreamMode: streamModePersistent}, runs); err == nil || !strings.Contains(err.Error(), "stream mode") {
+		t.Fatalf("mismatched stream mode error = %v", err)
+	}
+}
+
+func TestPersistentConfigBaseRejectsDifferentStreamMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cluster.json")
+	if err := os.WriteFile(path, []byte(`{"network":{"mode":"libp2p","stream_mode":"fresh"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateClusterConfigStreamMode(path, streamModePersistent); err == nil || !strings.Contains(err.Error(), "stream mode") {
+		t.Fatalf("config-base mismatch error = %v", err)
+	}
+	if err := validateClusterConfigStreamMode(path, streamModeFresh); err != nil {
+		t.Fatalf("matching config-base mode rejected: %v", err)
 	}
 }
 

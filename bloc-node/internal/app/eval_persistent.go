@@ -278,6 +278,10 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 		measurement.Error = err.Error()
 		return nil, measurement, err
 	}
+	if err := validateClusterConfigStreamMode(configPath, options.StreamMode); err != nil {
+		measurement.Error = err.Error()
+		return nil, measurement, err
+	}
 	if options.TxSource == "mock-encrypted-corpus" {
 		if err := validatePersistentCorpusConfig(configPath, scenario, options.CorpusByNodes[scenario.Nodes]); err != nil {
 			measurement.Error = err.Error()
@@ -328,6 +332,27 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 	return cluster, measurement, nil
 }
 
+func validateClusterConfigStreamMode(path, expected string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read cluster config stream mode: %w", err)
+	}
+	var config struct {
+		Network NetworkConfig `json:"network"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("decode cluster config stream mode: %w", err)
+	}
+	normalizeNetworkConfig(&config.Network)
+	if err := validateNetworkConfig(config.Network); err != nil {
+		return err
+	}
+	if config.Network.StreamMode != expected {
+		return fmt.Errorf("cluster config stream mode %q does not match evaluator stream mode %q", config.Network.StreamMode, expected)
+	}
+	return nil
+}
+
 func validatePersistentCorpusConfig(path string, scenario evalScenario, provenance corpusProvenance) error {
 	cfg, err := readConfig(path)
 	if err != nil {
@@ -352,7 +377,7 @@ func validatePersistentCorpusConfig(path string, scenario evalScenario, provenan
 }
 
 func (c *persistentCluster) runSlot(outDir, runID string, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options suiteOptions) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StartedAt: time.Now(), Results: []Result{}}
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StreamMode: options.StreamMode, StartedAt: time.Now(), Results: []Result{}}
 	if options.TxSource == "mock-encrypted-corpus" {
 		identity := corpusIdentityForCount(options.CorpusByNodes[scenario.Nodes], scenario.BatchSize)
 		run.Corpus = &identity

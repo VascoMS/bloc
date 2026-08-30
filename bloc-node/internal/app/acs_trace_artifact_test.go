@@ -85,6 +85,44 @@ func TestValidateACSTraceArtifactAcceptsCompleteArtifact(t *testing.T) {
 	}
 }
 
+func TestValidateACSTraceArtifactAcceptsHistoricalV1(t *testing.T) {
+	manifest, runs, records := validACSTraceArtifactFixture()
+	manifest.ACSTraceSchema = hbbft.ACSTraceSchemaV1
+	for runIndex := range runs {
+		for resultIndex := range runs[runIndex].Results {
+			runs[runIndex].Results[resultIndex].ACSTrace.SchemaVersion = hbbft.ACSTraceSchemaV1
+		}
+	}
+	for index := range records {
+		records[index].SchemaVersion = hbbft.ACSTraceSchemaV1
+	}
+	path := writeACSTraceRecords(t, records)
+	if err := validateACSTraceArtifact(manifest, runs, path); err != nil {
+		t.Fatalf("historical v1 artifact rejected: %v", err)
+	}
+}
+
+func TestValidateACSTraceArtifactRejectsV2PhaseCountMismatch(t *testing.T) {
+	manifest, runs, records := validACSTraceArtifactFixture()
+	message := hbbft.ACSMessageTrace{
+		OutboundCount: 1, OutboundBytes: 10, SendCount: 1, SendTotalUS: 10, SendMaxUS: 10,
+		Encode:          hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 1, MaxUS: 1},
+		QueueWait:       hbbft.ACSSendPhaseTrace{Count: 1},
+		StreamOpen:      hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 2, MaxUS: 2},
+		Write:           hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 7, MaxUS: 7},
+		Finalize:        hbbft.ACSSendPhaseTrace{Count: 1},
+		StreamOpenCount: 1,
+	}
+	runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageProof] = message
+	records[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+	records[0].Messages[0].Trace.Encode.Count = 0
+	path := writeACSTraceRecords(t, records)
+	err := validateACSTraceArtifact(manifest, runs, path)
+	if err == nil || !strings.Contains(err.Error(), "phase count") {
+		t.Fatalf("validate error = %v, want phase count failure", err)
+	}
+}
+
 func TestValidateACSTraceArtifactAllowsRemoteRBCOutputBeforeLocalInput(t *testing.T) {
 	manifest, runs, _ := validACSTraceArtifactFixture()
 	trace := runs[0].Results[0].ACSTrace
@@ -198,6 +236,9 @@ func TestWriteSuiteOutputsGatesACSTraceArtifactWithManifest(t *testing.T) {
 	}
 
 	legacyDir := t.TempDir()
+	for runIndex := range runs {
+		runs[runIndex].StreamMode = ""
+	}
 	if err := writeSuiteOutputs(legacyDir, nil, runs, suiteManifest{}); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +369,7 @@ func writeACSTraceRecords(t *testing.T, records []acsTraceArtifactRecord) string
 
 func validACSTraceArtifactFixture() (suiteManifest, []EvalRun, []acsTraceArtifactRecord) {
 	runs := []EvalRun{{
-		RunID: "run", MeasurementBlock: 3, Slot: 9, Nodes: 2,
+		RunID: "run", MeasurementBlock: 3, Slot: 9, Nodes: 2, StreamMode: streamModeFresh,
 		Results: []Result{
 			{NodeID: 0, Metrics: Metrics{ACSUS: 10}, ACSTrace: artifactTestTrace(10)},
 			{NodeID: 1, Metrics: Metrics{ACSUS: 20}, ACSTrace: artifactTestTrace(20)},
@@ -338,7 +379,7 @@ func validACSTraceArtifactFixture() (suiteManifest, []EvalRun, []acsTraceArtifac
 		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
 		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
 	}
-	return suiteManifest{ACSTraceSchema: hbbft.ACSTraceSchemaVersion}, runs, records
+	return suiteManifest{ACSTraceSchema: hbbft.ACSTraceSchemaVersion, StreamMode: streamModeFresh}, runs, records
 }
 
 func proposerIDs[T interface{ proposerID() uint64 }](records []T) []uint64 {

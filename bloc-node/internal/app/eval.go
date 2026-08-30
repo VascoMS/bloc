@@ -46,6 +46,7 @@ type EvalRun struct {
 	MaxDecryptedGas     uint64             `json:"max_decrypted_gas"`
 	MaxDecryptedTxs     int                `json:"max_decrypted_txs"`
 	Network             string             `json:"network"`
+	StreamMode          string             `json:"stream_mode"`
 	Faults              map[uint64]string  `json:"faults,omitempty"`
 	Success             bool               `json:"success"`
 	Consistent          bool               `json:"consistent"`
@@ -134,6 +135,7 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 		MaxDecryptedGas: maxDecryptedGas,
 		MaxDecryptedTxs: maxDecryptedTxs,
 		Network:         "libp2p",
+		StreamMode:      streamMode,
 		Faults:          make(map[uint64]string),
 		StartedAt:       time.Now(),
 	}

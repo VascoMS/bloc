@@ -86,12 +86,18 @@ release-candidate configuration contract are defined in
   commit `7a293290b4ab96363cd10dec271418cc88f4794e` as
   `sha256:e1e8ba6d722d71bebd2568dece3e54e859375358b36d80ab4386fec44ecf0f83`;
   its network-disabled smoke confirms the non-root runtime and `--acs-trace`
-  surface. The commit-addressed ECR tag is prepared locally but has not been
-  pushed, no AWS API was called, and no AWS resource was allocated. Local
-  pre-cloud validation is therefore complete. No ACS stage or optimization
-  conclusion is supported until matched VM evidence exists. Before a canary,
-  separately authorize publication, record the remote digest, freeze the n4/n7
-  private bundles against it, and obtain live campaign authorization.
+  surface. Under separate publication authorization, that exact OCI index was
+  pushed to the immutable, scan-on-push private ECR repository as
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:e1e8ba6d722d71bebd2568dece3e54e859375358b36d80ab4386fec44ecf0f83`;
+  the remote digest equals the local digest and its runtime child is
+  `linux/amd64`. Reused n4/n7 identities and corpora were copied without prior
+  campaign keys into new private bundles, bound to that BLOC digest and the
+  existing immutable mempool digest, and reverified. Exact-source
+  `--validate-only` checks pass for same-AZ and three-region at both n4 and n7.
+  No EC2 or other campaign infrastructure was allocated. Pre-cloud readiness is
+  therefore complete. No ACS stage or optimization conclusion is supported
+  until matched VM evidence exists; live campaign execution remains separately
+  unauthorized.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -475,11 +481,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain explicit authorization to publish issue #23's locally frozen
-   diagnostic image to ECR, record the remote digest, and freeze the n4/n7
-   private bundles against it. Then obtain separate authorization for the
-   smallest matched same-AZ/three-region diagnostic canary. Do not start a live
-   campaign or select an optimization before that gate and matched evidence.
+1. Obtain explicit live authorization for issue #23's smallest matched n4
+   same-AZ and three-region diagnostic canaries. Validate and compare that pair
+   before scaling to n7 or the full campaign. Do not start live infrastructure
+   or select an optimization before that authorization and matched evidence.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.

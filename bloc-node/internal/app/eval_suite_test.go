@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthdm/hbbft"
 )
 
 func TestM1BaselineProfileResolvesCompleteMatrix(t *testing.T) {
@@ -211,6 +213,100 @@ func TestRunMeasurementsRecordFixedConfiguration(t *testing.T) {
 			t.Fatalf("%s = %s, want %s", name, got, want)
 		}
 	}
+}
+
+func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nodes.csv")
+	trace := hbbft.ACSTrace{
+		SchemaVersion: hbbft.ACSTraceSchemaVersion,
+		Enabled:       true,
+		Aggregate: hbbft.ACSAggregateTrace{
+			InputStarted:       hbbft.TracePoint{Recorded: true, OffsetUS: 0},
+			FirstRBCOutput:     hbbft.TracePoint{Recorded: true, OffsetUS: 10},
+			RBCOutputQuorum:    hbbft.TracePoint{Recorded: true, OffsetUS: 20},
+			FirstTrueBBA:       hbbft.TracePoint{Recorded: true, OffsetUS: 30},
+			TrueBBAQuorum:      hbbft.TracePoint{Recorded: true, OffsetUS: 40},
+			FalseInputInjected: hbbft.TracePoint{Recorded: true, OffsetUS: 50},
+			AllBBADecided:      hbbft.TracePoint{Recorded: true, OffsetUS: 60},
+			TruthyRBCReady:     hbbft.TracePoint{Recorded: true, OffsetUS: 70},
+			CoreDecision:       hbbft.TracePoint{Recorded: true, OffsetUS: 80},
+		},
+		Wait: hbbft.ACSWaitTrace{TrueBBAQuorumUS: 11, AllBBAUS: 22, TruthyRBCUS: 33},
+		Adapter: hbbft.ACSAdapterTrace{
+			CommonSubsetDecoded: hbbft.TracePoint{Recorded: true, OffsetUS: 90},
+			BlockBodyBuilt:      hbbft.TracePoint{Recorded: true, OffsetUS: 100},
+			NodeOutputReceived:  hbbft.TracePoint{Recorded: true, OffsetUS: 110},
+		},
+		BBA: map[uint64]hbbft.BBATrace{
+			0: {MaxEpoch: 2},
+			1: {MaxEpoch: 7},
+		},
+		Messages: map[hbbft.ACSMessageSubtype]hbbft.ACSMessageTrace{
+			hbbft.ACSMessageProof: {InboundCount: 2, InboundBytes: 20, OutboundCount: 3, OutboundBytes: 30, SendCount: 4, SendTotalUS: 40, SendMaxUS: 25, SendFailureCount: 1},
+			hbbft.ACSMessageEcho:  {InboundCount: 5, InboundBytes: 50, OutboundCount: 6, OutboundBytes: 60, SendCount: 7, SendTotalUS: 70, SendMaxUS: 35, SendFailureCount: 2},
+		},
+	}
+	runs := []EvalRun{{
+		RunID: "run", MeasurementBlock: 4,
+		Results: []Result{{NodeID: 2, ACSTrace: trace}},
+	}}
+
+	if err := writeNodeMeasurements(path, runs); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readCSV(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := make(map[string]int, len(records[0]))
+	for i, name := range records[0] {
+		index[name] = i
+	}
+	want := map[string]string{
+		"acs_trace_schema":             hbbft.ACSTraceSchemaVersion,
+		"acs_input_started_us":         "0",
+		"acs_first_rbc_output_us":      "10",
+		"acs_rbc_output_quorum_us":     "20",
+		"acs_first_true_bba_us":        "30",
+		"acs_true_bba_quorum_us":       "40",
+		"acs_false_input_injected_us":  "50",
+		"acs_all_bba_decided_us":       "60",
+		"acs_truthy_rbc_ready_us":      "70",
+		"acs_core_decision_us":         "80",
+		"acs_common_subset_decoded_us": "90",
+		"acs_block_body_built_us":      "100",
+		"acs_node_output_received_us":  "110",
+		"acs_wait_true_bba_quorum_us":  "11",
+		"acs_wait_all_bba_us":          "22",
+		"acs_wait_truthy_rbc_us":       "33",
+		"acs_inbound_messages":         "7",
+		"acs_inbound_bytes":            "70",
+		"acs_outbound_messages":        "9",
+		"acs_outbound_bytes":           "90",
+		"acs_send_count":               "11",
+		"acs_send_total_us":            "110",
+		"acs_send_max_us":              "35",
+		"acs_send_failures":            "3",
+		"acs_max_bba_epoch":            "7",
+	}
+	for name, expected := range want {
+		column, ok := index[name]
+		if !ok {
+			t.Fatalf("missing ACS trace column %q", name)
+		}
+		if got := records[1][column]; got != expected {
+			t.Fatalf("%s = %q, want %q", name, got, expected)
+		}
+	}
+}
+
+func readCSV(path string) ([][]string, error) {
+	handle, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer handle.Close()
+	return csv.NewReader(handle).ReadAll()
 }
 
 func TestPrepareSuiteOutputDirRejectsExistingArtifacts(t *testing.T) {

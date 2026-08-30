@@ -217,7 +217,11 @@ func evalRemote(args []string) error {
 			slotID++
 		}
 	}
-	if err := writeSuiteOutputs(options.OutDir, []evalScenario{scenario}, runs); err != nil {
+	manifest.ACSTraceSchema, err = acsTraceSchemaForRuns(runs)
+	if err != nil {
+		return err
+	}
+	if err := writeSuiteOutputs(options.OutDir, []evalScenario{scenario}, runs, manifest); err != nil {
 		return err
 	}
 	collectionComplete := suiteCollectionComplete(plannedRuns, runs)

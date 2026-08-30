@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthdm/hbbft"
 )
 
 const suiteSchemaVersion = "bloc-eval-suite/v3"
@@ -29,6 +31,7 @@ type evalScenario struct {
 
 type suiteManifest struct {
 	SchemaVersion       string                       `json:"schema_version"`
+	ACSTraceSchema      string                       `json:"acs_trace_schema,omitempty"`
 	ExperimentID        string                       `json:"experiment_id"`
 	Profile             string                       `json:"profile,omitempty"`
 	Status              string                       `json:"status"`
@@ -321,7 +324,11 @@ func evalSuite(args []string) error {
 	if err := runsFile.Close(); err != nil {
 		return err
 	}
-	if err := writeSuiteOutputs(options.OutDir, scenarios, allRuns); err != nil {
+	manifest.ACSTraceSchema, err = acsTraceSchemaForRuns(allRuns)
+	if err != nil {
+		return err
+	}
+	if err := writeSuiteOutputs(options.OutDir, scenarios, allRuns, manifest); err != nil {
 		return err
 	}
 	collectionComplete := campaignErr == nil && suiteCollectionComplete(plannedRuns, allRuns)
@@ -528,7 +535,7 @@ func buildScenarios(nodes, batches []int, bmax int) ([]evalScenario, error) {
 	return scenarios, nil
 }
 
-func writeSuiteOutputs(outDir string, scenarios []evalScenario, runs []EvalRun) error {
+func writeSuiteOutputs(outDir string, scenarios []evalScenario, runs []EvalRun, manifest suiteManifest) error {
 	if err := writeNodeMeasurements(filepath.Join(outDir, "node_measurements.csv"), runs); err != nil {
 		return err
 	}
@@ -539,7 +546,17 @@ func writeSuiteOutputs(outDir string, scenarios []evalScenario, runs []EvalRun) 
 	if err := writeJSONFile(filepath.Join(outDir, "scenario_summary.json"), summaries); err != nil {
 		return err
 	}
-	return writeScenarioSummaryCSV(filepath.Join(outDir, "scenario_summary.csv"), summaries)
+	if err := writeScenarioSummaryCSV(filepath.Join(outDir, "scenario_summary.csv"), summaries); err != nil {
+		return err
+	}
+	if manifest.ACSTraceSchema == "" {
+		return nil
+	}
+	path := filepath.Join(outDir, "acs_trace.jsonl")
+	if err := writeACSTraceArtifact(path, runs); err != nil {
+		return err
+	}
+	return validateACSTraceArtifact(manifest, runs, path)
 }
 
 func metricValues(run EvalRun, result Result) map[string]float64 {
@@ -697,12 +714,14 @@ func percentileType7(sorted []float64, p float64) float64 {
 }
 
 func writeNodeMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized",
+		"acs_trace_schema", "acs_input_started_us", "acs_first_rbc_output_us", "acs_rbc_output_quorum_us", "acs_first_true_bba_us", "acs_true_bba_quorum_us", "acs_false_input_injected_us", "acs_all_bba_decided_us", "acs_truthy_rbc_ready_us", "acs_core_decision_us", "acs_common_subset_decoded_us", "acs_block_body_built_us", "acs_node_output_received_us", "acs_wait_true_bba_quorum_us", "acs_wait_all_bba_us", "acs_wait_truthy_rbc_us", "acs_inbound_messages", "acs_inbound_bytes", "acs_outbound_messages", "acs_outbound_bytes", "acs_send_count", "acs_send_total_us", "acs_send_max_us", "acs_send_failures", "acs_max_bba_epoch"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			for _, result := range run.Results {
 				m := result.Metrics
 				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
+				record = append(record, acsTraceSummaryValues(result.ACSTrace)...)
 				if err := w.Write(record); err != nil {
 					return err
 				}
@@ -710,6 +729,68 @@ func writeNodeMeasurements(path string, runs []EvalRun) error {
 		}
 		return nil
 	})
+}
+
+func acsTraceSummaryValues(trace hbbft.ACSTrace) []string {
+	const columnCount = 25
+	if !trace.Enabled {
+		return make([]string, columnCount)
+	}
+	var inboundCount, inboundBytes, outboundCount, outboundBytes uint64
+	var sendCount, sendFailures uint64
+	var sendTotalUS, sendMaxUS int64
+	for _, message := range trace.Messages {
+		inboundCount += message.InboundCount
+		inboundBytes += message.InboundBytes
+		outboundCount += message.OutboundCount
+		outboundBytes += message.OutboundBytes
+		sendCount += message.SendCount
+		sendTotalUS += message.SendTotalUS
+		if message.SendMaxUS > sendMaxUS {
+			sendMaxUS = message.SendMaxUS
+		}
+		sendFailures += message.SendFailureCount
+	}
+	var maxBBAEpoch uint32
+	for _, bba := range trace.BBA {
+		if bba.MaxEpoch > maxBBAEpoch {
+			maxBBAEpoch = bba.MaxEpoch
+		}
+	}
+	return []string{
+		trace.SchemaVersion,
+		tracePointCSV(trace.Aggregate.InputStarted),
+		tracePointCSV(trace.Aggregate.FirstRBCOutput),
+		tracePointCSV(trace.Aggregate.RBCOutputQuorum),
+		tracePointCSV(trace.Aggregate.FirstTrueBBA),
+		tracePointCSV(trace.Aggregate.TrueBBAQuorum),
+		tracePointCSV(trace.Aggregate.FalseInputInjected),
+		tracePointCSV(trace.Aggregate.AllBBADecided),
+		tracePointCSV(trace.Aggregate.TruthyRBCReady),
+		tracePointCSV(trace.Aggregate.CoreDecision),
+		tracePointCSV(trace.Adapter.CommonSubsetDecoded),
+		tracePointCSV(trace.Adapter.BlockBodyBuilt),
+		tracePointCSV(trace.Adapter.NodeOutputReceived),
+		strconv.FormatInt(trace.Wait.TrueBBAQuorumUS, 10),
+		strconv.FormatInt(trace.Wait.AllBBAUS, 10),
+		strconv.FormatInt(trace.Wait.TruthyRBCUS, 10),
+		strconv.FormatUint(inboundCount, 10),
+		strconv.FormatUint(inboundBytes, 10),
+		strconv.FormatUint(outboundCount, 10),
+		strconv.FormatUint(outboundBytes, 10),
+		strconv.FormatUint(sendCount, 10),
+		strconv.FormatInt(sendTotalUS, 10),
+		strconv.FormatInt(sendMaxUS, 10),
+		strconv.FormatUint(sendFailures, 10),
+		strconv.FormatUint(uint64(maxBBAEpoch), 10),
+	}
+}
+
+func tracePointCSV(point hbbft.TracePoint) string {
+	if !point.Recorded {
+		return ""
+	}
+	return strconv.FormatInt(point.OffsetUS, 10)
 }
 
 func writeRunMeasurements(path string, runs []EvalRun) error {

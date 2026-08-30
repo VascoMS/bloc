@@ -91,7 +91,8 @@ local multiaddresses use TCP underneath; libp2p is not gRPC.
 `fresh` retain the compatibility path: protocol `/bloc/envelope/1.0.0`, one
 logical stream per envelope, and one protobuf message terminated by the stream
 boundary. `persistent` selects `/bloc/envelope/2.0.0`, prewarms one outbound
-stream per peer, and carries repeated length-delimited protobuf frames on it.
+stream per peer, confirms libp2p's lazy protocol handshake before readiness,
+and carries repeated length-delimited protobuf frames on it.
 The underlying libp2p peer connections are persistent in both modes; this
 experiment isolates reuse of the logical envelope streams.
 

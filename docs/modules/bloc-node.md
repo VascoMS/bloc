@@ -210,7 +210,9 @@ waits for that dispatcher before returning.
 Lower-ID peers repeatedly connect to higher-ID peers in both modes. Fresh-mode
 health becomes ready once every configured peer is connected. Persistent-mode
 health additionally requires peerstore support for protocol v2 and a cached
-prewarmed stream for every peer; prewarming never initiates a new peer dial.
+prewarmed stream for every peer. Because libp2p negotiates a known protocol
+lazily, prewarm forces the handshake and waits for its response before marking
+the writer ready; it never initiates a new peer dial.
 Shutdown stops admission, cancels prewarming, closes the host, drains/fails
 workers, and waits for active inbound streams plus their dispatchers. Protocol
 v1 remains fresh-only and v2 persistent-only so mixed configurations fail

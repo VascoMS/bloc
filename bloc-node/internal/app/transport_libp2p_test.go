@@ -129,15 +129,18 @@ func TestFreshTransportReturnsPartialPhasesOnWriteFailure(t *testing.T) {
 		peers: map[uint64]NodeConfig{1: {ID: 1}},
 	}
 	wantErr := errors.New("write failed")
-	stream := &failingOutboundStream{writeErr: wantErr}
+	stream := &failingOutboundStream{writeErr: wantErr, writeDelay: time.Millisecond}
 	transport := newLibP2PTransport(node, fixedEnvelopeCodec{encoded: []byte("abc")})
-	transport.openStream = func(context.Context, uint64) (outboundStream, error) { return stream, nil }
+	transport.openStream = func(context.Context, uint64) (outboundStream, error) {
+		time.Sleep(time.Millisecond)
+		return stream, nil
+	}
 
 	result, err := transport.Send(t.Context(), 1, WireEnvelope{})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("send error = %v, want %v", err, wantErr)
 	}
-	if result.EncodedBytes != 0 || result.EncodeDuration <= 0 || result.StreamOpenDuration <= 0 || result.WriteDuration <= 0 {
+	if result.EncodedBytes != 0 || result.StreamOpenDuration <= 0 || result.WriteDuration <= 0 || result.FinalizeDuration != 0 {
 		t.Fatalf("partial result = %+v", result)
 	}
 	if !stream.reset || stream.closed {
@@ -146,15 +149,19 @@ func TestFreshTransportReturnsPartialPhasesOnWriteFailure(t *testing.T) {
 }
 
 type failingOutboundStream struct {
-	writeErr error
-	reset    bool
-	closed   bool
+	writeErr   error
+	writeDelay time.Duration
+	reset      bool
+	closed     bool
 }
 
-func (s *failingOutboundStream) Write([]byte) (int, error) { return 0, s.writeErr }
-func (*failingOutboundStream) CloseWrite() error           { return nil }
-func (s *failingOutboundStream) Close() error              { s.closed = true; return nil }
-func (s *failingOutboundStream) Reset() error              { s.reset = true; return nil }
+func (s *failingOutboundStream) Write([]byte) (int, error) {
+	time.Sleep(s.writeDelay)
+	return 0, s.writeErr
+}
+func (*failingOutboundStream) CloseWrite() error { return nil }
+func (s *failingOutboundStream) Close() error    { s.closed = true; return nil }
+func (s *failingOutboundStream) Reset() error    { s.reset = true; return nil }
 func (*failingOutboundStream) SetWriteDeadline(time.Time) error {
 	return nil
 }

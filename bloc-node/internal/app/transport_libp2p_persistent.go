@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,11 @@ type persistentWriteStream interface {
 	Close() error
 	Reset() error
 	SetWriteDeadline(time.Time) error
+}
+
+type persistentProtocolNegotiationStream interface {
+	io.Reader
+	SetReadDeadline(time.Time) error
 }
 
 type persistentSendRequest struct {
@@ -167,9 +173,38 @@ func (w *peerStreamWriter) openPrewarmedStream(stream persistentWriteStream, req
 		request.result <- errPersistentWriterClosed
 		return nil
 	}
+	if err := completePersistentProtocolNegotiation(request.ctx, opened); err != nil {
+		_ = opened.Reset()
+		request.result <- err
+		return nil
+	}
 	w.ready.Store(true)
 	request.result <- nil
 	return opened
+}
+
+func completePersistentProtocolNegotiation(ctx context.Context, stream persistentWriteStream) error {
+	negotiating, ok := stream.(persistentProtocolNegotiationStream)
+	if !ok {
+		return errors.New("persistent stream does not support protocol negotiation confirmation")
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return errors.New("persistent stream prewarm has no effective deadline")
+	}
+	if err := negotiating.SetReadDeadline(deadline); err != nil {
+		return fmt.Errorf("set persistent prewarm read deadline: %w", err)
+	}
+	// The libp2p known-protocol fast path returns a lazy multistream wrapper.
+	// A zero-length read completes both handshake directions without consuming
+	// application bytes, so receiver-side negotiation cannot expire while idle.
+	if _, err := negotiating.Read(nil); err != nil {
+		return fmt.Errorf("complete persistent protocol negotiation: %w", err)
+	}
+	if err := negotiating.SetReadDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("clear persistent prewarm read deadline: %w", err)
+	}
+	return nil
 }
 
 func (w *peerStreamWriter) writeRequest(stream persistentWriteStream, request persistentSendRequest) persistentWriteStream {

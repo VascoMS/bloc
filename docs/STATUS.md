@@ -111,27 +111,34 @@ release-candidate configuration contract are defined in
   `bloc-node/results/phase1-streams/local-fresh/`,
   `bloc-node/results/phase1-streams/local-persistent/`, and
   `bloc-node/results/phase1-streams/local-comparison/`. The phase-one cloud
-  campaign is explicitly authorized. Source
-  `fbebd778c76cd0c8e3a16a5673cb1803bec2f090` and private ECR image
-  `sha256:730771174d5cd6a79ff19271c65fddf7fd28a6da2f74698cd4ad08ce9ab70a50`
-  passed the four-arm no-allocation contract. Same-AZ fresh attempt
-  `bloc-ec2-i23-p1-sa-fr-c2` is accepted: all nine cells completed, retaining
-  90/90 measured runs and 420 trace-v2 records. Terraform destroyed all 15
-  resources and retained plus independent authenticated cleanup checks are
-  empty. Same-AZ persistent attempt `bloc-ec2-i23-p1-sa-ps-c1` is rejected:
-  slot 1 timed out with zero node results, its prewarmed streams reset at the
-  ten-second write deadlines, and later slots returned `409 Conflict` because
-  slot 1 remained active. Its 0/90 completed measured runs are not evidence.
-  The materializer marked the phase invalid, Terraform destroyed all 15
-  resources, and retained plus independent cleanup checks are empty. The
-  campaign remains halted before multi-region. A bounded 32-frame FIFO handoff
-  now keeps each persistent stream's read loop draining while one dispatcher
-  invokes the protocol handler in order. The failure was reproduced before the
-  change, and the regression, focused/full/race transport checks, a four-slot
-  smoke run, and the exact 105-slot local matrix now pass: 90/90 measured runs,
-  420 trace-v2 records, zero send failures, and no recovery. Freeze a new
-  source/image/bundle and rerun the matched same-AZ pair before allocating
-  multi-region. Do not expand to n7 or publish p99 from 30 observations.
+  campaign is explicitly authorized. Corrected source
+  `e00569539303f9245c4bc95db7b3bb894d097a54` and private ECR image
+  `sha256:810f9e1996c6e5d0fc41cf793061299b19f5850ddcc822e94f57bd4614118908`
+  passed the four-arm no-allocation contract. Same-AZ fresh
+  `bloc-ec2-i23-p1-sa-fr-c3`, same-AZ persistent
+  `bloc-ec2-i23-p1-sa-ps-c3`, and three-region fresh
+  `bloc-ec2-i23-p1-tr-fr-c3` are accepted: each retained all 105 planned slots,
+  90/90 successful, consistent measured runs, and 420 trace-v2 records. The
+  same-AZ persistent arm had 12 first-use failures and replacement opens in its
+  first warmup only, then retained zero measured send failures and 24,190
+  measured stream reuses with no measured opens. Three-region persistent
+  `bloc-ec2-i23-p1-tr-ps-c3` is rejected: all twelve prewarmed streams were
+  still in libp2p's lazy protocol-negotiation state, exceeded the receiver's
+  ten-second negotiation timeout during deployment staging, and reset with
+  protocol code `0x1001` on first use. Slot 1 timed out with zero node results;
+  all later prepares returned `409 Conflict`, so 0/90 measured runs and no ACS
+  traces are admissible. The final validator marked the phase invalid. Every
+  attempt completed recovery and teardown: Terraform destroyed 15 resources
+  per same-AZ arm and 39 per three-region arm, and retained plus independent
+  authenticated cleanup checks for the three accepted arms are empty. The
+  persistent prewarmer now forces libp2p's lazy handshake to complete and waits
+  for negotiation confirmation before marking a writer ready. Its focused
+  regression failed before the change and now passes; the real libp2p pair
+  proves that the receiver's inbound v2 stream is negotiated before readiness,
+  the focused race check passes, `go vet ./...` is clean, and the complete
+  `bloc-node` suite passes. Because the source changed, freeze one replacement
+  source/image/bundle and repeat all four arms rather than mixing candidate
+  revisions. Do not expand to n7 or publish p99 from 30 observations.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent
@@ -515,9 +522,10 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Freeze the corrected issue #23 source/image/bundle, rerun same-AZ fresh then
-   persistent, and advance to the authorized multi-region pair only if both
-   same-AZ arms and their independent cleanup checks are accepted.
+1. Freeze the issue #23 lazy-negotiation correction into one source/image/bundle
+   and repeat same-AZ fresh, same-AZ persistent, three-region fresh, then
+   three-region persistent. Advance only after each prior arm and its cleanup
+   checks are accepted.
 2. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -289,6 +290,9 @@ func TestPersistentPrewarmReadyAndReusesOneStream(t *testing.T) {
 	if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent); got != 1 {
 		t.Fatalf("prewarmed sender streams = %d, want 1", got)
 	}
+	if got := countProtocolStreams(pair.receiver, pair.sender.host.ID(), blocEnvelopeProtocolPersistent, network.DirInbound); got != 1 {
+		t.Fatalf("negotiated receiver streams = %d, want 1", got)
+	}
 
 	for slot := uint64(1); slot <= 2; slot++ {
 		result, err := pair.sender.Send(t.Context(), pair.receiver.node.self.ID,
@@ -317,6 +321,27 @@ func TestPersistentPrewarmReadyAndReusesOneStream(t *testing.T) {
 	}
 	if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent); got != 1 {
 		t.Fatalf("streams after sends/readiness = %d, want 1", got)
+	}
+}
+
+func TestPeerStreamWriterPrewarmCompletesProtocolNegotiation(t *testing.T) {
+	stop := make(chan struct{})
+	stream := &negotiatingPersistentStream{}
+	writer := newPeerStreamWriter(1, func(context.Context, uint64) (persistentWriteStream, error) {
+		return stream, nil
+	}, stop)
+	t.Cleanup(func() { stopPeerStreamWriter(t, stop, writer) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := writer.prewarmStream(ctx); err != nil {
+		t.Fatalf("prewarm stream: %v", err)
+	}
+	if !stream.negotiated.Load() {
+		t.Fatal("prewarm returned before lazy protocol negotiation completed")
+	}
+	if !writer.ready.Load() {
+		t.Fatal("writer did not become ready after protocol negotiation")
 	}
 }
 
@@ -425,10 +450,19 @@ func waitForTransportReady(t *testing.T, transport *LibP2PTransport) {
 }
 
 func countOpenProtocolStreams(transport *LibP2PTransport, remotePeer peer.ID, protocolID protocol.ID) int {
+	return countProtocolStreams(transport, remotePeer, protocolID, network.DirOutbound)
+}
+
+func countProtocolStreams(
+	transport *LibP2PTransport,
+	remotePeer peer.ID,
+	protocolID protocol.ID,
+	direction network.Direction,
+) int {
 	count := 0
 	for _, connection := range transport.host.Network().ConnsToPeer(remotePeer) {
 		for _, stream := range connection.GetStreams() {
-			if stream.Protocol() == protocolID && stream.Stat().Direction == network.DirOutbound {
+			if stream.Protocol() == protocolID && stream.Stat().Direction == direction {
 				count++
 			}
 		}
@@ -895,6 +929,18 @@ type capturePersistentStream struct {
 	buffer bytes.Buffer
 	reset  bool
 }
+
+type negotiatingPersistentStream struct {
+	capturePersistentStream
+	negotiated atomic.Bool
+}
+
+func (s *negotiatingPersistentStream) Read([]byte) (int, error) {
+	s.negotiated.Store(true)
+	return 0, nil
+}
+
+func (*negotiatingPersistentStream) SetReadDeadline(time.Time) error { return nil }
 
 func (s *capturePersistentStream) Write(data []byte) (int, error) {
 	s.mu.Lock()

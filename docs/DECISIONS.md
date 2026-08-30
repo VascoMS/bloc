@@ -524,7 +524,9 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Decision: Keep `/bloc/envelope/1.0.0` as the fresh compatibility arm and add
   `/bloc/envelope/2.0.0` as an opt-in persistent arm. Each peer has one worker,
   a capacity-one request queue, one prewarmed length-delimited stream, and
-  synchronous send completion. Each authenticated inbound v2 stream drains
+  synchronous send completion. Prewarm must complete and confirm libp2p's lazy
+  protocol negotiation before the writer may report ready. Each authenticated
+  inbound v2 stream drains
   frames into one ordered dispatcher through a bounded 32-frame handoff. On an
   uncertain write the stream is reset and replaced for the next request without
   replay. Mixed modes fail readiness.
@@ -542,8 +544,13 @@ Use this file for major architecture, protocol, and workflow decisions.
   test whether logical-stream churn explains latency; they do not prove remote
   receipt or replace the high-priority GossipSub phase. The first AWS persistent
   arm exposed the missing read/dispatch separation by timing out slot 1 and is
-  rejected evidence; the corrected transport requires a new immutable freeze
-  and matched same-AZ pair before multi-region collection.
+  rejected evidence. A later three-region persistent arm exposed that opening a
+  known-protocol libp2p stream does not itself complete its lazy multistream
+  handshake: deployment staging outlasted the receiver's negotiation timeout,
+  and every unconfirmed prewarmed stream reset on first use. That arm is also
+  rejected. Readiness now waits for negotiation confirmation. Because this
+  changes the frozen source, all four comparison arms require one replacement
+  immutable candidate rather than mixing revisions.
 - Related files: `bloc-node/internal/app/transport_libp2p.go`,
   `bloc-node/internal/app/transport_libp2p_persistent.go`,
   `sbc/hbbft/trace.go`, `latency-charts/src/bloc_latency_charts/transport_attribution.py`,

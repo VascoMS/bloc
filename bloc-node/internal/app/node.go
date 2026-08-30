@@ -1201,16 +1201,26 @@ func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
 			traceACSSend = classifyErr == nil
 		}
 		sendStarted := time.Now()
-		size, err := n.transport.Send(context.Background(), to, env)
+		result, err := n.transport.Send(context.Background(), to, env)
 		sendDuration := time.Since(sendStarted)
 		if traceACSSend {
-			n.slot.RecordACSOutbound(acsSubtype, size, sendDuration, err)
+			n.slot.RecordACSOutbound(acsSubtype, hbbft.ACSSendObservation{
+				Size:       result.EncodedBytes,
+				Total:      sendDuration,
+				Encode:     result.EncodeDuration,
+				QueueWait:  result.QueueWaitDuration,
+				StreamOpen: result.StreamOpenDuration,
+				Write:      result.WriteDuration,
+				Finalize:   result.FinalizeDuration,
+				Reused:     result.StreamReused,
+				Err:        err,
+			})
 		}
 		if err != nil {
 			log.Printf("send %s to %d failed: %v", env.Kind, to, err)
 			return
 		}
-		n.recordOutbound(env.Kind, size)
+		n.recordOutbound(env.Kind, result.EncodedBytes)
 	}()
 }
 

@@ -17,7 +17,7 @@ type blockingSlotTransport struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
-	size    int
+	result  transportSendResult
 	err     error
 }
 
@@ -25,20 +25,20 @@ type discardSlotTransport struct{}
 
 func (discardSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
 func (discardSlotTransport) Close() error                                 { return nil }
-func (discardSlotTransport) Send(context.Context, uint64, WireEnvelope) (int, error) {
-	return 1, nil
+func (discardSlotTransport) Send(context.Context, uint64, WireEnvelope) (transportSendResult, error) {
+	return transportSendResult{EncodedBytes: 1}, nil
 }
 
 func (t *blockingSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
 func (t *blockingSlotTransport) Close() error                                 { return nil }
-func (t *blockingSlotTransport) Send(context.Context, uint64, WireEnvelope) (int, error) {
+func (t *blockingSlotTransport) Send(context.Context, uint64, WireEnvelope) (transportSendResult, error) {
 	t.once.Do(func() { close(t.started) })
 	<-t.release
-	size := t.size
-	if size == 0 {
-		size = 17
+	result := t.result
+	if result.EncodedBytes == 0 && t.err == nil {
+		result.EncodedBytes = 17
 	}
-	return size, t.err
+	return result, t.err
 }
 
 func lifecycleTestNode(t *testing.T) *Node {
@@ -417,8 +417,15 @@ func TestACSSubtypeOutboundAccountingAndSlotIsolation(t *testing.T) {
 			transport := &blockingSlotTransport{
 				started: make(chan struct{}),
 				release: make(chan struct{}),
-				size:    29,
-				err:     test.sendErr,
+				result: transportSendResult{
+					EncodedBytes:       29,
+					EncodeDuration:     1 * time.Millisecond,
+					QueueWaitDuration:  2 * time.Millisecond,
+					StreamOpenDuration: 3 * time.Millisecond,
+					WriteDuration:      4 * time.Millisecond,
+					FinalizeDuration:   5 * time.Millisecond,
+				},
+				err: test.sendErr,
 			}
 			n.transport = transport
 			n.sendEnvelope(1, WireEnvelope{
@@ -452,13 +459,33 @@ func TestACSSubtypeOutboundAccountingAndSlotIsolation(t *testing.T) {
 			if test.wantSuccess == 1 && (got.OutboundBytes != 29 || got.SendMaxUS > got.SendTotalUS) {
 				t.Fatalf("successful BVAL accounting = %+v", got)
 			}
+			if test.wantSuccess == 1 {
+				assertNodeSendPhase(t, "encode", got.Encode, 1000)
+				assertNodeSendPhase(t, "queue wait", got.QueueWait, 2000)
+				assertNodeSendPhase(t, "stream open", got.StreamOpen, 3000)
+				assertNodeSendPhase(t, "write", got.Write, 4000)
+				assertNodeSendPhase(t, "finalize", got.Finalize, 5000)
+				if got.StreamOpenCount != 1 || got.StreamReuseCount != 0 {
+					t.Fatalf("fresh stream accounting = %+v", got)
+				}
+			}
 			if test.wantFailure == 1 && (got.OutboundBytes != 0 || got.SendTotalUS != 0) {
 				t.Fatalf("failed BVAL counted as success: %+v", got)
+			}
+			if test.wantFailure == 1 && (got.Encode.Count != 0 || got.StreamOpen.Count != 0 || got.Write.Count != 0) {
+				t.Fatalf("failed BVAL phases counted as successful latency: %+v", got)
 			}
 			if fresh := n.slot.Trace().Messages[hbbft.ACSMessageBVAL]; fresh != (hbbft.ACSMessageTrace{}) {
 				t.Fatalf("old send contaminated new slot: %+v", fresh)
 			}
 		})
+	}
+}
+
+func assertNodeSendPhase(t *testing.T, name string, got hbbft.ACSSendPhaseTrace, wantUS int64) {
+	t.Helper()
+	if got.Count != 1 || got.TotalUS != wantUS || got.MaxUS != wantUS {
+		t.Fatalf("%s phase = %+v, want one %dus observation", name, got, wantUS)
 	}
 }
 

@@ -29,6 +29,15 @@ type LibP2PTransport struct {
 	codec         EnvelopeCodec
 	host          host.Host
 	peerOperators map[peer.ID]uint64
+	openStream    func(context.Context, uint64) (outboundStream, error)
+}
+
+type outboundStream interface {
+	io.Writer
+	CloseWrite() error
+	Close() error
+	Reset() error
+	SetWriteDeadline(time.Time) error
 }
 
 func newLibP2PTransport(node *Node, codec EnvelopeCodec) *LibP2PTransport {
@@ -144,24 +153,35 @@ func validateAuthenticatedEnvelope(operatorID, selfID uint64, env WireEnvelope) 
 
 // Send writes one addressed envelope to a fresh logical stream. libp2p
 // multiplexes these streams over persistent peer connections.
-func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope) (int, error) {
+func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope) (transportSendResult, error) {
+	var result transportSendResult
 	if _, ok := t.node.peers[to]; !ok {
-		return 0, fmt.Errorf("unknown peer %d", to)
+		return result, fmt.Errorf("unknown peer %d", to)
 	}
+	ctx, cancel := withTransportSendDeadline(ctx)
+	defer cancel()
 	env = authenticatedOutboundEnvelope(t.node.self.ID, to, env)
+	started := time.Now()
 	data, err := t.codec.Encode(env)
+	result.EncodeDuration = time.Since(started)
 	if err != nil {
 		t.node.recordProtocolRejected("outbound", "payload")
-		return 0, err
+		return result, err
 	}
 	if len(data) > t.node.cfg.Limits.MaxEnvelopeBytes {
 		t.node.recordProtocolRejected("outbound", "oversize")
-		return 0, fmt.Errorf("%w: encoded %d bytes, maximum %d", errEnvelopeTooLarge, len(data), t.node.cfg.Limits.MaxEnvelopeBytes)
+		return result, fmt.Errorf("%w: encoded %d bytes, maximum %d", errEnvelopeTooLarge, len(data), t.node.cfg.Limits.MaxEnvelopeBytes)
 	}
-	if err := t.sendStream(ctx, to, data); err != nil {
-		return 0, err
+	streamResult, err := t.sendStream(ctx, to, data)
+	result.StreamOpenDuration = streamResult.StreamOpenDuration
+	result.WriteDuration = streamResult.WriteDuration
+	result.FinalizeDuration = streamResult.FinalizeDuration
+	result.StreamReused = streamResult.StreamReused
+	if err != nil {
+		return result, err
 	}
-	return len(data), nil
+	result.EncodedBytes = len(data)
+	return result, nil
 }
 
 func authenticatedOutboundEnvelope(from, to uint64, env WireEnvelope) WireEnvelope {
@@ -208,24 +228,58 @@ func (t *LibP2PTransport) Ready() bool {
 	return true
 }
 
-func (t *LibP2PTransport) sendStream(ctx context.Context, to uint64, data []byte) error {
+func (t *LibP2PTransport) sendStream(ctx context.Context, to uint64, data []byte) (transportSendResult, error) {
+	var result transportSendResult
+	started := time.Now()
+	s, err := t.openOutboundStream(ctx, to)
+	result.StreamOpenDuration = time.Since(started)
+	if err != nil {
+		return result, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := s.SetWriteDeadline(deadline); err != nil {
+			_ = s.Reset()
+			return result, err
+		}
+	}
+	started = time.Now()
+	err = writeAll(s, data)
+	result.WriteDuration = time.Since(started)
+	if err != nil {
+		_ = s.Reset()
+		return result, err
+	}
+	started = time.Now()
+	if err := s.CloseWrite(); err != nil {
+		result.FinalizeDuration = time.Since(started)
+		_ = s.Reset()
+		return result, err
+	}
+	if err := s.Close(); err != nil {
+		result.FinalizeDuration = time.Since(started)
+		_ = s.Reset()
+		return result, err
+	}
+	result.FinalizeDuration = time.Since(started)
+	return result, nil
+}
+
+func (t *LibP2PTransport) openOutboundStream(ctx context.Context, to uint64) (outboundStream, error) {
+	if t.openStream != nil {
+		return t.openStream(ctx, to)
+	}
 	cfg, ok := t.node.peers[to]
 	if !ok {
-		return fmt.Errorf("unknown peer %d", to)
+		return nil, fmt.Errorf("unknown peer %d", to)
 	}
 	id, err := peer.Decode(cfg.P2PPeerID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s, err := t.host.NewStream(ctx, id, blocEnvelopeProtocol)
-	if err != nil {
-		return err
+	if t.host == nil {
+		return nil, errors.New("libp2p transport is not started")
 	}
-	defer s.Close()
-	if err := writeAll(s, data); err != nil {
-		return err
-	}
-	return s.CloseWrite()
+	return t.host.NewStream(ctx, id, blocEnvelopeProtocol)
 }
 
 func writeAll(writer io.Writer, data []byte) error {

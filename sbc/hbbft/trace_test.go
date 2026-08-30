@@ -1,6 +1,7 @@
 package hbbft
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -103,5 +104,57 @@ func TestTraceWaitTransitionsAreExclusive(t *testing.T) {
 	got := recorder.snapshot().Wait
 	if got.TrueBBAQuorumUS != 50 || got.AllBBAUS != 30 || got.TruthyRBCUS != 20 {
 		t.Fatalf("wait attribution = %+v", got)
+	}
+}
+
+func TestACSOutboundAggregatesSuccessfulSendPhases(t *testing.T) {
+	slot := NewSlotACS(SlotConfig{
+		Config: Config{N: 4, F: 1, ID: 0, Nodes: []uint64{0, 1, 2, 3}},
+		Slot:   1,
+		Trace:  TraceOptions{Enabled: true},
+	})
+	defer slot.Close()
+	slot.BeginTrace(time.Now())
+
+	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
+		Size: 512, Total: 9 * time.Millisecond,
+		Encode: time.Millisecond, QueueWait: 2 * time.Millisecond,
+		Write: 6 * time.Millisecond, Reused: true,
+	})
+	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
+		Size: 256, Total: 15 * time.Millisecond,
+		Encode: 2 * time.Millisecond, StreamOpen: 4 * time.Millisecond,
+		Write: 7 * time.Millisecond, Finalize: 2 * time.Millisecond,
+	})
+	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
+		Total: 5 * time.Millisecond, StreamOpen: 5 * time.Millisecond,
+		Err: errors.New("open failed"),
+	})
+
+	trace := slot.Trace()
+	if trace.SchemaVersion != ACSTraceSchemaV2 || ACSTraceSchemaVersion != ACSTraceSchemaV2 {
+		t.Fatalf("trace schema = %q, current = %q", trace.SchemaVersion, ACSTraceSchemaVersion)
+	}
+	got := trace.Messages[ACSMessageReady]
+	if got.OutboundCount != 2 || got.OutboundBytes != 768 || got.SendCount != 2 || got.SendFailureCount != 1 {
+		t.Fatalf("send accounting = %+v", got)
+	}
+	if got.SendTotalUS != 24000 || got.SendMaxUS != 15000 {
+		t.Fatalf("send duration accounting = %+v", got)
+	}
+	assertSendPhase(t, "encode", got.Encode, 2, 3000, 2000)
+	assertSendPhase(t, "queue wait", got.QueueWait, 2, 2000, 2000)
+	assertSendPhase(t, "stream open", got.StreamOpen, 2, 4000, 4000)
+	assertSendPhase(t, "write", got.Write, 2, 13000, 7000)
+	assertSendPhase(t, "finalize", got.Finalize, 2, 2000, 2000)
+	if got.StreamOpenCount != 1 || got.StreamReuseCount != 1 {
+		t.Fatalf("stream reuse accounting = %+v", got)
+	}
+}
+
+func assertSendPhase(t *testing.T, name string, got ACSSendPhaseTrace, count uint64, totalUS, maxUS int64) {
+	t.Helper()
+	if got.Count != count || got.TotalUS != totalUS || got.MaxUS != maxUS {
+		t.Fatalf("%s phase = %+v, want count=%d total_us=%d max_us=%d", name, got, count, totalUS, maxUS)
 	}
 }

@@ -5,7 +5,11 @@ import (
 	"time"
 )
 
-const ACSTraceSchemaVersion = "bloc-acs-trace/v1"
+const (
+	ACSTraceSchemaV1      = "bloc-acs-trace/v1"
+	ACSTraceSchemaV2      = "bloc-acs-trace/v2"
+	ACSTraceSchemaVersion = ACSTraceSchemaV2
+)
 
 // TracePoint is a process-local monotonic offset from proposal readiness.
 // Recorded distinguishes an event at offset zero from an event that did not
@@ -99,16 +103,44 @@ type ACSAdapterTrace struct {
 	NodeOutputReceived  TracePoint `json:"node_output_received"`
 }
 
+// ACSSendPhaseTrace contains bounded timing for one fixed transport phase.
+type ACSSendPhaseTrace struct {
+	Count   uint64 `json:"count"`
+	TotalUS int64  `json:"total_us"`
+	MaxUS   int64  `json:"max_us"`
+}
+
+// ACSSendObservation contains one completed transport attempt. A successful
+// observation represents a complete transport write, not remote receipt.
+type ACSSendObservation struct {
+	Size       int
+	Total      time.Duration
+	Encode     time.Duration
+	QueueWait  time.Duration
+	StreamOpen time.Duration
+	Write      time.Duration
+	Finalize   time.Duration
+	Reused     bool
+	Err        error
+}
+
 // ACSMessageTrace contains bounded per-subtype transport accounting.
 type ACSMessageTrace struct {
-	InboundCount     uint64 `json:"inbound_count"`
-	InboundBytes     uint64 `json:"inbound_bytes"`
-	OutboundCount    uint64 `json:"outbound_count"`
-	OutboundBytes    uint64 `json:"outbound_bytes"`
-	SendCount        uint64 `json:"send_count"`
-	SendTotalUS      int64  `json:"send_total_us"`
-	SendMaxUS        int64  `json:"send_max_us"`
-	SendFailureCount uint64 `json:"send_failure_count"`
+	InboundCount     uint64            `json:"inbound_count"`
+	InboundBytes     uint64            `json:"inbound_bytes"`
+	OutboundCount    uint64            `json:"outbound_count"`
+	OutboundBytes    uint64            `json:"outbound_bytes"`
+	SendCount        uint64            `json:"send_count"`
+	SendTotalUS      int64             `json:"send_total_us"`
+	SendMaxUS        int64             `json:"send_max_us"`
+	SendFailureCount uint64            `json:"send_failure_count"`
+	Encode           ACSSendPhaseTrace `json:"encode"`
+	QueueWait        ACSSendPhaseTrace `json:"queue_wait"`
+	StreamOpen       ACSSendPhaseTrace `json:"stream_open"`
+	Write            ACSSendPhaseTrace `json:"write"`
+	Finalize         ACSSendPhaseTrace `json:"finalize"`
+	StreamOpenCount  uint64            `json:"stream_open_count"`
+	StreamReuseCount uint64            `json:"stream_reuse_count"`
 }
 
 type aggregateTraceEvent uint8
@@ -368,7 +400,7 @@ func (r *traceRecorder) recordMessageInbound(subtype ACSMessageSubtype, size int
 	r.trace.Messages[subtype] = entry
 }
 
-func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, size int, duration time.Duration, sendErr error) {
+func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, observation ACSSendObservation) {
 	if r == nil || !r.enabled {
 		return
 	}
@@ -381,17 +413,17 @@ func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, size in
 	if !ok {
 		return
 	}
-	if sendErr != nil {
+	if observation.Err != nil {
 		entry.SendFailureCount++
 		r.trace.Messages[subtype] = entry
 		return
 	}
 	entry.OutboundCount++
-	if size > 0 {
-		entry.OutboundBytes += uint64(size)
+	if observation.Size > 0 {
+		entry.OutboundBytes += uint64(observation.Size)
 	}
 	entry.SendCount++
-	durationUS := duration.Microseconds()
+	durationUS := observation.Total.Microseconds()
 	if durationUS < 0 {
 		durationUS = 0
 	}
@@ -399,7 +431,29 @@ func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, size in
 	if durationUS > entry.SendMaxUS {
 		entry.SendMaxUS = durationUS
 	}
+	recordSendPhase(&entry.Encode, observation.Encode)
+	recordSendPhase(&entry.QueueWait, observation.QueueWait)
+	recordSendPhase(&entry.StreamOpen, observation.StreamOpen)
+	recordSendPhase(&entry.Write, observation.Write)
+	recordSendPhase(&entry.Finalize, observation.Finalize)
+	if observation.Reused {
+		entry.StreamReuseCount++
+	} else {
+		entry.StreamOpenCount++
+	}
 	r.trace.Messages[subtype] = entry
+}
+
+func recordSendPhase(phase *ACSSendPhaseTrace, duration time.Duration) {
+	durationUS := duration.Microseconds()
+	if durationUS < 0 {
+		durationUS = 0
+	}
+	phase.Count++
+	phase.TotalUS += durationUS
+	if durationUS > phase.MaxUS {
+		phase.MaxUS = durationUS
+	}
 }
 
 func (r *traceRecorder) transitionWait(reason string) {

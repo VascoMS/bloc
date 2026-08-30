@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -96,6 +97,10 @@ func TestOutboundEnvelopeRejectsOversizeBeforeOpeningStream(t *testing.T) {
 		peers: map[uint64]NodeConfig{1: {ID: 1}},
 	}
 	transport := newLibP2PTransport(node, fixedEnvelopeCodec{encoded: []byte("12345")})
+	transport.openStream = func(context.Context, uint64) (outboundStream, error) {
+		t.Fatal("oversize envelope opened a stream")
+		return nil, nil
+	}
 	if _, err := transport.Send(t.Context(), 1, WireEnvelope{}); !errors.Is(err, errEnvelopeTooLarge) {
 		t.Fatalf("oversize send error = %v", err)
 	}

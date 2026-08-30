@@ -108,7 +108,22 @@ release-candidate configuration contract are defined in
   of the rejected 40-record scenario, and the complete `bloc-node` suite pass.
   Both attempts remain rejected diagnostic evidence, all AWS and temporary-key
   cleanup is independently empty, and three-region execution remains gated on
-  a clean from-zero same-AZ retry with a newly frozen immutable image.
+  a clean from-zero same-AZ retry with a newly frozen immutable image. That
+  replacement was published from source
+  `35b50b627529d601e89a6b4621ea6e36bc457985` as
+  `sha256:759b81650cd5e94395a06dd6381ead276c5168b293c316563ec0e91f95fbde3c`,
+  rebound to a verified n4 bundle, and exercised from zero as
+  `bloc-ec2-i23-sa-n4-c3`. C3 again passed provisioning, digest checks, health,
+  and every executed protocol attempt, then failed closed on one remote BBA
+  whose first post-origin BIN offset belonged to a later epoch than its
+  recorded AUX/quorum/decision. The epochless detail cannot support those
+  cross-epoch ordering assertions; commit
+  `0afd1578cb5afd7f2b1f36d38c7759bf9962d452` removes only those invalid checks,
+  retains one-shot decision-before-done validation, replays the rejected
+  40-record scenario successfully, and passes the complete `bloc-node` suite.
+  C3 remains rejected diagnostic evidence; all 15 resources and its key were
+  removed, authenticated cleanup plus independent EC2/EBS/VPC/IAM checks are
+  empty, and three-region remains stopped pending another clean same-AZ retry.
 - **Replacement campaign execution:** the epochless hybrid-ciphertext wire,
   deterministic 512-target master corpus, immutable cluster-specific encrypted
   prefixes, and exact-count provider path are implemented. Network-independent

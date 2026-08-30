@@ -203,6 +203,12 @@ availability) are additive within the core wait interval. Adapter points split
 the core decision from common-subset decoding, block-body construction, and
 node receipt.
 
+For a remote BBA that began before the local proposal-ready origin, recurring
+BIN, AUX, and valid-AUX-quorum events may first be recorded in different
+epochs. Their epochless offsets therefore have no pairwise causal ordering and
+must not be subtracted. The one-shot BBA decision must still precede `done` when
+both points are recorded.
+
 ### 7. Slot adapter
 
 `SlotACS.InputBatch` gob-encodes the candidate `[]byte` before giving it to RBC.

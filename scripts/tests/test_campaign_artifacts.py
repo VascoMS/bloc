@@ -376,10 +376,10 @@ class FinalCampaignArtifactTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_phase(self, phase="readiness-pilot", attempts=3):
+    def make_phase(self, phase="readiness-pilot", attempts=3, blocks_override=None, warmups_override=None):
         root = self.root / phase
         root.mkdir(parents=True)
-        blocks = 1 if phase == "readiness-pilot" else 10
+        blocks = blocks_override if blocks_override is not None else (1 if phase == "readiness-pilot" else 10)
         if attempts % blocks != 0:
             raise ValueError("attempts must divide evenly across blocks")
         source = "c" * 40
@@ -391,7 +391,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             "source_sha": source, "bloc_image": bloc, "mempool_image": mempool,
             "bundle_version": "bloc-campaign-bundle-v1", "public_config_id": "public",
             "encrypted_corpus_id": "corpus", "batches": [8, 32, 128], "seed": 20260621,
-            "deadline": "12s", "warmups": 1 if phase == "readiness-pilot" else (0 if phase == "resource" else 10),
+            "deadline": "12s", "warmups": warmups_override if warmups_override is not None else (1 if phase == "readiness-pilot" else (0 if phase == "resource" else 10)),
             "repetitions": attempts, "blocks": blocks,
             "sampler": "on" if phase == "resource" else "off",
         })
@@ -401,7 +401,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         ]})
         scenario = root / "scenarios/controller/results"
         scenario.mkdir(parents=True)
-        fields = ["run_id", "phase", "measurement_block", "planned_scenario_runs", "nodes", "batch_size",
+        fields = ["run_id", "phase", "measurement_block", "planned_scenario_runs", "slot", "nodes", "batch_size",
                   "success", "consistent", "outcome", "timed_out", "selected_ciphertexts"]
         with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
@@ -410,10 +410,75 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                     for index in range(1, attempts // blocks + 1):
                         writer.writerow({"run_id": f"measured-r{index:03d}-b{batch}", "phase": "measured",
                                          "measurement_block": str(block), "planned_scenario_runs": str(attempts),
+                                         "slot": str((block - 1) * (attempts // blocks) + index),
                                          "nodes": "4", "batch_size": str(batch), "success": "true",
                                          "consistent": "true", "outcome": "completed", "timed_out": "false",
                                          "selected_ciphertexts": str(batch)})
         return root
+
+    def add_acs_trace_artifacts(self, root):
+        trace_schema = "bloc-acs-trace/v1"
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        manifest["acs_trace_schema"] = trace_schema
+        artifacts.write_json(root / "manifest.json", manifest)
+        for run_path in root.glob("scenarios/**/run_measurements.csv"):
+            scenario_root = run_path.parent
+            artifacts.write_json(scenario_root / "manifest.json", {"acs_trace_schema": trace_schema})
+            node_rows = []
+            trace_records = []
+            for run in artifacts.read_csv(run_path):
+                for node_id in range(4):
+                    node_rows.append({
+                        "run_id": run["run_id"], "phase": run["phase"],
+                        "measurement_block": run["measurement_block"], "node_id": str(node_id),
+                        "acs_trace_schema": trace_schema,
+                        "acs_inbound_messages": "1", "acs_inbound_bytes": "10",
+                        "acs_outbound_messages": "2", "acs_outbound_bytes": "20",
+                        "acs_send_count": "2", "acs_send_total_us": "4",
+                        "acs_send_max_us": "2", "acs_send_failures": "0",
+                    })
+                    point = lambda offset: {"recorded": True, "offset_us": offset}
+                    trace_records.append({
+                        "key": {
+                            "measurement_block": int(run["measurement_block"]),
+                            "run_id": run["run_id"], "node_id": node_id,
+                            "slot": int(run["slot"]),
+                        },
+                        "schema_version": trace_schema, "enabled": True,
+                        "aggregate": {
+                            "input_started": point(0), "first_rbc_output": point(1),
+                            "rbc_output_quorum": point(2), "first_true_bba": point(3),
+                            "true_bba_quorum": point(4),
+                            "false_input_injected": {"recorded": False, "offset_us": 0},
+                            "all_bba_decided": point(5), "truthy_rbc_ready": point(6),
+                            "core_decision": point(7),
+                        },
+                        "wait_us": {"true_bba_quorum_us": 1, "all_bba_us": 2, "truthy_rbc_us": 3},
+                        "adapter": {
+                            "common_subset_decoded": point(8), "block_body_built": point(9),
+                            "node_output_received": point(10),
+                        },
+                        "rbc": [{"proposer_id": proposer, "trace": {}} for proposer in range(4)],
+                        "bba": [{"proposer_id": proposer, "trace": {}} for proposer in range(4)],
+                        "messages": [
+                            {"subtype": "proof", "trace": {
+                                "inbound_count": 1, "inbound_bytes": 10,
+                                "outbound_count": 2, "outbound_bytes": 20,
+                                "send_count": 2, "send_total_us": 4,
+                                "send_max_us": 2, "send_failure_count": 0,
+                            }},
+                            *[{"subtype": subtype, "trace": {
+                                "inbound_count": 0, "inbound_bytes": 0,
+                                "outbound_count": 0, "outbound_bytes": 0,
+                                "send_count": 0, "send_total_us": 0,
+                                "send_max_us": 0, "send_failure_count": 0,
+                            }} for subtype in ("echo", "ready", "bval", "aux")],
+                        ],
+                    })
+            artifacts.write_csv(scenario_root / "node_measurements.csv", node_rows, list(node_rows[0]))
+            with (scenario_root / "acs_trace.jsonl").open("w", encoding="utf-8") as handle:
+                for record in trace_records:
+                    handle.write(json.dumps(record, separators=(",", ":")) + "\n")
 
     def add_resource_segments(self, root):
         for node in range(4):
@@ -441,6 +506,85 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         rows[0].update(success="false", consistent="false", outcome="timed_out", timed_out="true", selected_ciphertexts="0")
         artifacts.write_csv(next(root.glob("scenarios/**/run_measurements.csv")), rows)
         artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_diagnostic_phase_accepts_complete_acs_trace_artifacts(self):
+        root = self.make_phase()
+        self.add_acs_trace_artifacts(root)
+
+        artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_diagnostic_latency_accepts_lean_5_by_30_schedule(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5)
+        self.add_acs_trace_artifacts(root)
+
+        artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_diagnostic_phase_rejects_missing_node_trace(self):
+        root = self.make_phase()
+        self.add_acs_trace_artifacts(root)
+        path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "missing node trace"):
+            artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_diagnostic_phase_rejects_duplicate_trace_key(self):
+        root = self.make_phase()
+        self.add_acs_trace_artifacts(root)
+        path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join([*lines, lines[0]]) + "\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "duplicate ACS trace key"):
+            artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_diagnostic_phase_rejects_unknown_trace_schema(self):
+        root = self.make_phase()
+        self.add_acs_trace_artifacts(root)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        manifest["acs_trace_schema"] = "bloc-acs-trace/v999"
+        artifacts.write_json(root / "manifest.json", manifest)
+
+        with self.assertRaisesRegex(ValueError, "unsupported ACS trace schema"):
+            artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+
+    def test_final_diagnostic_phase_rejects_corrupt_trace_details(self):
+        root = self.make_phase()
+        self.add_acs_trace_artifacts(root)
+        path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+        original = path.read_text(encoding="utf-8").splitlines()
+
+        def negative_offset(record):
+            record["aggregate"]["core_decision"]["offset_us"] = -1
+
+        def impossible_order(record):
+            record["aggregate"]["core_decision"]["offset_us"] = 11
+
+        def unknown_proposer(record):
+            record["rbc"].append({"proposer_id": 99, "trace": {}})
+
+        def missing_subtype(record):
+            record["messages"] = record["messages"][:-1]
+
+        def mismatched_count(record):
+            record["messages"][0]["trace"]["inbound_count"] = 2
+
+        for name, mutate, message in (
+            ("negative offset", negative_offset, "negative ACS trace offset"),
+            ("impossible order", impossible_order, "core decision occurs after"),
+            ("unknown proposer", unknown_proposer, "proposer membership"),
+            ("missing subtype", missing_subtype, "message subtypes"),
+            ("mismatched count", mismatched_count, "aggregate/detail"),
+        ):
+            with self.subTest(name=name):
+                record = json.loads(original[0])
+                mutate(record)
+                changed = [json.dumps(record, separators=(",", ":")), *original[1:]]
+                path.write_text("\n".join(changed) + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, message):
+                    artifacts.assert_final_phase(root, "same-az", "readiness-pilot")
+        path.write_text("\n".join(original) + "\n", encoding="utf-8")
 
     def test_final_phase_accepts_run_ids_scoped_to_measurement_block(self):
         root = self.make_phase("latency", attempts=1000)

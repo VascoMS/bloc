@@ -75,6 +75,42 @@ the full retained n7 evidence set fits alongside the OS and container layers;
 operator root volumes retain the AMI default. Every root volume is deleted with
 its instance.
 
+Issue #23 ACS diagnostics use the same shared lifecycle with one explicit trace
+schema. These exact commands validate the matched same-AZ and three-region
+interfaces without sourcing a live adapter or allocating resources:
+
+```sh
+bash deploy/ec2/run-same-az-campaign.sh \
+  --phase latency \
+  --bundle-root <private-n4-bundle> --node-count 4 \
+  --source-sha <replacement-source-sha> \
+  --bloc-image <account>.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:<digest> \
+  --mempool-image <account>.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:<digest> \
+  --experiment-id bloc-acs-sa-n4 \
+  --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
+  --acs-trace-schema bloc-acs-trace/v1 \
+  --validate-only
+
+bash deploy/ec2/run-three-region-campaign.sh \
+  --phase latency \
+  --bundle-root <private-n4-bundle> --node-count 4 \
+  --source-sha <replacement-source-sha> \
+  --bloc-image <account>.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:<digest> \
+  --mempool-image <account>.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:<digest> \
+  --experiment-id bloc-acs-3r-n4 \
+  --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
+  --acs-trace-schema bloc-acs-trace/v1 \
+  --validate-only
+```
+
+The trace schema enables bounded ACS tracing in generated operator configs and
+requires every recovered evaluator root to contain a matching manifest,
+`node_measurements.csv`, and `acs_trace.jsonl`. The diagnostic latency contract
+uses 5 warmups, 30 measured attempts, and 3 balanced blocks per batch with the
+resource sampler off. Historical campaigns without `acs_trace_schema` remain
+valid and do not require trace artifacts. Live execution still requires the
+separate authorization described above.
+
 Evaluator invocations do not remain attached to a long-lived SSH session. The
 runner stages `run-final-remote-job.sh` on the controller, atomically claims one
 job identity per block/batch/first-slot tuple, starts that job at most once, and
@@ -104,7 +140,9 @@ The fixed phases are `readiness-pilot` (n4 only: 1 warmup, 3 attempts, sampler
 off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and
 `resource` (0 warmups, 1,000 attempts, 10 blocks, sampler on). All use batches
 8/32/128, seed 20260621, and the 12-second boundary. The extension phase remains
-rejected until a later n10/batch-512 30-observation decision.
+rejected until a later n10/batch-512 30-observation decision. The explicit
+`bloc-acs-trace/v1` latency diagnostic is the narrow exception: it uses the
+5-warmup/30-attempt/3-block contract above and does not run a resource phase.
 
 ## Manual Deployment Recipe
 

@@ -56,6 +56,41 @@ func TestMaterializeCampaignConfigPreservesFrozenInputsAcrossTopologies(t *testi
 	}
 }
 
+func TestMaterializeCampaignConfigEnablesACSTraceOnlyWhenRequested(t *testing.T) {
+	root := writeCampaignBundleFixture(t, 4, 3)
+	manifest, err := buildCampaignBundleManifest(root, testCampaignSourceSHA, testCampaignBlocImage, testCampaignMempoolImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONFileAtomic(filepath.Join(root, campaignBundleManifestFile), manifest, 0644); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := loadCampaignBundle(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := campaignMaterializeOptions{
+		ClusterOut: "cluster.json", CRSOut: "cluster.crs", Topology: "T0-same-az",
+		MempoolURL: "http://mempool-il:8080", HTTPPort: 8000, P2PPort: 9000,
+		HTTPHostMode: "private-ip", P2PHostMode: "private-ip",
+	}
+	legacy, _, _, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("same-az"), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Diagnostics.ACSTrace {
+		t.Fatal("legacy campaign unexpectedly enabled ACS tracing")
+	}
+	options.ACSTrace = true
+	diagnostic, _, _, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("same-az"), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnostic.Diagnostics.ACSTrace {
+		t.Fatal("diagnostic campaign did not enable ACS tracing")
+	}
+}
+
 func TestMaterializeCampaignConfigRejectsInvalidPlacement(t *testing.T) {
 	root := writeCampaignBundleFixture(t, 4, 3)
 	manifest, err := buildCampaignBundleManifest(root, testCampaignSourceSHA, testCampaignBlocImage, testCampaignMempoolImage)

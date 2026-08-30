@@ -24,6 +24,7 @@ type campaignMaterializeOptions struct {
 	P2PPort       int
 	HTTPHostMode  string
 	P2PHostMode   string
+	ACSTrace      bool
 }
 
 func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Inventory, options campaignMaterializeOptions) (ConfigFile, []byte, remoteEvalConfig, error) {
@@ -77,6 +78,7 @@ func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Invent
 		CRSFile: filepath.ToSlash(crsRelative), CRSSHA256: bundle.Identity.CRSSHA256,
 		PublicKeyHex: bundle.Identity.PublicKeyHex, Blockspace: bundle.Identity.Blockspace,
 		Limits: bundle.Identity.Limits, Network: NetworkConfig{Mode: "libp2p"},
+		Diagnostics: DiagnosticsConfig{ACSTrace: options.ACSTrace},
 		Provider: ProviderConfig{
 			Mode: "mempool-http", MempoolURL: options.MempoolURL, MempoolTimeoutMS: defaultMempoolTimeoutMS,
 			ExpectedPublicConfigID:        bundle.Corpus.PublicConfigID,
@@ -189,6 +191,7 @@ func materializeCampaignConfig(args []string) error {
 	fs.IntVar(&options.P2PPort, "p2p-port", 9000, "operator P2P port")
 	fs.StringVar(&options.HTTPHostMode, "http-host-mode", "private-ip", "inventory HTTP host field")
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "inventory P2P host field")
+	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

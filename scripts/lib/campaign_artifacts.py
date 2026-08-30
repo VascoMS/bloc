@@ -670,6 +670,109 @@ def commands_json(records: Path) -> list[dict[str, Any]]:
 FINAL_ECR_IMAGE = re.compile(
     r"^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$"
 )
+ACS_TRACE_SCHEMA = "bloc-acs-trace/v1"
+ACS_MESSAGE_SUBTYPES = {"proof", "echo", "ready", "bval", "aux"}
+
+
+def _assert_nonnegative_trace_offsets(value: Any, location: str) -> None:
+    if isinstance(value, dict):
+        if value.get("recorded") is True and "offset_us" in value and int(value["offset_us"]) < 0:
+            raise ValueError(f"{location}: negative ACS trace offset")
+        for child in value.values():
+            _assert_nonnegative_trace_offsets(child, location)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_nonnegative_trace_offsets(child, location)
+
+
+def _acs_trace_key(record: dict[str, Any]) -> tuple[int, str, int, int]:
+    key = record.get("key", {})
+    return (int(key["measurement_block"]), str(key["run_id"]), int(key["node_id"]), int(key["slot"]))
+
+
+def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: str) -> None:
+    if not trace_schema:
+        return
+    if trace_schema != ACS_TRACE_SCHEMA:
+        raise ValueError(f"unsupported ACS trace schema {trace_schema!r}")
+    evaluator_manifest_path = scenario_root / "manifest.json"
+    evaluator_manifest = json.loads(evaluator_manifest_path.read_text(encoding="utf-8-sig"))
+    if evaluator_manifest.get("acs_trace_schema") != trace_schema:
+        raise ValueError(f"{evaluator_manifest_path}: ACS trace schema mismatch")
+
+    run_path = scenario_root / "run_measurements.csv"
+    run_rows = read_csv(run_path)
+    slots: dict[tuple[int, str], int] = {}
+    for row in run_rows:
+        run_key = (int(row.get("measurement_block", 0)), row["run_id"])
+        if run_key in slots:
+            raise ValueError(f"{run_path}: duplicate block-scoped run identity {run_key}")
+        slots[run_key] = int(row["slot"])
+
+    node_path = scenario_root / "node_measurements.csv"
+    node_rows = read_csv(node_path)
+    expected: dict[tuple[int, str, int, int], dict[str, str]] = {}
+    for row in node_rows:
+        run_key = (int(row.get("measurement_block", 0)), row["run_id"])
+        if run_key not in slots:
+            raise ValueError(f"{node_path}: node row has no matching run {run_key}")
+        key = (*run_key, int(row["node_id"]), slots[run_key])
+        if key in expected:
+            raise ValueError(f"{node_path}: duplicate expected ACS trace key {key}")
+        if row.get("acs_trace_schema") != trace_schema:
+            raise ValueError(f"{node_path}: ACS trace schema mismatch")
+        expected[key] = row
+
+    trace_path = scenario_root / "acs_trace.jsonl"
+    records: dict[tuple[int, str, int, int], dict[str, Any]] = {}
+    with trace_path.open(encoding="utf-8-sig") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            key = _acs_trace_key(record)
+            if key in records:
+                raise ValueError(f"{trace_path}:{line_number}: duplicate ACS trace key {key}")
+            records[key] = record
+    missing = set(expected) - set(records)
+    unexpected = set(records) - set(expected)
+    if missing:
+        raise ValueError(f"{trace_path}: missing node trace for {sorted(missing)[0]}")
+    if unexpected:
+        raise ValueError(f"{trace_path}: unexpected node trace for {sorted(unexpected)[0]}")
+
+    membership = set(range(nodes))
+    for key, record in records.items():
+        if record.get("schema_version") != trace_schema or record.get("enabled") is not True:
+            raise ValueError(f"{trace_path}: disabled or mismatched ACS trace {key}")
+        for name in ("rbc", "bba"):
+            proposer_ids = [int(item["proposer_id"]) for item in record.get(name, [])]
+            if len(proposer_ids) != len(set(proposer_ids)) or set(proposer_ids) != membership:
+                raise ValueError(f"{trace_path}: invalid {name.upper()} proposer membership for {key}")
+        messages = record.get("messages", [])
+        subtypes = [str(item.get("subtype", "")) for item in messages]
+        if len(subtypes) != len(set(subtypes)) or set(subtypes) != ACS_MESSAGE_SUBTYPES:
+            raise ValueError(f"{trace_path}: invalid fixed ACS message subtypes for {key}")
+        _assert_nonnegative_trace_offsets(record, f"{trace_path} {key}")
+        core = record.get("aggregate", {}).get("core_decision", {})
+        received = record.get("adapter", {}).get("node_output_received", {})
+        if core.get("recorded") is not True or received.get("recorded") is not True:
+            raise ValueError(f"{trace_path}: missing ACS completion offset for {key}")
+        if int(core["offset_us"]) > int(received["offset_us"]):
+            raise ValueError(f"{trace_path}: core decision occurs after node output receipt for {key}")
+
+        totals = {
+            "acs_inbound_messages": sum(int(item["trace"]["inbound_count"]) for item in messages),
+            "acs_inbound_bytes": sum(int(item["trace"]["inbound_bytes"]) for item in messages),
+            "acs_outbound_messages": sum(int(item["trace"]["outbound_count"]) for item in messages),
+            "acs_outbound_bytes": sum(int(item["trace"]["outbound_bytes"]) for item in messages),
+            "acs_send_count": sum(int(item["trace"]["send_count"]) for item in messages),
+            "acs_send_total_us": sum(int(item["trace"]["send_total_us"]) for item in messages),
+            "acs_send_max_us": max(int(item["trace"]["send_max_us"]) for item in messages),
+            "acs_send_failures": sum(int(item["trace"]["send_failure_count"]) for item in messages),
+        }
+        if any(int(expected[key].get(field, -1)) != value for field, value in totals.items()):
+            raise ValueError(f"{trace_path}: aggregate/detail ACS message mismatch for {key}")
 
 
 def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase: str) -> None:
@@ -687,11 +790,16 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
         raise ValueError(f"{manifest_path}: bundle identities are incomplete")
     if manifest.get("batches") != [8, 32, 128] or manifest.get("seed") != 20260621 or manifest.get("deadline") != "12s":
         raise ValueError(f"{manifest_path}: fixed schedule identity is invalid")
+    trace_schema = str(manifest.get("acs_trace_schema", ""))
+    if trace_schema and trace_schema != ACS_TRACE_SCHEMA:
+        raise ValueError(f"{manifest_path}: unsupported ACS trace schema {trace_schema!r}")
     schedules = {
         "readiness-pilot": (4, 1, 3, 1, "off"),
         "latency": (None, 10, 1000, 10, "off"),
         "resource": (None, 0, 1000, 10, "on"),
     }
+    if trace_schema and expected_phase == "latency":
+        schedules["latency"] = (None, 5, 30, 3, "off")
     if expected_phase not in schedules:
         raise ValueError(f"unsupported final phase {expected_phase}")
     required_n, warmups, repetitions, blocks, sampler = schedules[expected_phase]
@@ -724,6 +832,8 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if not run_paths:
         raise ValueError(f"{phase_root}: run measurements are missing")
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
+    for path in run_paths:
+        assert_acs_trace_artifacts(path.parent, nodes, trace_schema)
     for batch in (8, 32, 128):
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
         attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}

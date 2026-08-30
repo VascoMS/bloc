@@ -323,6 +323,29 @@ if final_assert_cleanup_empty "$nonempty_cleanup"; then
   exit 1
 fi
 
+materialize_root="$fixture/materialize-diagnostics"
+materialize_bin="$materialize_root/bin"
+materialize_log="$materialize_root/go.log"
+mkdir -p "$materialize_root/generated-public" "$materialize_root/bundle" "$materialize_bin"
+printf '{}\n' >"$materialize_root/inventory.json"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >"$MATERIALIZE_LOG"\n' >"$materialize_bin/go"
+chmod +x "$materialize_bin/go"
+FINAL_REPO_ROOT="$repo_root" FINAL_BUNDLE_ROOT="$materialize_root/bundle"
+FINAL_TOPOLOGY=same-az MATERIALIZE_LOG="$materialize_log"
+export MATERIALIZE_LOG
+FINAL_ACS_TRACE_SCHEMA=""
+PATH="$materialize_bin:$PATH" final_materialize_public "$materialize_root"
+if grep -Fq -- '--acs-trace' "$materialize_log"; then
+  echo "legacy campaign materialization enabled ACS tracing" >&2
+  exit 1
+fi
+FINAL_ACS_TRACE_SCHEMA=bloc-acs-trace/v1
+PATH="$materialize_bin:$PATH" final_materialize_public "$materialize_root"
+grep -Fq -- '--acs-trace' "$materialize_log" || {
+  echo "diagnostic campaign materialization omitted ACS tracing" >&2
+  exit 1
+}
+
 stage_root="$fixture/stage"
 mkdir -p "$stage_root/bundle/secrets" "$stage_root/generated-public"
 printf '%s\n' '{"file_sha256":{"encrypted-corpus.json":"corpus-hash"}}' >"$stage_root/bundle/bundle-manifest.json"
@@ -605,6 +628,7 @@ install_fakes() {
   FINAL_PHASE=latency
   FINAL_SAMPLER=off FINAL_WARMUPS=10 FINAL_REPETITIONS=1000 FINAL_BLOCKS=10
   FINAL_SEED=20260621 FINAL_DEADLINE=12s
+  FINAL_ACS_TRACE_SCHEMA=""
   FINAL_FAIL_STAGE=""
 
   final_topology_prepare() { printf 'prepare\n' >>"$FINAL_EVENT_LOG"; }
@@ -646,11 +670,11 @@ install_fakes() {
 }
 
 run_case() {
-  local name="$1" phase="$2" sampler="$3" fail_stage="$4" expected="$5"
+  local name="$1" phase="$2" sampler="$3" fail_stage="$4" expected="$5" trace_schema="${6:-}"
   local root="$fixture/$name"
   make_fixture "$root"
   install_fakes "$root"
-  FINAL_PHASE="$phase" FINAL_SAMPLER="$sampler" FINAL_FAIL_STAGE="$fail_stage"
+  FINAL_PHASE="$phase" FINAL_SAMPLER="$sampler" FINAL_FAIL_STAGE="$fail_stage" FINAL_ACS_TRACE_SCHEMA="$trace_schema"
   status=0
   final_run_campaign_lifecycle "$root/artifacts" || status=$?
   [[ "$status" -eq "$expected" ]] || { echo "$name status=$status, want $expected" >&2; exit 1; }
@@ -664,6 +688,12 @@ if task6_selected mandatory-validation; then
     exit 1
   }
   ! grep -q sampler "$success_root/events"
+
+  diagnostic_root="$(run_case diagnostic latency off '' 0 bloc-acs-trace/v1)"
+  jq -e '.acs_trace_schema == "bloc-acs-trace/v1"' "$diagnostic_root/artifacts/manifest.json" >/dev/null || {
+    echo "diagnostic lifecycle manifest omitted its ACS trace schema" >&2
+    exit 1
+  }
 
   resource_root="$(run_case resource resource on '' 0)"
   grep -Fq finalize-resources "$resource_root/events"

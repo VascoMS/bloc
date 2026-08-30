@@ -61,6 +61,10 @@ expect_failure "$runner" --topology same-az --phase readiness-pilot --bundle-roo
 grep -Fq 'experiment id must be at most 47 characters' "$fixture/stderr"
 expect_success "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only
 grep -Fq 'warmups=10 repetitions=1000 blocks=10 sampler=off batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
+expect_success "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" \
+  --acs-trace-schema bloc-acs-trace/v1 --validate-only
+grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
+grep -Fq 'acs_trace_schema=bloc-acs-trace/v1' "$fixture/stdout"
 expect_success "$runner" --topology three-region --phase resource --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --validate-only
 grep -Fq 'warmups=0 repetitions=1000 blocks=10 sampler=on batches=8,32,128 seed=20260621 deadline=12s' "$fixture/stdout"
 
@@ -68,6 +72,10 @@ expect_success "$same_wrapper" --phase latency --bundle-root "$fixture/n4" --nod
 grep -Fq 'topology=same-az' "$fixture/stdout"
 expect_success "$three_wrapper" --phase latency --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --validate-only
 grep -Fq 'topology=three-region' "$fixture/stdout"
+expect_success "$same_wrapper" --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" \
+  --acs-trace-schema bloc-acs-trace/v1 --validate-only
+expect_success "$three_wrapper" --phase latency --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" \
+  --acs-trace-schema bloc-acs-trace/v1 --validate-only
 
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/$source_sha/0000000000000000000000000000000000000000}" --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]/$bloc_image/$mempool_image}" --validate-only
@@ -80,6 +88,7 @@ expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixt
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}"
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only --execute-live
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --unknown value --validate-only
+expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --acs-trace-schema bloc-acs-trace/v999 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root
 
 [[ ! -s "$call_log" ]] || { echo "validate-only invoked lifecycle tools" >&2; cat "$call_log" >&2; exit 1; }

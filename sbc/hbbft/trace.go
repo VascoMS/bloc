@@ -1,0 +1,303 @@
+package hbbft
+
+import (
+	"sync"
+	"time"
+)
+
+const ACSTraceSchemaVersion = "bloc-acs-trace/v1"
+
+// TracePoint is a process-local monotonic offset from proposal readiness.
+// Recorded distinguishes an event at offset zero from an event that did not
+// occur.
+type TracePoint struct {
+	Recorded bool  `json:"recorded"`
+	OffsetUS int64 `json:"offset_us"`
+}
+
+// ACSMessageSubtype is one of the fixed ACS wire-message categories.
+type ACSMessageSubtype string
+
+const (
+	ACSMessageProof ACSMessageSubtype = "proof"
+	ACSMessageEcho  ACSMessageSubtype = "echo"
+	ACSMessageReady ACSMessageSubtype = "ready"
+	ACSMessageBVAL  ACSMessageSubtype = "bval"
+	ACSMessageAUX   ACSMessageSubtype = "aux"
+)
+
+var acsMessageSubtypes = [...]ACSMessageSubtype{
+	ACSMessageProof,
+	ACSMessageEcho,
+	ACSMessageReady,
+	ACSMessageBVAL,
+	ACSMessageAUX,
+}
+
+// ACSTrace contains one bounded diagnostic record for an ACS slot.
+type ACSTrace struct {
+	SchemaVersion string                                `json:"schema_version,omitempty"`
+	Enabled       bool                                  `json:"enabled"`
+	Aggregate     ACSAggregateTrace                     `json:"aggregate"`
+	Wait          ACSWaitTrace                          `json:"wait_us"`
+	Adapter       ACSAdapterTrace                       `json:"adapter"`
+	RBC           map[uint64]RBCTrace                   `json:"rbc,omitempty"`
+	BBA           map[uint64]BBATrace                   `json:"bba,omitempty"`
+	Messages      map[ACSMessageSubtype]ACSMessageTrace `json:"messages,omitempty"`
+}
+
+// ACSAggregateTrace captures milestones shared across proposer instances.
+type ACSAggregateTrace struct {
+	InputStarted       TracePoint `json:"input_started"`
+	FirstRBCOutput     TracePoint `json:"first_rbc_output"`
+	RBCOutputQuorum    TracePoint `json:"rbc_output_quorum"`
+	FirstTrueBBA       TracePoint `json:"first_true_bba"`
+	TrueBBAQuorum      TracePoint `json:"true_bba_quorum"`
+	FalseInputInjected TracePoint `json:"false_input_injected"`
+	AllBBADecided      TracePoint `json:"all_bba_decided"`
+	TruthyRBCReady     TracePoint `json:"truthy_rbc_ready"`
+	CoreDecision       TracePoint `json:"core_decision"`
+}
+
+// RBCTrace captures bounded reliable-broadcast milestones for one proposer.
+type RBCTrace struct {
+	ProofAccepted          TracePoint `json:"proof_accepted"`
+	EchoSent               TracePoint `json:"echo_sent"`
+	ReadySent              TracePoint `json:"ready_sent"`
+	DecodeEligible         TracePoint `json:"decode_eligible"`
+	ReconstructionStarted  TracePoint `json:"reconstruction_started"`
+	ReconstructionFinished TracePoint `json:"reconstruction_finished"`
+	OutputStored           TracePoint `json:"output_stored"`
+}
+
+// BBATrace captures bounded binary-agreement milestones for one proposer.
+type BBATrace struct {
+	Input          TracePoint `json:"input"`
+	InputValue     bool       `json:"input_value"`
+	FirstBinValue  TracePoint `json:"first_bin_value"`
+	FirstBin       bool       `json:"first_bin"`
+	FirstAux       TracePoint `json:"first_aux"`
+	FirstAuxValue  bool       `json:"first_aux_value"`
+	ValidAuxQuorum TracePoint `json:"valid_aux_quorum"`
+	Decision       TracePoint `json:"decision"`
+	DecisionValue  bool       `json:"decision_value"`
+	Done           TracePoint `json:"done"`
+	MaxEpoch       uint32     `json:"max_epoch"`
+}
+
+// ACSWaitTrace attributes mutually exclusive ACS completion wait states.
+type ACSWaitTrace struct {
+	TrueBBAQuorumUS int64 `json:"true_bba_quorum_us"`
+	AllBBAUS        int64 `json:"all_bba_us"`
+	TruthyRBCUS     int64 `json:"truthy_rbc_us"`
+}
+
+// ACSAdapterTrace separates the hbbft decision from local slot/node work.
+type ACSAdapterTrace struct {
+	CommonSubsetDecoded TracePoint `json:"common_subset_decoded"`
+	BlockBodyBuilt      TracePoint `json:"block_body_built"`
+	NodeOutputReceived  TracePoint `json:"node_output_received"`
+}
+
+// ACSMessageTrace contains bounded per-subtype transport accounting.
+type ACSMessageTrace struct {
+	InboundCount     uint64 `json:"inbound_count"`
+	InboundBytes     uint64 `json:"inbound_bytes"`
+	OutboundCount    uint64 `json:"outbound_count"`
+	OutboundBytes    uint64 `json:"outbound_bytes"`
+	SendCount        uint64 `json:"send_count"`
+	SendTotalUS      int64  `json:"send_total_us"`
+	SendMaxUS        int64  `json:"send_max_us"`
+	SendFailureCount uint64 `json:"send_failure_count"`
+}
+
+type aggregateTraceEvent uint8
+
+const (
+	traceACSInputStarted aggregateTraceEvent = iota
+	traceACSFirstRBCOutput
+	traceACSRBCOutputQuorum
+	traceACSFirstTrueBBA
+	traceACSTrueBBAQuorum
+	traceACSFalseInputInjected
+	traceACSAllBBADecided
+	traceACSTruthyRBCReady
+	traceACSCoreDecision
+)
+
+type rbcTraceEvent uint8
+
+const (
+	traceRBCProofAccepted rbcTraceEvent = iota
+	traceRBCEchoSent
+	traceRBCReadySent
+	traceRBCDecodeEligible
+	traceRBCReconstructionStarted
+	traceRBCReconstructionFinished
+	traceRBCOutputStored
+)
+
+type bbaTraceEvent uint8
+
+const (
+	traceBBAInput bbaTraceEvent = iota
+	traceBBAFirstBinValue
+	traceBBAFirstAux
+	traceBBAValidAuxQuorum
+	traceBBADecision
+	traceBBADone
+)
+
+type adapterTraceEvent uint8
+
+const (
+	traceCommonSubsetDecoded adapterTraceEvent = iota
+	traceBlockBodyBuilt
+	traceNodeOutputReceived
+)
+
+type traceRecorder struct {
+	mu      sync.Mutex
+	enabled bool
+	now     func() time.Time
+	base    time.Time
+	started bool
+	trace   ACSTrace
+}
+
+func newTraceRecorder(nodes []uint64, enabled bool, now func() time.Time) *traceRecorder {
+	if now == nil {
+		now = time.Now
+	}
+	recorder := &traceRecorder{enabled: enabled, now: now}
+	if !enabled {
+		return recorder
+	}
+	recorder.trace = ACSTrace{
+		SchemaVersion: ACSTraceSchemaVersion,
+		Enabled:       true,
+		RBC:           make(map[uint64]RBCTrace, len(nodes)),
+		BBA:           make(map[uint64]BBATrace, len(nodes)),
+		Messages:      make(map[ACSMessageSubtype]ACSMessageTrace, len(acsMessageSubtypes)),
+	}
+	for _, id := range nodes {
+		recorder.trace.RBC[id] = RBCTrace{}
+		recorder.trace.BBA[id] = BBATrace{}
+	}
+	for _, subtype := range acsMessageSubtypes {
+		recorder.trace.Messages[subtype] = ACSMessageTrace{}
+	}
+	return recorder
+}
+
+func (r *traceRecorder) begin(base time.Time) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.started {
+		return
+	}
+	r.base = base
+	r.started = true
+}
+
+func (r *traceRecorder) pointLocked(point *TracePoint) {
+	if point.Recorded || !r.started {
+		return
+	}
+	offset := r.now().Sub(r.base).Microseconds()
+	if offset < 0 {
+		return
+	}
+	point.Recorded = true
+	point.OffsetUS = offset
+}
+
+func (r *traceRecorder) recordAggregate(event aggregateTraceEvent) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var point *TracePoint
+	switch event {
+	case traceACSInputStarted:
+		point = &r.trace.Aggregate.InputStarted
+	case traceACSFirstRBCOutput:
+		point = &r.trace.Aggregate.FirstRBCOutput
+	case traceACSRBCOutputQuorum:
+		point = &r.trace.Aggregate.RBCOutputQuorum
+	case traceACSFirstTrueBBA:
+		point = &r.trace.Aggregate.FirstTrueBBA
+	case traceACSTrueBBAQuorum:
+		point = &r.trace.Aggregate.TrueBBAQuorum
+	case traceACSFalseInputInjected:
+		point = &r.trace.Aggregate.FalseInputInjected
+	case traceACSAllBBADecided:
+		point = &r.trace.Aggregate.AllBBADecided
+	case traceACSTruthyRBCReady:
+		point = &r.trace.Aggregate.TruthyRBCReady
+	case traceACSCoreDecision:
+		point = &r.trace.Aggregate.CoreDecision
+	default:
+		return
+	}
+	r.pointLocked(point)
+}
+
+func (r *traceRecorder) recordRBC(proposerID uint64, event rbcTraceEvent) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.trace.RBC[proposerID]
+	if !ok {
+		return
+	}
+	var point *TracePoint
+	switch event {
+	case traceRBCProofAccepted:
+		point = &entry.ProofAccepted
+	case traceRBCEchoSent:
+		point = &entry.EchoSent
+	case traceRBCReadySent:
+		point = &entry.ReadySent
+	case traceRBCDecodeEligible:
+		point = &entry.DecodeEligible
+	case traceRBCReconstructionStarted:
+		point = &entry.ReconstructionStarted
+	case traceRBCReconstructionFinished:
+		point = &entry.ReconstructionFinished
+	case traceRBCOutputStored:
+		point = &entry.OutputStored
+	default:
+		return
+	}
+	r.pointLocked(point)
+	r.trace.RBC[proposerID] = entry
+}
+
+func (r *traceRecorder) snapshot() ACSTrace {
+	if r == nil || !r.enabled {
+		return ACSTrace{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := r.trace
+	result.RBC = make(map[uint64]RBCTrace, len(r.trace.RBC))
+	for id, trace := range r.trace.RBC {
+		result.RBC[id] = trace
+	}
+	result.BBA = make(map[uint64]BBATrace, len(r.trace.BBA))
+	for id, trace := range r.trace.BBA {
+		result.BBA[id] = trace
+	}
+	result.Messages = make(map[ACSMessageSubtype]ACSMessageTrace, len(r.trace.Messages))
+	for subtype, trace := range r.trace.Messages {
+		result.Messages[subtype] = trace
+	}
+	return result
+}

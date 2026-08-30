@@ -31,13 +31,20 @@ type persistentSendCompletion struct {
 	err    error
 }
 
+type persistentPrewarmRequest struct {
+	ctx    context.Context
+	result chan error
+}
+
 type peerStreamWriter struct {
-	operatorID uint64
-	queue      chan persistentSendRequest
-	open       func(context.Context, uint64) (persistentWriteStream, error)
-	stop       <-chan struct{}
-	ready      atomic.Bool
-	done       chan struct{}
+	operatorID  uint64
+	queue       chan persistentSendRequest
+	prewarm     chan persistentPrewarmRequest
+	open        func(context.Context, uint64) (persistentWriteStream, error)
+	prewarmOpen func(context.Context, uint64) (persistentWriteStream, error)
+	stop        <-chan struct{}
+	ready       atomic.Bool
+	done        chan struct{}
 }
 
 func newPeerStreamWriter(
@@ -46,14 +53,35 @@ func newPeerStreamWriter(
 	stop <-chan struct{},
 ) *peerStreamWriter {
 	writer := &peerStreamWriter{
-		operatorID: operatorID,
-		queue:      make(chan persistentSendRequest, persistentQueueCapacity),
-		open:       open,
-		stop:       stop,
-		done:       make(chan struct{}),
+		operatorID:  operatorID,
+		queue:       make(chan persistentSendRequest, persistentQueueCapacity),
+		prewarm:     make(chan persistentPrewarmRequest, 1),
+		open:        open,
+		prewarmOpen: open,
+		stop:        stop,
+		done:        make(chan struct{}),
 	}
 	go writer.run()
 	return writer
+}
+
+func (w *peerStreamWriter) prewarmStream(ctx context.Context) error {
+	request := persistentPrewarmRequest{ctx: ctx, result: make(chan error, 1)}
+	select {
+	case w.prewarm <- request:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-w.stop:
+		return errPersistentWriterClosed
+	}
+	select {
+	case err := <-request.result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-w.stop:
+		return errPersistentWriterClosed
+	}
 }
 
 func (w *peerStreamWriter) send(ctx context.Context, payload []byte) (transportSendResult, error) {
@@ -104,8 +132,44 @@ func (w *peerStreamWriter) run() {
 				return
 			}
 			stream = w.writeRequest(stream, request)
+		case request := <-w.prewarm:
+			if persistentWriterStopped(w.stop) {
+				request.result <- errPersistentWriterClosed
+				w.stopStream(stream)
+				w.failQueued()
+				return
+			}
+			stream = w.openPrewarmedStream(stream, request)
 		}
 	}
+}
+
+func (w *peerStreamWriter) openPrewarmedStream(stream persistentWriteStream, request persistentPrewarmRequest) persistentWriteStream {
+	if err := request.ctx.Err(); err != nil {
+		request.result <- err
+		return stream
+	}
+	if stream != nil {
+		request.result <- nil
+		return stream
+	}
+	opened, err := w.prewarmOpen(request.ctx, w.operatorID)
+	if err != nil {
+		request.result <- err
+		return nil
+	}
+	if opened == nil {
+		request.result <- errors.New("persistent stream prewarmer returned a nil stream")
+		return nil
+	}
+	if persistentWriterStopped(w.stop) {
+		_ = opened.Reset()
+		request.result <- errPersistentWriterClosed
+		return nil
+	}
+	w.ready.Store(true)
+	request.result <- nil
+	return opened
 }
 
 func (w *peerStreamWriter) writeRequest(stream persistentWriteStream, request persistentSendRequest) persistentWriteStream {
@@ -184,7 +248,14 @@ func (w *peerStreamWriter) failQueued() {
 		case request := <-w.queue:
 			request.result <- persistentSendCompletion{err: errPersistentWriterClosed}
 		default:
-			return
+			for {
+				select {
+				case request := <-w.prewarm:
+					request.result <- errPersistentWriterClosed
+				default:
+					return
+				}
+			}
 		}
 	}
 }

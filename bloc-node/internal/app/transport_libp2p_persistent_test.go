@@ -223,6 +223,176 @@ func TestFreshHandlerKeepsV1WireCompatibilityAndModeIsolation(t *testing.T) {
 	}
 }
 
+func TestPersistentPrewarmReadyAndReusesOneStream(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	waitForTransportReady(t, pair.sender)
+	waitForTransportReady(t, pair.receiver)
+	if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent); got != 1 {
+		t.Fatalf("prewarmed sender streams = %d, want 1", got)
+	}
+
+	for slot := uint64(1); slot <= 2; slot++ {
+		result, err := pair.sender.Send(t.Context(), pair.receiver.node.self.ID,
+			validPersistentTestEnvelope(pair.sender.node.self.ID, pair.receiver.node.self.ID, slot))
+		if err != nil {
+			t.Fatalf("send slot %d: %v", slot, err)
+		}
+		if !result.StreamReused || result.StreamOpenDuration != 0 || result.FinalizeDuration != 0 {
+			t.Fatalf("slot %d result = %+v, want prewarmed reuse", slot, result)
+		}
+	}
+	for slot := uint64(1); slot <= 2; slot++ {
+		select {
+		case delivery := <-pair.deliveries:
+			if delivery.envelope.Slot != slot {
+				t.Fatalf("delivery slot = %d, want %d", delivery.envelope.Slot, slot)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for slot %d", slot)
+		}
+	}
+	for index := 0; index < 5; index++ {
+		if !pair.sender.Ready() {
+			t.Fatalf("ready call %d returned false", index)
+		}
+	}
+	if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent); got != 1 {
+		t.Fatalf("streams after sends/readiness = %d, want 1", got)
+	}
+}
+
+func TestPersistentReadyRejectsMixedModePeer(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModeFresh, true)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pair.sender.Ready() {
+			t.Fatal("persistent transport became ready with a fresh-only peer")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !pair.receiver.Ready() {
+		t.Fatal("fresh receiver did not retain connection-only readiness")
+	}
+	if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent); got != 0 {
+		t.Fatalf("mixed-mode v2 streams = %d, want 0", got)
+	}
+}
+
+func TestPersistentResetFailsEnvelopeAndNextSendOpensReplacement(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	waitForTransportReady(t, pair.sender)
+	outbound := findProtocolStream(pair.sender, pair.receiver.host.ID(), blocEnvelopeProtocolPersistent, network.DirOutbound)
+	if outbound == nil {
+		t.Fatal("prewarmed outbound stream not found")
+	}
+	if err := outbound.Reset(); err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := pair.sender.Send(t.Context(), 1, validPersistentTestEnvelope(0, 1, 10))
+	if err == nil || failed.EncodedBytes != 0 {
+		t.Fatalf("send on reset stream result=%+v err=%v", failed, err)
+	}
+	next, err := pair.sender.Send(t.Context(), 1, validPersistentTestEnvelope(0, 1, 11))
+	if err != nil {
+		t.Fatalf("replacement send: %v", err)
+	}
+	if next.StreamReused || next.StreamOpenDuration <= 0 || next.FinalizeDuration != 0 {
+		t.Fatalf("replacement result = %+v", next)
+	}
+	select {
+	case delivery := <-pair.deliveries:
+		if delivery.envelope.Slot != 11 {
+			t.Fatalf("failed envelope was delivered or replayed: %+v", delivery)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement envelope was not delivered")
+	}
+	assertNoPersistentDelivery(t, pair.deliveries)
+}
+
+func TestPersistentCloseWaitsForInboundHandlerAndIsIdempotent(t *testing.T) {
+	handlerStarted := make(chan struct{})
+	handlerRelease := make(chan struct{})
+	pair := newLibP2PTransportPairWithHandler(t, streamModePersistent, streamModePersistent, true,
+		func(WireEnvelope, int) {
+			close(handlerStarted)
+			<-handlerRelease
+		})
+	waitForTransportReady(t, pair.sender)
+	if _, err := pair.sender.Send(t.Context(), 1, validPersistentTestEnvelope(0, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("inbound handler did not start")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- pair.receiver.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("close returned before inbound handler exited: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(handlerRelease)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("close did not finish after handler release")
+	}
+	if err := pair.receiver.Close(); err != nil {
+		t.Fatalf("repeated close: %v", err)
+	}
+	if _, err := pair.receiver.Send(t.Context(), 0, validPersistentTestEnvelope(1, 0, 2)); !errors.Is(err, errPersistentWriterClosed) {
+		t.Fatalf("send after close error = %v, want writer closed", err)
+	}
+}
+
+func waitForTransportReady(t *testing.T, transport *LibP2PTransport) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if transport.Ready() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("transport did not become ready")
+}
+
+func countOpenProtocolStreams(transport *LibP2PTransport, remotePeer peer.ID, protocolID protocol.ID) int {
+	count := 0
+	for _, connection := range transport.host.Network().ConnsToPeer(remotePeer) {
+		for _, stream := range connection.GetStreams() {
+			if stream.Protocol() == protocolID && stream.Stat().Direction == network.DirOutbound {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func findProtocolStream(
+	transport *LibP2PTransport,
+	remotePeer peer.ID,
+	protocolID protocol.ID,
+	direction network.Direction,
+) network.Stream {
+	for _, connection := range transport.host.Network().ConnsToPeer(remotePeer) {
+		for _, stream := range connection.GetStreams() {
+			if stream.Protocol() == protocolID && stream.Stat().Direction == direction {
+				return stream
+			}
+		}
+	}
+	return nil
+}
+
 func writePersistentTestFrames(t *testing.T, pair libP2PTransportPair, frames ...[]byte) network.Stream {
 	t.Helper()
 	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolPersistent)
@@ -291,6 +461,15 @@ type libP2PTransportPair struct {
 }
 
 func newLibP2PTransportPair(t *testing.T, senderMode, receiverMode string, receiverKnowsSender bool) libP2PTransportPair {
+	return newLibP2PTransportPairWithHandler(t, senderMode, receiverMode, receiverKnowsSender, nil)
+}
+
+func newLibP2PTransportPairWithHandler(
+	t *testing.T,
+	senderMode, receiverMode string,
+	receiverKnowsSender bool,
+	receiverHandler EnvelopeHandler,
+) libP2PTransportPair {
 	t.Helper()
 	senderPrivate, senderPeerID, err := generateLibP2PIdentity()
 	if err != nil {
@@ -313,9 +492,12 @@ func newLibP2PTransportPair(t *testing.T, senderMode, receiverMode string, recei
 	receiver := newLibP2PTransport(receiverNode, ProtoEnvelopeCodec{})
 	deliveries := make(chan persistentTestDelivery, 16)
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := receiver.Start(ctx, func(envelope WireEnvelope, encodedBytes int) {
-		deliveries <- persistentTestDelivery{envelope: envelope, encodedBytes: encodedBytes}
-	}); err != nil {
+	if receiverHandler == nil {
+		receiverHandler = func(envelope WireEnvelope, encodedBytes int) {
+			deliveries <- persistentTestDelivery{envelope: envelope, encodedBytes: encodedBytes}
+		}
+	}
+	if err := receiver.Start(ctx, receiverHandler); err != nil {
 		cancel()
 		t.Fatal(err)
 	}

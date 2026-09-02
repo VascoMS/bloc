@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-08-30`
+- Last reviewed: `2026-09-02`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -24,7 +24,7 @@ long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
 500-transaction balanced client corpus with one plaintext/encrypted measurement
 per target, a separate nested 512-target representative protocol corpus,
 Prometheus metrics, local evaluators, VM/EC2 remote evaluation, and opt-in
-bounded `bloc-acs-trace/v1` diagnostics with fail-closed evaluator artifacts.
+bounded `bloc-acs-trace/v2` diagnostics with fail-closed evaluator artifacts.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -68,7 +68,25 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #23 phase one is accepted; GossipSub phase two remains:** the final
+- **RBC READY relay omits local self-admission:** the `N-F` ECHO trigger queues
+  READY and processes the local READY, while the `F+1` READY relay trigger
+  queues READY without adding it to `recvReadys`. For `n=4,f=1`, two matching
+  remote READYs therefore cause a relay but still leave the node dependent on a
+  third remote READY; one withholding participant can prevent output despite
+  enough matching ECHO shards. The approved correction unifies both emission
+  paths, counts the local READY exactly once, and runs the full ACS safety gate.
+  Implementation has not started.
+- **ACS transport traces are right-censored at local output:** outbound sends
+  complete asynchronously after the retained trace snapshot. `ACSUS` remains
+  valid, but queue and send-phase attribution can omit the slowest outstanding
+  messages. The approved minimal trace correction records synchronous send
+  admission, terminal completion, pending-at-decision counts, READY trigger
+  reasons, and fail-closed final `bloc-acs-trace/v3` artifacts before the
+  persistent-lane experiment. The approved scope and acceptance contract are
+  in the [READY/stream-lane design](superpowers/specs/2026-09-02-rbc-ready-stream-lanes-design.md).
+  Implementation has not started.
+
+- **Issue #23 phase one is accepted; GossipSub phase two is deferred:** the final
   n4 four-arm campaign used source
   `7720b1f5bfce1997f611c1db95cead394b0349c4`, immutable BLOC image
   `sha256:87da6c9a447f73b8090e3b257dce94c357d64b97d644ea57e1150d4137426a34`,
@@ -103,9 +121,10 @@ release-candidate configuration contract are defined in
   `72.434/144.454/428.540 ms`, and true-BBA-quorum p50 is
   `209.100/235.958/508.608 ms`. Direct persistent streams neither reduce the
   all-to-all message pattern nor remove those WAN-dependent rounds, and a
-  single per-peer stream can serialize large concurrent messages. This result
-  supports the separately scoped GossipSub dissemination phase, not further
-  direct-stream queue tuning as the primary latency solution. No n7 or p99
+  single per-peer stream can serialize large concurrent messages. The selected
+  next experiment isolates that application-level head-of-line mechanism with
+  separate persistent control and data streams. GossipSub remains a possible
+  later dissemination experiment but is not an immediate action. No n7 or p99
   claim is made from this 30-observation diagnostic.
 
   All four runs completed recovery and teardown. Terraform destroyed 15
@@ -501,18 +520,23 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Publish the accepted issue #23 c4 evidence and phase-one conclusion only
-   after explicit authorization for the new external payload, then close or
-   rescope phase one according to its acceptance criteria.
-2. Leave issue #15 open and paused for resource collection. Do not admit any
+1. Create and prioritize the M5 issue and Project item for RBC READY
+   self-admission, then implement it on a dedicated branch with the targeted
+   withholding regression and full ACS safety gate.
+2. Follow with separate tracked issues for minimal ACS trace finalization and
+   the opt-in persistent control/data stream mode. Keep current `persistent` as
+   the matched control and do not begin implementation before each issue exists.
+3. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
+   proposals. Do not include them in the focused READY/stream-lane program.
+4. Run the matched same-AZ/three-region `persistent` versus
+   `persistent-lanes` campaign only after local, race, and ACS safety gates pass
+   and separate cloud authorization is granted.
+5. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
-3. Do not combine measurements from different source, image, corpus,
+6. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-4. Create and prioritize the separately scoped GossipSub phase-two issue before
-   implementation. Use the accepted c4 direct-stream evidence as its baseline;
-   do not extend phase one to n7 or publish p99 from 30 observations.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+7. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

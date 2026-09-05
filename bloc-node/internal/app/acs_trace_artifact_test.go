@@ -384,6 +384,42 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 			},
 		},
 		{
+			name: "terminal outcome overflow", want: "terminal count",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				message := runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady]
+				message.OutboundCount = ^uint64(0)
+				message.SendCount = ^uint64(0)
+				message.SendFailureCount = 1
+				for _, phase := range []*hbbft.ACSSendPhaseTrace{
+					&message.Encode, &message.QueueWait, &message.StreamOpen, &message.Write, &message.Finalize,
+				} {
+					phase.Count = message.SendCount
+				}
+				message.StreamOpenCount = message.SendCount
+				runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady] = message
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "stream accounting overflow", want: "open/reuse count",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				message := runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady]
+				message.ScheduledCount = 1
+				message.TerminalCount = 1
+				message.OutboundCount = 1
+				message.SendCount = 1
+				for _, phase := range []*hbbft.ACSSendPhaseTrace{
+					&message.Encode, &message.QueueWait, &message.StreamOpen, &message.Write, &message.Finalize,
+				} {
+					phase.Count = message.SendCount
+				}
+				message.StreamOpenCount = ^uint64(0)
+				message.StreamReuseCount = 2
+				runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady] = message
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
 			name: "missing READY trigger", want: "missing READY trigger",
 			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
 				ready := runs[0].Results[0].ACSTrace.RBC[0]
@@ -405,12 +441,36 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 			},
 		},
 		{
-			name: "echo READY trigger above threshold", want: "READY trigger threshold",
+			name: "echo READY trigger above membership", want: "READY trigger counts",
 			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
 				ready := runs[0].Results[0].ACSTrace.RBC[0]
 				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
 				ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
 				ready.ReadyTriggerEchoCount = 3
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "echo READY trigger crosses relay threshold", want: "READY trigger history",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+				ready.ReadyTriggerEchoCount = 2
+				ready.ReadyTriggerReadyCount = 1
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "echo READY trigger count exceeds membership", want: "READY trigger counts",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+				ready.ReadyTriggerEchoCount = 2
+				ready.ReadyTriggerReadyCount = 3
 				runs[0].Results[0].ACSTrace.RBC[0] = ready
 				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
 			},
@@ -433,6 +493,30 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
 				ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
 				ready.ReadyTriggerReadyCount = 2
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "relay READY trigger crosses echo threshold", want: "READY trigger history",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+				ready.ReadyTriggerEchoCount = 2
+				ready.ReadyTriggerReadyCount = 1
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "relay READY trigger count exceeds membership", want: "READY trigger counts",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+				ready.ReadyTriggerEchoCount = 3
+				ready.ReadyTriggerReadyCount = 1
 				runs[0].Results[0].ACSTrace.RBC[0] = ready
 				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
 			},
@@ -472,6 +556,22 @@ func TestValidateACSTraceArtifactAcceptsExactV3READYTriggers(t *testing.T) {
 	}
 	if err := validateACSTraceArtifact(manifest, runs, writeACSTraceRecords(t, records)); err != nil {
 		t.Fatalf("exact v3 READY triggers rejected: %v", err)
+	}
+}
+
+func TestValidateACSTraceArtifactAcceptsPreOriginV3READYTrigger(t *testing.T) {
+	manifest, runs, _ := validACSTraceArtifactFixture()
+	ready := runs[0].Results[0].ACSTrace.RBC[0]
+	ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+	ready.ReadyTriggerReadyCount = 1
+	runs[0].Results[0].ACSTrace.RBC[0] = ready
+
+	records := []acsTraceArtifactRecord{
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+	if err := validateACSTraceArtifact(manifest, runs, writeACSTraceRecords(t, records)); err != nil {
+		t.Fatalf("pre-origin v3 READY trigger rejected: %v", err)
 	}
 }
 

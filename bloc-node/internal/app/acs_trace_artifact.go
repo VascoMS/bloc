@@ -390,7 +390,8 @@ func validateV3RBCReadyTrigger(trace hbbft.RBCTrace, members int) error {
 	if trace.ReadyTrigger != hbbft.RBCReadyTriggerEchoQuorum && trace.ReadyTrigger != hbbft.RBCReadyTriggerRelay {
 		return fmt.Errorf("invalid READY trigger %q", trace.ReadyTrigger)
 	}
-	if trace.ReadyTriggerEchoCount < 0 || trace.ReadyTriggerReadyCount < 0 {
+	if trace.ReadyTriggerEchoCount < 0 || trace.ReadyTriggerReadyCount < 0 ||
+		trace.ReadyTriggerEchoCount > members || trace.ReadyTriggerReadyCount > members {
 		return fmt.Errorf("invalid READY trigger counts echo=%d ready=%d", trace.ReadyTriggerEchoCount, trace.ReadyTriggerReadyCount)
 	}
 	faults := (members - 1) / 3
@@ -399,9 +400,15 @@ func validateV3RBCReadyTrigger(trace hbbft.RBCTrace, members int) error {
 		if trace.ReadyTriggerEchoCount != members-faults {
 			return fmt.Errorf("READY trigger threshold for echo_quorum is %d, got %d", members-faults, trace.ReadyTriggerEchoCount)
 		}
+		if trace.ReadyTriggerReadyCount >= faults+1 {
+			return fmt.Errorf("READY trigger history for echo_quorum has ready count %d at relay threshold %d", trace.ReadyTriggerReadyCount, faults+1)
+		}
 	case hbbft.RBCReadyTriggerRelay:
 		if trace.ReadyTriggerReadyCount != faults+1 {
 			return fmt.Errorf("READY trigger threshold for ready_relay is %d, got %d", faults+1, trace.ReadyTriggerReadyCount)
+		}
+		if trace.ReadyTriggerEchoCount >= members-faults {
+			return fmt.Errorf("READY trigger history for ready_relay has echo count %d at echo threshold %d", trace.ReadyTriggerEchoCount, members-faults)
 		}
 	}
 	return nil
@@ -483,8 +490,8 @@ func validateV3MessageLifecycle(subtype hbbft.ACSMessageSubtype, trace hbbft.ACS
 	if trace.ScheduledCount != trace.TerminalCount {
 		return fmt.Errorf("ACS message subtype %q scheduled count %d does not match terminal count %d", subtype, trace.ScheduledCount, trace.TerminalCount)
 	}
-	if trace.TerminalCount != trace.OutboundCount+trace.SendFailureCount {
-		return fmt.Errorf("ACS message subtype %q terminal count %d does not match successful plus failed outcomes %d", subtype, trace.TerminalCount, trace.OutboundCount+trace.SendFailureCount)
+	if trace.OutboundCount > trace.TerminalCount || trace.SendFailureCount != trace.TerminalCount-trace.OutboundCount {
+		return fmt.Errorf("ACS message subtype %q terminal count %d does not match successful plus failed outcomes", subtype, trace.TerminalCount)
 	}
 	if trace.SendCount != trace.OutboundCount || trace.PendingAtDecision > trace.ScheduledCount {
 		return fmt.Errorf("ACS message subtype %q has inconsistent successful or pending counts", subtype)
@@ -504,8 +511,8 @@ func validateV2MessagePhases(subtype hbbft.ACSMessageSubtype, trace hbbft.ACSMes
 			return fmt.Errorf("invalid %s phase duration for ACS message subtype %q", name, subtype)
 		}
 	}
-	if trace.StreamOpenCount+trace.StreamReuseCount != trace.SendCount {
-		return fmt.Errorf("ACS message subtype %q open/reuse count %d does not match send count %d", subtype, trace.StreamOpenCount+trace.StreamReuseCount, trace.SendCount)
+	if trace.StreamOpenCount > trace.SendCount || trace.StreamReuseCount != trace.SendCount-trace.StreamOpenCount {
+		return fmt.Errorf("ACS message subtype %q open/reuse count does not match send count %d", subtype, trace.SendCount)
 	}
 	return nil
 }

@@ -292,7 +292,7 @@ func (r *RBC) handleEchoRequest(senderID uint64, req *EchoRequest) error {
 		return r.tryDecodeValue(req.RootHash)
 	}
 
-	return r.emitReady(req.RootHash)
+	return r.emitReady(req.RootHash, RBCReadyTriggerEchoQuorum)
 }
 
 // If a node had received (2 * f + 1) ready's (with matching root hash)
@@ -308,21 +308,24 @@ func (r *RBC) handleReadyRequest(senderID uint64, req *ReadyRequest) error {
 	r.recvReadys[senderID] = req.RootHash
 
 	if r.countReadys(req.RootHash) == r.F+1 && !r.readySent {
-		return r.emitReady(req.RootHash)
+		return r.emitReady(req.RootHash, RBCReadyTriggerRelay)
 	}
 	return r.tryDecodeValue(req.RootHash)
 }
 
-func (r *RBC) emitReady(root []byte) error {
+func (r *RBC) emitReady(root []byte, trigger RBCReadyTrigger) error {
 	if r.readySent {
 		return r.tryDecodeValue(root)
 	}
 	if _, exists := r.recvReadys[r.ID]; exists {
 		return fmt.Errorf("local ready already admitted for node %d", r.ID)
 	}
+	echoCount := r.countEchos(root)
+	readyCount := r.countReadys(root)
+
 	r.recvReadys[r.ID] = root
 	r.readySent = true
-	r.trace.recordRBC(r.proposerID, traceRBCReadySent)
+	r.trace.recordRBCReady(r.proposerID, trigger, echoCount, readyCount)
 	r.messages = append(r.messages, &BroadcastMessage{
 		Payload: &ReadyRequest{RootHash: root},
 	})

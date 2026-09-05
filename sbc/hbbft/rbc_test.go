@@ -60,6 +60,44 @@ func TestRBCTraceRecordsThresholdAndReconstructionMilestones(t *testing.T) {
 		t.Fatalf("RBC reconstruction order: %+v", got)
 	}
 	require.Equal(t, value, rbc.Output())
+	if got.ReadyTrigger != RBCReadyTriggerEchoQuorum ||
+		got.ReadyTriggerEchoCount != 3 || got.ReadyTriggerReadyCount != 0 {
+		t.Fatalf("ECHO-quorum READY trigger = %+v", got)
+	}
+}
+
+func TestRBCTraceRecordsReadyRelayTriggerBeforeSelfAdmission(t *testing.T) {
+	base := time.Unix(550, 0)
+	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return base.Add(time.Microsecond) })
+	recorder.begin(base)
+	rbc := newRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
+	t.Cleanup(rbc.stop)
+	value := []byte("traceable-rbc-payload!")
+	shards, err := makeShards(rbc.enc, value)
+	require.NoError(t, err)
+	proofs, err := makeProofRequests(shards)
+	require.NoError(t, err)
+
+	handleRBCEcho(t, rbc, 1, proofs[1])
+	handleRBCEcho(t, rbc, 2, proofs[2])
+	handleRBCReady(t, rbc, 1, proofs[0].RootHash)
+	handleRBCReady(t, rbc, 2, proofs[0].RootHash)
+
+	got := recorder.snapshot().RBC[0]
+	if got.ReadyTrigger != RBCReadyTriggerRelay ||
+		got.ReadyTriggerEchoCount != 2 || got.ReadyTriggerReadyCount != 2 {
+		t.Fatalf("READY-relay trigger = %+v", got)
+	}
+}
+
+func TestRBCTraceKeepsReadyTriggerBeforeProposalOrigin(t *testing.T) {
+	recorder := newTraceRecorder(makeids(4), true, time.Now)
+	recorder.recordRBCReady(0, RBCReadyTriggerRelay, 2, 2)
+	got := recorder.snapshot().RBC[0]
+	if got.ReadySent.Recorded || got.ReadyTrigger != RBCReadyTriggerRelay ||
+		got.ReadyTriggerEchoCount != 2 || got.ReadyTriggerReadyCount != 2 {
+		t.Fatalf("pre-origin READY context = %+v", got)
+	}
 }
 
 func readyRelayFixture(t *testing.T) (*RBC, []byte, []*ProofRequest) {
@@ -160,7 +198,7 @@ func TestRBCEmitReadyRejectsPreAdmittedLocalReady(t *testing.T) {
 
 	rbc.recvReadys[rbc.ID] = root
 
-	err := rbc.emitReady(root)
+	err := rbc.emitReady(root, RBCReadyTriggerRelay)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "local ready already admitted")
 	assert.False(t, rbc.readySent)

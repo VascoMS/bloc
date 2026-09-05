@@ -39,6 +39,13 @@ var acsMessageSubtypes = [...]ACSMessageSubtype{
 	ACSMessageAUX,
 }
 
+type RBCReadyTrigger string
+
+const (
+	RBCReadyTriggerEchoQuorum RBCReadyTrigger = "echo_quorum"
+	RBCReadyTriggerRelay      RBCReadyTrigger = "ready_relay"
+)
+
 // ACSTrace contains one bounded diagnostic record for an ACS slot.
 type ACSTrace struct {
 	SchemaVersion string                                `json:"schema_version,omitempty"`
@@ -72,13 +79,16 @@ type ACSAggregateTrace struct {
 
 // RBCTrace captures bounded reliable-broadcast milestones for one proposer.
 type RBCTrace struct {
-	ProofAccepted          TracePoint `json:"proof_accepted"`
-	EchoSent               TracePoint `json:"echo_sent"`
-	ReadySent              TracePoint `json:"ready_sent"`
-	DecodeEligible         TracePoint `json:"decode_eligible"`
-	ReconstructionStarted  TracePoint `json:"reconstruction_started"`
-	ReconstructionFinished TracePoint `json:"reconstruction_finished"`
-	OutputStored           TracePoint `json:"output_stored"`
+	ProofAccepted          TracePoint      `json:"proof_accepted"`
+	EchoSent               TracePoint      `json:"echo_sent"`
+	ReadySent              TracePoint      `json:"ready_sent"`
+	ReadyTrigger           RBCReadyTrigger `json:"ready_trigger,omitempty"`
+	ReadyTriggerEchoCount  int             `json:"ready_trigger_echo_count,omitempty"`
+	ReadyTriggerReadyCount int             `json:"ready_trigger_ready_count,omitempty"`
+	DecodeEligible         TracePoint      `json:"decode_eligible"`
+	ReconstructionStarted  TracePoint      `json:"reconstruction_started"`
+	ReconstructionFinished TracePoint      `json:"reconstruction_finished"`
+	OutputStored           TracePoint      `json:"output_stored"`
 }
 
 // BBATrace captures bounded binary-agreement milestones for one proposer.
@@ -323,6 +333,23 @@ func (r *traceRecorder) recordRBC(proposerID uint64, event rbcTraceEvent) {
 		return
 	}
 	r.pointLocked(point)
+	r.trace.RBC[proposerID] = entry
+}
+
+func (r *traceRecorder) recordRBCReady(proposerID uint64, trigger RBCReadyTrigger, echoCount, readyCount int) {
+	if r == nil || !r.enabled {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.trace.RBC[proposerID]
+	if !ok || entry.ReadyTrigger != "" {
+		return
+	}
+	r.pointLocked(&entry.ReadySent)
+	entry.ReadyTrigger = trigger
+	entry.ReadyTriggerEchoCount = echoCount
+	entry.ReadyTriggerReadyCount = readyCount
 	r.trace.RBC[proposerID] = entry
 }
 

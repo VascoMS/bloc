@@ -36,6 +36,12 @@ func TestRBCTraceRecordsThresholdAndReconstructionMilestones(t *testing.T) {
 	require.NoError(t, rbc.HandleMessage(2, &BroadcastMessage{Payload: &EchoRequest{ProofRequest: *proofs[2]}}))
 	now = base.Add(40 * time.Microsecond)
 	require.NoError(t, rbc.HandleMessage(1, &BroadcastMessage{Payload: &ReadyRequest{RootHash: proofs[0].RootHash}}))
+	if got := rbc.trace.snapshot().RBC[rbc.proposerID]; got.DecodeEligible.Recorded ||
+		got.ReconstructionStarted.Recorded || got.ReconstructionFinished.Recorded ||
+		got.OutputStored.Recorded {
+		t.Fatalf("RBC decoded too early: %+v", got)
+	}
+	assert.False(t, rbc.outputDecoded)
 	now = base.Add(50 * time.Microsecond)
 	require.NoError(t, rbc.HandleMessage(2, &BroadcastMessage{Payload: &ReadyRequest{RootHash: proofs[0].RootHash}}))
 
@@ -93,6 +99,10 @@ func TestRBCReadyRelayAdmitsLocalReady(t *testing.T) {
 	require.Empty(t, rbc.Messages())
 
 	handleRBCReady(t, rbc, 1, root)
+	assert.False(t, rbc.readySent)
+	assert.NotContains(t, rbc.recvReadys, rbc.ID)
+	assert.False(t, rbc.outputDecoded)
+	assert.Empty(t, rbc.Messages())
 	handleRBCReady(t, rbc, 2, root)
 
 	assert.Equal(t, 3, rbc.countReadys(root))

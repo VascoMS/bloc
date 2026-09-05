@@ -714,7 +714,7 @@ func TestStepACSSealsOutputBeforeImmediateDecisionSends(t *testing.T) {
 		nodes[id] = n
 	}
 
-	for id, n := range nodes {
+	for id, n := range nodes[:3] {
 		if _, err := n.stepACS(func() error { return n.slot.InputBatch([]byte{byte('a' + id)}) }); err != nil {
 			t.Fatalf("input node %d: %v", id, err)
 		}
@@ -766,8 +766,39 @@ func TestStepACSSealsOutputBeforeImmediateDecisionSends(t *testing.T) {
 				t.Fatalf("decision sends were not retained as pending: scheduled_before=%d decision_scheduled=%d pending=%d trace=%+v", scheduledBefore, decisionScheduled, pendingAtDecision, trace)
 			}
 
-			if _, err := target.stepACS(func() error { return nil }); err != nil {
-				t.Fatalf("post-output ACS step: %v", err)
+			if _, err := nodes[3].stepACS(func() error { return nodes[3].slot.InputBatch([]byte("d")) }); err != nil {
+				t.Fatalf("post-output proposer input: %v", err)
+			}
+			postOutputDeadline := time.After(3 * time.Second)
+			proofDelivered := false
+			echoTransported := false
+			for !echoTransported {
+				select {
+				case postOutput := <-transport.sends:
+					subtype, classifyErr := classifyACSMessage(postOutput.ACS)
+					if classifyErr != nil {
+						t.Fatalf("classify post-output ACS message: %v", classifyErr)
+					}
+					if !proofDelivered && postOutput.From == 3 && postOutput.To == 0 &&
+						postOutput.ACS.Payload.ProposerID == 3 && subtype == hbbft.ACSMessageProof {
+						if _, err := target.stepACS(func() error {
+							return target.slot.HandleMessage(postOutput.From, postOutput.ACS)
+						}); err != nil {
+							t.Fatalf("deliver post-output proof: %v", err)
+						}
+						proofDelivered = true
+						continue
+					}
+					if proofDelivered && postOutput.From == 0 && postOutput.ACS.Payload.ProposerID == 3 &&
+						subtype == hbbft.ACSMessageEcho {
+						if !postOutput.Direct {
+							t.Fatal("post-output echo was not routed as a direct envelope")
+						}
+						echoTransported = true
+					}
+				case <-postOutputDeadline:
+					t.Fatalf("post-output ACS message was not transported: proof_delivered=%t", proofDelivered)
+				}
 			}
 			var afterScheduled uint64
 			for _, subtype := range []hbbft.ACSMessageSubtype{

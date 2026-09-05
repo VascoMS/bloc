@@ -143,13 +143,28 @@ func (s *SlotACS) RecordACSInbound(subtype ACSMessageSubtype, size int) {
 	s.trace.recordMessageInbound(subtype, size)
 }
 
-// RecordACSOutbound adds one transport completion to its fixed subtype
-// summary. Failed sends increment only the failure count.
-func (s *SlotACS) RecordACSOutbound(subtype ACSMessageSubtype, observation ACSSendObservation) {
+func (s *SlotACS) BeginACSOutbound(subtype ACSMessageSubtype) *ACSSendToken {
+	if s == nil || s.trace == nil {
+		return nil
+	}
+	return s.trace.beginMessageOutbound(subtype)
+}
+
+func (s *SlotACS) SealACSOutbound() {
 	if s == nil || s.trace == nil {
 		return
 	}
-	s.trace.recordMessageOutbound(subtype, observation)
+	s.trace.sealMessageOutbound()
+}
+
+func (s *SlotACS) TraceFinalized() bool {
+	return s == nil || s.trace == nil || s.trace.traceFinalized()
+}
+
+// RecordACSOutbound adds one transport completion to its fixed subtype
+// summary. Failed sends increment only the failure count.
+func (s *SlotACS) RecordACSOutbound(subtype ACSMessageSubtype, observation ACSSendObservation) {
+	s.BeginACSOutbound(subtype).Complete(observation)
 }
 
 // Slot returns the slot identifier handled by this adapter instance.

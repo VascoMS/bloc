@@ -8,7 +8,8 @@ import (
 const (
 	ACSTraceSchemaV1      = "bloc-acs-trace/v1"
 	ACSTraceSchemaV2      = "bloc-acs-trace/v2"
-	ACSTraceSchemaVersion = ACSTraceSchemaV2
+	ACSTraceSchemaV3      = "bloc-acs-trace/v3"
+	ACSTraceSchemaVersion = ACSTraceSchemaV3
 )
 
 // TracePoint is a process-local monotonic offset from proposal readiness.
@@ -42,12 +43,18 @@ var acsMessageSubtypes = [...]ACSMessageSubtype{
 type ACSTrace struct {
 	SchemaVersion string                                `json:"schema_version,omitempty"`
 	Enabled       bool                                  `json:"enabled"`
+	Transport     ACSTransportTrace                     `json:"transport"`
 	Aggregate     ACSAggregateTrace                     `json:"aggregate"`
 	Wait          ACSWaitTrace                          `json:"wait_us"`
 	Adapter       ACSAdapterTrace                       `json:"adapter"`
 	RBC           map[uint64]RBCTrace                   `json:"rbc,omitempty"`
 	BBA           map[uint64]BBATrace                   `json:"bba,omitempty"`
 	Messages      map[ACSMessageSubtype]ACSMessageTrace `json:"messages,omitempty"`
+}
+
+type ACSTransportTrace struct {
+	Sealed    bool `json:"sealed"`
+	Finalized bool `json:"finalized"`
 }
 
 // ACSAggregateTrace captures milestones shared across proposer instances.
@@ -126,21 +133,24 @@ type ACSSendObservation struct {
 
 // ACSMessageTrace contains bounded per-subtype transport accounting.
 type ACSMessageTrace struct {
-	InboundCount     uint64            `json:"inbound_count"`
-	InboundBytes     uint64            `json:"inbound_bytes"`
-	OutboundCount    uint64            `json:"outbound_count"`
-	OutboundBytes    uint64            `json:"outbound_bytes"`
-	SendCount        uint64            `json:"send_count"`
-	SendTotalUS      int64             `json:"send_total_us"`
-	SendMaxUS        int64             `json:"send_max_us"`
-	SendFailureCount uint64            `json:"send_failure_count"`
-	Encode           ACSSendPhaseTrace `json:"encode"`
-	QueueWait        ACSSendPhaseTrace `json:"queue_wait"`
-	StreamOpen       ACSSendPhaseTrace `json:"stream_open"`
-	Write            ACSSendPhaseTrace `json:"write"`
-	Finalize         ACSSendPhaseTrace `json:"finalize"`
-	StreamOpenCount  uint64            `json:"stream_open_count"`
-	StreamReuseCount uint64            `json:"stream_reuse_count"`
+	ScheduledCount    uint64            `json:"scheduled_count"`
+	TerminalCount     uint64            `json:"terminal_count"`
+	PendingAtDecision uint64            `json:"pending_at_decision"`
+	InboundCount      uint64            `json:"inbound_count"`
+	InboundBytes      uint64            `json:"inbound_bytes"`
+	OutboundCount     uint64            `json:"outbound_count"`
+	OutboundBytes     uint64            `json:"outbound_bytes"`
+	SendCount         uint64            `json:"send_count"`
+	SendTotalUS       int64             `json:"send_total_us"`
+	SendMaxUS         int64             `json:"send_max_us"`
+	SendFailureCount  uint64            `json:"send_failure_count"`
+	Encode            ACSSendPhaseTrace `json:"encode"`
+	QueueWait         ACSSendPhaseTrace `json:"queue_wait"`
+	StreamOpen        ACSSendPhaseTrace `json:"stream_open"`
+	Write             ACSSendPhaseTrace `json:"write"`
+	Finalize          ACSSendPhaseTrace `json:"finalize"`
+	StreamOpenCount   uint64            `json:"stream_open_count"`
+	StreamReuseCount  uint64            `json:"stream_reuse_count"`
 }
 
 type aggregateTraceEvent uint8
@@ -401,21 +411,13 @@ func (r *traceRecorder) recordMessageInbound(subtype ACSMessageSubtype, size int
 }
 
 func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, observation ACSSendObservation) {
-	if r == nil || !r.enabled {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.started {
-		return
-	}
-	entry, ok := r.trace.Messages[subtype]
-	if !ok {
-		return
-	}
+	token := r.beginMessageOutbound(subtype)
+	token.Complete(observation)
+}
+
+func recordCompletedSend(entry *ACSMessageTrace, observation ACSSendObservation) {
 	if observation.Err != nil {
 		entry.SendFailureCount++
-		r.trace.Messages[subtype] = entry
 		return
 	}
 	entry.OutboundCount++
@@ -441,7 +443,6 @@ func (r *traceRecorder) recordMessageOutbound(subtype ACSMessageSubtype, observa
 	} else {
 		entry.StreamOpenCount++
 	}
-	r.trace.Messages[subtype] = entry
 }
 
 func recordSendPhase(phase *ACSSendPhaseTrace, duration time.Duration) {

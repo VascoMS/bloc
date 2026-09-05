@@ -107,48 +107,90 @@ func TestTraceWaitTransitionsAreExclusive(t *testing.T) {
 	}
 }
 
-func TestACSOutboundAggregatesSuccessfulSendPhases(t *testing.T) {
+func TestACSOutboundLifecycleSealsAndFinalizesExactlyOnce(t *testing.T) {
 	slot := NewSlotACS(SlotConfig{
 		Config: Config{N: 4, F: 1, ID: 0, Nodes: []uint64{0, 1, 2, 3}},
 		Slot:   1,
 		Trace:  TraceOptions{Enabled: true},
 	})
-	defer slot.Close()
+	t.Cleanup(slot.Close)
 	slot.BeginTrace(time.Now())
 
-	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
+	success := slot.BeginACSOutbound(ACSMessageReady)
+	failure := slot.BeginACSOutbound(ACSMessageReady)
+	beforeSeal := slot.Trace()
+	if beforeSeal.SchemaVersion != ACSTraceSchemaV3 ||
+		beforeSeal.Messages[ACSMessageReady].ScheduledCount != 2 ||
+		beforeSeal.Messages[ACSMessageReady].TerminalCount != 0 {
+		t.Fatalf("scheduled trace = %+v", beforeSeal)
+	}
+
+	slot.SealACSOutbound()
+	sealed := slot.Trace()
+	if !sealed.Transport.Sealed || sealed.Transport.Finalized ||
+		sealed.Messages[ACSMessageReady].PendingAtDecision != 2 {
+		t.Fatalf("sealed trace = %+v", sealed)
+	}
+
+	success.Complete(ACSSendObservation{
 		Size: 512, Total: 9 * time.Millisecond,
 		Encode: time.Millisecond, QueueWait: 2 * time.Millisecond,
 		Write: 6 * time.Millisecond, Reused: true,
 	})
-	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
-		Size: 256, Total: 15 * time.Millisecond,
-		Encode: 2 * time.Millisecond, StreamOpen: 4 * time.Millisecond,
-		Write: 7 * time.Millisecond, Finalize: 2 * time.Millisecond,
-	})
-	slot.RecordACSOutbound(ACSMessageReady, ACSSendObservation{
-		Total: 5 * time.Millisecond, StreamOpen: 5 * time.Millisecond,
-		Err: errors.New("open failed"),
-	})
+	// A copied caller path may invoke Complete twice; the token must count once.
+	success.Complete(ACSSendObservation{Err: errors.New("duplicate completion")})
+	failure.Complete(ACSSendObservation{Err: errors.New("open failed")})
 
-	trace := slot.Trace()
-	if trace.SchemaVersion != ACSTraceSchemaV2 || ACSTraceSchemaVersion != ACSTraceSchemaV2 {
-		t.Fatalf("trace schema = %q, current = %q", trace.SchemaVersion, ACSTraceSchemaVersion)
+	final := slot.Trace()
+	got := final.Messages[ACSMessageReady]
+	if !final.Transport.Finalized || !slot.TraceFinalized() {
+		t.Fatalf("trace did not finalize: %+v", final.Transport)
 	}
-	got := trace.Messages[ACSMessageReady]
-	if got.OutboundCount != 2 || got.OutboundBytes != 768 || got.SendCount != 2 || got.SendFailureCount != 1 {
-		t.Fatalf("send accounting = %+v", got)
+	if got.ScheduledCount != 2 || got.TerminalCount != 2 ||
+		got.OutboundCount != 1 || got.SendCount != 1 || got.SendFailureCount != 1 ||
+		got.PendingAtDecision != 2 {
+		t.Fatalf("terminal accounting = %+v", got)
 	}
-	if got.SendTotalUS != 24000 || got.SendMaxUS != 15000 {
-		t.Fatalf("send duration accounting = %+v", got)
-	}
-	assertSendPhase(t, "encode", got.Encode, 2, 3000, 2000)
-	assertSendPhase(t, "queue wait", got.QueueWait, 2, 2000, 2000)
-	assertSendPhase(t, "stream open", got.StreamOpen, 2, 4000, 4000)
-	assertSendPhase(t, "write", got.Write, 2, 13000, 7000)
-	assertSendPhase(t, "finalize", got.Finalize, 2, 2000, 2000)
-	if got.StreamOpenCount != 1 || got.StreamReuseCount != 1 {
+	assertSendPhase(t, "encode", got.Encode, 1, 1000, 1000)
+	assertSendPhase(t, "queue wait", got.QueueWait, 1, 2000, 2000)
+	assertSendPhase(t, "write", got.Write, 1, 6000, 6000)
+	if got.StreamOpenCount != 0 || got.StreamReuseCount != 1 {
 		t.Fatalf("stream reuse accounting = %+v", got)
+	}
+
+	late := slot.BeginACSOutbound(ACSMessageReady)
+	late.Complete(ACSSendObservation{Size: 9})
+	if after := slot.Trace().Messages[ACSMessageReady]; after != got {
+		t.Fatalf("post-seal send changed trace: before=%+v after=%+v", got, after)
+	}
+}
+
+func TestDisabledACSOutboundTraceIsAlreadyFinal(t *testing.T) {
+	slot := NewSlotACS(SlotConfig{Config: Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)}, Slot: 1})
+	t.Cleanup(slot.Close)
+	token := slot.BeginACSOutbound(ACSMessageReady)
+	token.Complete(ACSSendObservation{Err: errors.New("ignored")})
+	slot.SealACSOutbound()
+	if !slot.TraceFinalized() || slot.Trace().Enabled {
+		t.Fatalf("disabled trace finalization = %+v", slot.Trace())
+	}
+}
+
+func TestACSOutboundLifecycleIncludesSendBeforeProposalOrigin(t *testing.T) {
+	slot := NewSlotACS(SlotConfig{
+		Config: Config{N: 4, F: 1, ID: 0, Nodes: makeids(4)}, Slot: 1,
+		Trace: TraceOptions{Enabled: true},
+	})
+	t.Cleanup(slot.Close)
+	token := slot.BeginACSOutbound(ACSMessageEcho)
+	token.Complete(ACSSendObservation{Size: 32, Total: time.Millisecond})
+	slot.BeginTrace(time.Now())
+	slot.SealACSOutbound()
+	got := slot.Trace()
+	message := got.Messages[ACSMessageEcho]
+	if message.ScheduledCount != 1 || message.TerminalCount != 1 ||
+		message.OutboundCount != 1 || !got.Transport.Finalized {
+		t.Fatalf("pre-origin outbound accounting = %+v", got)
 	}
 }
 

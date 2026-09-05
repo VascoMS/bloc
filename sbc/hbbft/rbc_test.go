@@ -56,6 +56,93 @@ func TestRBCTraceRecordsThresholdAndReconstructionMilestones(t *testing.T) {
 	require.Equal(t, value, rbc.Output())
 }
 
+func readyRelayFixture(t *testing.T) (*RBC, []byte, []*ProofRequest) {
+	t.Helper()
+	rbc := NewRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0)
+	value := []byte("traceable-rbc-payload!")
+	shards, err := makeShards(rbc.enc, value)
+	require.NoError(t, err)
+	proofs, err := makeProofRequests(shards)
+	require.NoError(t, err)
+	return rbc, value, proofs
+}
+
+func handleRBCEcho(t *testing.T, rbc *RBC, senderID uint64, proof *ProofRequest) {
+	t.Helper()
+	require.NoError(t, rbc.HandleMessage(senderID, &BroadcastMessage{
+		Payload: &EchoRequest{ProofRequest: *proof},
+	}))
+}
+
+func handleRBCReady(t *testing.T, rbc *RBC, senderID uint64, root []byte) {
+	t.Helper()
+	require.NoError(t, rbc.HandleMessage(senderID, &BroadcastMessage{
+		Payload: &ReadyRequest{RootHash: root},
+	}))
+}
+
+func TestRBCReadyRelayAdmitsLocalReady(t *testing.T) {
+	rbc, value, proofs := readyRelayFixture(t)
+	t.Cleanup(rbc.stop)
+	root := proofs[0].RootHash
+
+	// Two distinct ECHOs provide the N-2F shards needed for reconstruction,
+	// but remain below the N-F ECHO threshold that directly emits READY.
+	handleRBCEcho(t, rbc, 1, proofs[1])
+	handleRBCEcho(t, rbc, 2, proofs[2])
+	require.Empty(t, rbc.Messages())
+
+	handleRBCReady(t, rbc, 1, root)
+	handleRBCReady(t, rbc, 2, root)
+
+	assert.Equal(t, 3, rbc.countReadys(root))
+	assert.Equal(t, root, rbc.recvReadys[rbc.ID])
+	require.Equal(t, value, rbc.Output())
+
+	messages := rbc.Messages()
+	require.Len(t, messages, 1)
+	ready, ok := messages[0].Payload.(*ReadyRequest)
+	require.True(t, ok)
+	assert.Equal(t, root, ready.RootHash)
+}
+
+func TestRBCReadyRelayStillWaitsForEnoughMatchingEchos(t *testing.T) {
+	rbc, value, proofs := readyRelayFixture(t)
+	t.Cleanup(rbc.stop)
+	root := proofs[0].RootHash
+
+	handleRBCEcho(t, rbc, 1, proofs[1])
+	handleRBCReady(t, rbc, 1, root)
+	handleRBCReady(t, rbc, 2, root)
+
+	assert.Equal(t, 3, rbc.countReadys(root))
+	assert.Nil(t, rbc.Output())
+	require.Len(t, rbc.Messages(), 1)
+
+	// Reconstruction becomes eligible when a second matching shard arrives.
+	handleRBCEcho(t, rbc, 2, proofs[2])
+	require.Equal(t, value, rbc.Output())
+	assert.Empty(t, rbc.Messages())
+}
+
+func TestRBCReadyEmissionRemainsExactlyOnceAfterEchoQuorum(t *testing.T) {
+	rbc, _, proofs := readyRelayFixture(t)
+	t.Cleanup(rbc.stop)
+	root := proofs[0].RootHash
+
+	handleRBCReady(t, rbc, 1, root)
+	handleRBCReady(t, rbc, 2, root)
+	require.Len(t, rbc.Messages(), 1)
+
+	handleRBCEcho(t, rbc, 1, proofs[1])
+	handleRBCEcho(t, rbc, 2, proofs[2])
+	handleRBCEcho(t, rbc, 3, proofs[3])
+
+	assert.Empty(t, rbc.Messages())
+	assert.Equal(t, root, rbc.recvReadys[rbc.ID])
+	assert.Equal(t, 3, rbc.countReadys(root))
+}
+
 // Test RBC where 1 node will not provide its value. We use 4 nodes that will
 // tolerate 1 faulty node. The 3 good nodes should be able te reconstruct the
 // proposed value just fine.

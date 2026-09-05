@@ -292,11 +292,7 @@ func (r *RBC) handleEchoRequest(senderID uint64, req *EchoRequest) error {
 		return r.tryDecodeValue(req.RootHash)
 	}
 
-	r.readySent = true
-	r.trace.recordRBC(r.proposerID, traceRBCReadySent)
-	ready := &ReadyRequest{req.RootHash}
-	r.messages = append(r.messages, &BroadcastMessage{ready})
-	return r.handleReadyRequest(r.ID, ready)
+	return r.emitReady(req.RootHash)
 }
 
 // If a node had received (2 * f + 1) ready's (with matching root hash)
@@ -312,12 +308,28 @@ func (r *RBC) handleReadyRequest(senderID uint64, req *ReadyRequest) error {
 	r.recvReadys[senderID] = req.RootHash
 
 	if r.countReadys(req.RootHash) == r.F+1 && !r.readySent {
-		r.readySent = true
-		r.trace.recordRBC(r.proposerID, traceRBCReadySent)
-		ready := &ReadyRequest{req.RootHash}
-		r.messages = append(r.messages, &BroadcastMessage{ready})
+		return r.emitReady(req.RootHash)
 	}
 	return r.tryDecodeValue(req.RootHash)
+}
+
+func (r *RBC) emitReady(root []byte) error {
+	if r.readySent {
+		return r.tryDecodeValue(root)
+	}
+	if existingRoot, exists := r.recvReadys[r.ID]; exists {
+		if !bytes.Equal(existingRoot, root) {
+			return fmt.Errorf("local ready already admitted for node %d", r.ID)
+		}
+	} else {
+		r.recvReadys[r.ID] = root
+	}
+	r.readySent = true
+	r.trace.recordRBC(r.proposerID, traceRBCReadySent)
+	r.messages = append(r.messages, &BroadcastMessage{
+		Payload: &ReadyRequest{RootHash: root},
+	})
+	return r.tryDecodeValue(root)
 }
 
 // tryDecodeValue will check whether the Value (V) can be decoded from the received

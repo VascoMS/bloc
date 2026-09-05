@@ -575,6 +575,24 @@ func TestValidateACSTraceArtifactAcceptsPreOriginV3READYTrigger(t *testing.T) {
 	}
 }
 
+func TestValidateACSTraceArtifactRejectsN4EchoTriggerAboveExactThreshold(t *testing.T) {
+	manifest, runs, _ := validFourNodeACSTraceArtifactFixture()
+	ready := runs[0].Results[0].ACSTrace.RBC[0]
+	ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+	ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+	ready.ReadyTriggerEchoCount = 4
+	runs[0].Results[0].ACSTrace.RBC[0] = ready
+
+	records := make([]acsTraceArtifactRecord, len(runs[0].Results))
+	for index, result := range runs[0].Results {
+		records[index] = newACSTraceArtifactRecord(runs[0], result)
+	}
+	err := validateACSTraceArtifact(manifest, runs, writeACSTraceRecords(t, records))
+	if err == nil || !strings.Contains(err.Error(), "READY trigger threshold") {
+		t.Fatalf("validate error = %v, want exact N=4 ECHO threshold failure", err)
+	}
+}
+
 func readACSTraceArtifact(path string) ([]acsTraceArtifactRecord, error) {
 	handle, err := os.Open(path)
 	if err != nil {
@@ -624,6 +642,28 @@ func validACSTraceArtifactFixture() (suiteManifest, []EvalRun, []acsTraceArtifac
 	records := []acsTraceArtifactRecord{
 		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
 		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+	return suiteManifest{ACSTraceSchema: hbbft.ACSTraceSchemaVersion, StreamMode: streamModeFresh}, runs, records
+}
+
+func validFourNodeACSTraceArtifactFixture() (suiteManifest, []EvalRun, []acsTraceArtifactRecord) {
+	results := make([]Result, 4)
+	for nodeID := range results {
+		receiptUS := int64((nodeID + 1) * 10)
+		trace := artifactTestTrace(receiptUS)
+		for proposerID := uint64(2); proposerID < 4; proposerID++ {
+			trace.RBC[proposerID] = hbbft.RBCTrace{ProofAccepted: hbbft.TracePoint{Recorded: true, OffsetUS: 1}}
+			trace.BBA[proposerID] = hbbft.BBATrace{Input: hbbft.TracePoint{Recorded: true, OffsetUS: 2}}
+		}
+		results[nodeID] = Result{NodeID: uint64(nodeID), Metrics: Metrics{ACSUS: receiptUS}, ACSTrace: trace}
+	}
+	runs := []EvalRun{{
+		RunID: "run-n4", MeasurementBlock: 3, Slot: 9, Nodes: 4, StreamMode: streamModeFresh,
+		Results: results,
+	}}
+	records := make([]acsTraceArtifactRecord, len(results))
+	for index, result := range results {
+		records[index] = newACSTraceArtifactRecord(runs[0], result)
 	}
 	return suiteManifest{ACSTraceSchema: hbbft.ACSTraceSchemaVersion, StreamMode: streamModeFresh}, runs, records
 }

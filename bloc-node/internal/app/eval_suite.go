@@ -750,7 +750,7 @@ func percentileType7(sorted []float64, p float64) float64 {
 
 func writeNodeMeasurements(path string, runs []EvalRun) error {
 	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "stream_mode", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized",
-		"acs_trace_schema", "acs_input_started_us", "acs_first_rbc_output_us", "acs_rbc_output_quorum_us", "acs_first_true_bba_us", "acs_true_bba_quorum_us", "acs_false_input_injected_us", "acs_all_bba_decided_us", "acs_truthy_rbc_ready_us", "acs_core_decision_us", "acs_common_subset_decoded_us", "acs_block_body_built_us", "acs_node_output_received_us", "acs_wait_true_bba_quorum_us", "acs_wait_all_bba_us", "acs_wait_truthy_rbc_us", "acs_inbound_messages", "acs_inbound_bytes", "acs_outbound_messages", "acs_outbound_bytes", "acs_send_count", "acs_send_total_us", "acs_send_max_us", "acs_send_failures", "acs_encode_total_us", "acs_encode_max_us", "acs_queue_wait_total_us", "acs_queue_wait_max_us", "acs_stream_open_total_us", "acs_stream_open_max_us", "acs_write_total_us", "acs_write_max_us", "acs_finalize_total_us", "acs_finalize_max_us", "acs_stream_open_count", "acs_stream_reuse_count", "acs_max_bba_epoch"}
+		"acs_trace_schema", "acs_trace_sealed", "acs_trace_finalized", "acs_scheduled_sends", "acs_terminal_sends", "acs_pending_at_decision", "acs_input_started_us", "acs_first_rbc_output_us", "acs_rbc_output_quorum_us", "acs_first_true_bba_us", "acs_true_bba_quorum_us", "acs_false_input_injected_us", "acs_all_bba_decided_us", "acs_truthy_rbc_ready_us", "acs_core_decision_us", "acs_common_subset_decoded_us", "acs_block_body_built_us", "acs_node_output_received_us", "acs_wait_true_bba_quorum_us", "acs_wait_all_bba_us", "acs_wait_truthy_rbc_us", "acs_inbound_messages", "acs_inbound_bytes", "acs_outbound_messages", "acs_outbound_bytes", "acs_send_count", "acs_send_total_us", "acs_send_max_us", "acs_send_failures", "acs_encode_total_us", "acs_encode_max_us", "acs_queue_wait_total_us", "acs_queue_wait_max_us", "acs_stream_open_total_us", "acs_stream_open_max_us", "acs_write_total_us", "acs_write_max_us", "acs_finalize_total_us", "acs_finalize_max_us", "acs_stream_open_count", "acs_stream_reuse_count", "acs_max_bba_epoch"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			for _, result := range run.Results {
@@ -767,16 +767,20 @@ func writeNodeMeasurements(path string, runs []EvalRun) error {
 }
 
 func acsTraceSummaryValues(trace hbbft.ACSTrace) []string {
-	const columnCount = 37
+	const columnCount = 42
 	if !trace.Enabled {
 		return make([]string, columnCount)
 	}
 	var inboundCount, inboundBytes, outboundCount, outboundBytes uint64
+	var scheduledCount, terminalCount, pendingAtDecision uint64
 	var sendCount, sendFailures uint64
 	var sendTotalUS, sendMaxUS int64
 	var encode, queueWait, streamOpen, write, finalize hbbft.ACSSendPhaseTrace
 	var streamOpenCount, streamReuseCount uint64
 	for _, message := range trace.Messages {
+		scheduledCount += message.ScheduledCount
+		terminalCount += message.TerminalCount
+		pendingAtDecision += message.PendingAtDecision
 		inboundCount += message.InboundCount
 		inboundBytes += message.InboundBytes
 		outboundCount += message.OutboundCount
@@ -803,6 +807,11 @@ func acsTraceSummaryValues(trace hbbft.ACSTrace) []string {
 	}
 	return []string{
 		trace.SchemaVersion,
+		strconv.FormatBool(trace.Transport.Sealed),
+		strconv.FormatBool(trace.Transport.Finalized),
+		strconv.FormatUint(scheduledCount, 10),
+		strconv.FormatUint(terminalCount, 10),
+		strconv.FormatUint(pendingAtDecision, 10),
 		tracePointCSV(trace.Aggregate.InputStarted),
 		tracePointCSV(trace.Aggregate.FirstRBCOutput),
 		tracePointCSV(trace.Aggregate.RBCOutputQuorum),

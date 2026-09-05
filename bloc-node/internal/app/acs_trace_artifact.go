@@ -61,6 +61,7 @@ type acsTraceArtifactRecord struct {
 	Key           acsTraceArtifactKey     `json:"key"`
 	SchemaVersion string                  `json:"schema_version,omitempty"`
 	Enabled       bool                    `json:"enabled"`
+	Transport     hbbft.ACSTransportTrace `json:"transport"`
 	Aggregate     hbbft.ACSAggregateTrace `json:"aggregate"`
 	Wait          hbbft.ACSWaitTrace      `json:"wait_us"`
 	Adapter       hbbft.ACSAdapterTrace   `json:"adapter"`
@@ -94,8 +95,8 @@ func acsTraceSchemaForRuns(runs []EvalRun) (string, error) {
 			}
 		}
 	}
-	if schema != "" && schema != hbbft.ACSTraceSchemaV2 {
-		return "", fmt.Errorf("new evaluator runs require ACS trace schema %q, got %q", hbbft.ACSTraceSchemaV2, schema)
+	if schema != "" && schema != hbbft.ACSTraceSchemaVersion {
+		return "", fmt.Errorf("new evaluator runs require ACS trace schema %q, got %q", hbbft.ACSTraceSchemaVersion, schema)
 	}
 	return schema, nil
 }
@@ -221,6 +222,10 @@ func validateACSTraceArtifact(manifest suiteManifest, runs []EvalRun, path strin
 }
 
 func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]struct{}, expected expectedACSTraceArtifact) error {
+	if record.SchemaVersion == hbbft.ACSTraceSchemaV3 &&
+		(!record.Transport.Sealed || !record.Transport.Finalized) {
+		return fmt.Errorf("transport trace is not sealed and finalized")
+	}
 	points := []struct {
 		name  string
 		point hbbft.TracePoint
@@ -289,7 +294,7 @@ func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]st
 		return fmt.Errorf("negative ACS wait duration: %+v", record.Wait)
 	}
 
-	if err := validateRBCRecords(record.RBC, members); err != nil {
+	if err := validateRBCRecords(record.RBC, members, record.SchemaVersion); err != nil {
 		return err
 	}
 	for _, rbc := range record.RBC {
@@ -316,6 +321,7 @@ func validateACSTraceRecord(record acsTraceArtifactRecord, members map[uint64]st
 		return fmt.Errorf("aggregate/detail message mismatch")
 	}
 	if !reflect.DeepEqual(record.Aggregate, expected.record.Aggregate) ||
+		!reflect.DeepEqual(record.Transport, expected.record.Transport) ||
 		!reflect.DeepEqual(record.Wait, expected.record.Wait) ||
 		!reflect.DeepEqual(record.Adapter, expected.record.Adapter) ||
 		!reflect.DeepEqual(record.RBC, expected.record.RBC) ||
@@ -339,7 +345,7 @@ func requireTracePointOrder(leftName string, left hbbft.TracePoint, rightName st
 	return nil
 }
 
-func validateRBCRecords(records []acsRBCTraceRecord, members map[uint64]struct{}) error {
+func validateRBCRecords(records []acsRBCTraceRecord, members map[uint64]struct{}, schema string) error {
 	seen := make(map[uint64]struct{}, len(records))
 	for _, record := range records {
 		if _, known := members[record.ProposerID]; !known {
@@ -351,6 +357,11 @@ func validateRBCRecords(records []acsRBCTraceRecord, members map[uint64]struct{}
 		seen[record.ProposerID] = struct{}{}
 		if err := validateTracePoints("RBC", []hbbft.TracePoint{record.Trace.ProofAccepted, record.Trace.EchoSent, record.Trace.ReadySent, record.Trace.DecodeEligible, record.Trace.ReconstructionStarted, record.Trace.ReconstructionFinished, record.Trace.OutputStored}); err != nil {
 			return err
+		}
+		if schema == hbbft.ACSTraceSchemaV3 {
+			if err := validateV3RBCReadyTrigger(record.Trace, len(members)); err != nil {
+				return fmt.Errorf("RBC proposer %d: %w", record.ProposerID, err)
+			}
 		}
 		for _, pair := range [][2]hbbft.TracePoint{
 			{record.Trace.ProofAccepted, record.Trace.EchoSent},
@@ -365,6 +376,33 @@ func validateRBCRecords(records []acsRBCTraceRecord, members map[uint64]struct{}
 	}
 	if len(seen) != len(members) {
 		return fmt.Errorf("missing RBC proposer trace: got %d, want %d", len(seen), len(members))
+	}
+	return nil
+}
+
+func validateV3RBCReadyTrigger(trace hbbft.RBCTrace, members int) error {
+	if trace.ReadyTrigger == "" {
+		if !trace.ReadySent.Recorded && trace.ReadyTriggerEchoCount == 0 && trace.ReadyTriggerReadyCount == 0 {
+			return nil
+		}
+		return fmt.Errorf("missing READY trigger")
+	}
+	if trace.ReadyTrigger != hbbft.RBCReadyTriggerEchoQuorum && trace.ReadyTrigger != hbbft.RBCReadyTriggerRelay {
+		return fmt.Errorf("invalid READY trigger %q", trace.ReadyTrigger)
+	}
+	if trace.ReadyTriggerEchoCount < 0 || trace.ReadyTriggerReadyCount < 0 {
+		return fmt.Errorf("invalid READY trigger counts echo=%d ready=%d", trace.ReadyTriggerEchoCount, trace.ReadyTriggerReadyCount)
+	}
+	faults := (members - 1) / 3
+	switch trace.ReadyTrigger {
+	case hbbft.RBCReadyTriggerEchoQuorum:
+		if trace.ReadyTriggerEchoCount != members-faults {
+			return fmt.Errorf("READY trigger threshold for echo_quorum is %d, got %d", members-faults, trace.ReadyTriggerEchoCount)
+		}
+	case hbbft.RBCReadyTriggerRelay:
+		if trace.ReadyTriggerReadyCount != faults+1 {
+			return fmt.Errorf("READY trigger threshold for ready_relay is %d, got %d", faults+1, trace.ReadyTriggerReadyCount)
+		}
 	}
 	return nil
 }
@@ -421,8 +459,13 @@ func validateMessageRecords(records []acsMessageTraceRecord, schema string) (map
 		if record.Trace.SendTotalUS < 0 || record.Trace.SendMaxUS < 0 {
 			return nil, fmt.Errorf("negative send duration for ACS message subtype %q", record.Subtype)
 		}
-		if schema == hbbft.ACSTraceSchemaV2 {
+		if schema == hbbft.ACSTraceSchemaV2 || schema == hbbft.ACSTraceSchemaV3 {
 			if err := validateV2MessagePhases(record.Subtype, record.Trace); err != nil {
+				return nil, err
+			}
+		}
+		if schema == hbbft.ACSTraceSchemaV3 {
+			if err := validateV3MessageLifecycle(record.Subtype, record.Trace); err != nil {
 				return nil, err
 			}
 		}
@@ -434,6 +477,19 @@ func validateMessageRecords(records []acsMessageTraceRecord, schema string) (map
 		}
 	}
 	return seen, nil
+}
+
+func validateV3MessageLifecycle(subtype hbbft.ACSMessageSubtype, trace hbbft.ACSMessageTrace) error {
+	if trace.ScheduledCount != trace.TerminalCount {
+		return fmt.Errorf("ACS message subtype %q scheduled count %d does not match terminal count %d", subtype, trace.ScheduledCount, trace.TerminalCount)
+	}
+	if trace.TerminalCount != trace.OutboundCount+trace.SendFailureCount {
+		return fmt.Errorf("ACS message subtype %q terminal count %d does not match successful plus failed outcomes %d", subtype, trace.TerminalCount, trace.OutboundCount+trace.SendFailureCount)
+	}
+	if trace.SendCount != trace.OutboundCount || trace.PendingAtDecision > trace.ScheduledCount {
+		return fmt.Errorf("ACS message subtype %q has inconsistent successful or pending counts", subtype)
+	}
+	return nil
 }
 
 func validateV2MessagePhases(subtype hbbft.ACSMessageSubtype, trace hbbft.ACSMessageTrace) error {
@@ -455,7 +511,7 @@ func validateV2MessagePhases(subtype hbbft.ACSMessageSubtype, trace hbbft.ACSMes
 }
 
 func supportedACSTraceSchema(schema string) bool {
-	return schema == hbbft.ACSTraceSchemaV1 || schema == hbbft.ACSTraceSchemaV2
+	return schema == hbbft.ACSTraceSchemaV1 || schema == hbbft.ACSTraceSchemaV2 || schema == hbbft.ACSTraceSchemaV3
 }
 
 func acsTraceKeyLess(left, right acsTraceArtifactKey) bool {
@@ -482,6 +538,7 @@ func newACSTraceArtifactRecord(run EvalRun, result Result) acsTraceArtifactRecor
 		},
 		SchemaVersion: trace.SchemaVersion,
 		Enabled:       trace.Enabled,
+		Transport:     trace.Transport,
 		Aggregate:     trace.Aggregate,
 		Wait:          trace.Wait,
 		Adapter:       trace.Adapter,

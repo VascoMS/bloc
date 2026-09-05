@@ -252,6 +252,7 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 	trace := hbbft.ACSTrace{
 		SchemaVersion: hbbft.ACSTraceSchemaVersion,
 		Enabled:       true,
+		Transport:     hbbft.ACSTransportTrace{Sealed: true, Finalized: true},
 		Aggregate: hbbft.ACSAggregateTrace{
 			InputStarted:       hbbft.TracePoint{Recorded: true, OffsetUS: 0},
 			FirstRBCOutput:     hbbft.TracePoint{Recorded: true, OffsetUS: 10},
@@ -275,16 +276,18 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		},
 		Messages: map[hbbft.ACSMessageSubtype]hbbft.ACSMessageTrace{
 			hbbft.ACSMessageProof: {
-				InboundCount: 2, InboundBytes: 20, OutboundCount: 3, OutboundBytes: 30, SendCount: 4, SendTotalUS: 40, SendMaxUS: 25, SendFailureCount: 1,
-				Encode: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 40, MaxUS: 25}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 8, MaxUS: 5},
-				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 12, MaxUS: 6}, Write: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 16, MaxUS: 9},
-				Finalize: hbbft.ACSSendPhaseTrace{Count: 4, TotalUS: 20, MaxUS: 11}, StreamOpenCount: 4,
+				ScheduledCount: 4, TerminalCount: 4, PendingAtDecision: 1,
+				InboundCount: 2, InboundBytes: 20, OutboundCount: 3, OutboundBytes: 30, SendCount: 3, SendTotalUS: 40, SendMaxUS: 25, SendFailureCount: 1,
+				Encode: hbbft.ACSSendPhaseTrace{Count: 3, TotalUS: 40, MaxUS: 25}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 3, TotalUS: 8, MaxUS: 5},
+				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 3, TotalUS: 12, MaxUS: 6}, Write: hbbft.ACSSendPhaseTrace{Count: 3, TotalUS: 16, MaxUS: 9},
+				Finalize: hbbft.ACSSendPhaseTrace{Count: 3, TotalUS: 20, MaxUS: 11}, StreamOpenCount: 3,
 			},
 			hbbft.ACSMessageEcho: {
-				InboundCount: 5, InboundBytes: 50, OutboundCount: 6, OutboundBytes: 60, SendCount: 7, SendTotalUS: 70, SendMaxUS: 35, SendFailureCount: 2,
-				Encode: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 70, MaxUS: 35}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 14, MaxUS: 7},
-				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 21, MaxUS: 10}, Write: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 28, MaxUS: 12},
-				Finalize: hbbft.ACSSendPhaseTrace{Count: 7, TotalUS: 35, MaxUS: 15}, StreamOpenCount: 1, StreamReuseCount: 6,
+				ScheduledCount: 8, TerminalCount: 8, PendingAtDecision: 2,
+				InboundCount: 5, InboundBytes: 50, OutboundCount: 6, OutboundBytes: 60, SendCount: 6, SendTotalUS: 70, SendMaxUS: 35, SendFailureCount: 2,
+				Encode: hbbft.ACSSendPhaseTrace{Count: 6, TotalUS: 70, MaxUS: 35}, QueueWait: hbbft.ACSSendPhaseTrace{Count: 6, TotalUS: 14, MaxUS: 7},
+				StreamOpen: hbbft.ACSSendPhaseTrace{Count: 6, TotalUS: 21, MaxUS: 10}, Write: hbbft.ACSSendPhaseTrace{Count: 6, TotalUS: 28, MaxUS: 12},
+				Finalize: hbbft.ACSSendPhaseTrace{Count: 6, TotalUS: 35, MaxUS: 15}, StreamOpenCount: 1, StreamReuseCount: 5,
 			},
 		},
 	}
@@ -307,6 +310,11 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 	want := map[string]string{
 		"stream_mode":                  streamModePersistent,
 		"acs_trace_schema":             hbbft.ACSTraceSchemaVersion,
+		"acs_trace_sealed":             "true",
+		"acs_trace_finalized":          "true",
+		"acs_scheduled_sends":          "12",
+		"acs_terminal_sends":           "12",
+		"acs_pending_at_decision":      "3",
 		"acs_input_started_us":         "0",
 		"acs_first_rbc_output_us":      "10",
 		"acs_rbc_output_quorum_us":     "20",
@@ -326,7 +334,7 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		"acs_inbound_bytes":            "70",
 		"acs_outbound_messages":        "9",
 		"acs_outbound_bytes":           "90",
-		"acs_send_count":               "11",
+		"acs_send_count":               "9",
 		"acs_send_total_us":            "110",
 		"acs_send_max_us":              "35",
 		"acs_send_failures":            "3",
@@ -340,8 +348,8 @@ func TestNodeMeasurementsIncludeACSTraceSummary(t *testing.T) {
 		"acs_write_max_us":             "12",
 		"acs_finalize_total_us":        "55",
 		"acs_finalize_max_us":          "15",
-		"acs_stream_open_count":        "5",
-		"acs_stream_reuse_count":       "6",
+		"acs_stream_open_count":        "4",
+		"acs_stream_reuse_count":       "5",
 		"acs_max_bba_epoch":            "7",
 	}
 	for name, expected := range want {

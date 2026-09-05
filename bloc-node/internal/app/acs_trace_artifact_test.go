@@ -102,6 +102,50 @@ func TestValidateACSTraceArtifactAcceptsHistoricalV1(t *testing.T) {
 	}
 }
 
+func TestValidateACSTraceArtifactAcceptsHistoricalV2WithoutV3Lifecycle(t *testing.T) {
+	manifest, runs, _ := validACSTraceArtifactFixture()
+	manifest.ACSTraceSchema = hbbft.ACSTraceSchemaV2
+	for runIndex := range runs {
+		for resultIndex := range runs[runIndex].Results {
+			trace := runs[runIndex].Results[resultIndex].ACSTrace
+			trace.SchemaVersion = hbbft.ACSTraceSchemaV2
+			trace.Transport = hbbft.ACSTransportTrace{}
+			proof := trace.Messages[hbbft.ACSMessageProof]
+			proof.OutboundCount = 1
+			proof.SendCount = 1
+			proof.SendTotalUS = 10
+			proof.SendMaxUS = 10
+			proof.Encode = hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 1, MaxUS: 1}
+			proof.QueueWait = hbbft.ACSSendPhaseTrace{Count: 1}
+			proof.StreamOpen = hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 2, MaxUS: 2}
+			proof.Write = hbbft.ACSSendPhaseTrace{Count: 1, TotalUS: 7, MaxUS: 7}
+			proof.Finalize = hbbft.ACSSendPhaseTrace{Count: 1}
+			proof.StreamOpenCount = 1
+			trace.Messages[hbbft.ACSMessageProof] = proof
+			runs[runIndex].Results[resultIndex].ACSTrace = trace
+		}
+	}
+	records := []acsTraceArtifactRecord{
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+
+	if err := validateACSTraceArtifact(manifest, runs, writeACSTraceRecords(t, records)); err != nil {
+		t.Fatalf("historical v2 artifact without v3 lifecycle rejected: %v", err)
+	}
+}
+
+func TestACSTraceSchemaForRunsRequiresV3ForNewRuns(t *testing.T) {
+	_, runs, _ := validACSTraceArtifactFixture()
+	schema, err := acsTraceSchemaForRuns(runs)
+	if err != nil {
+		t.Fatalf("v3 evaluator runs rejected: %v", err)
+	}
+	if schema != hbbft.ACSTraceSchemaV3 {
+		t.Fatalf("new-run schema = %q, want %q", schema, hbbft.ACSTraceSchemaV3)
+	}
+}
+
 func TestValidateACSTraceArtifactRejectsV2PhaseCountMismatch(t *testing.T) {
 	manifest, runs, records := validACSTraceArtifactFixture()
 	message := hbbft.ACSMessageTrace{
@@ -314,6 +358,85 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 				runs[0].Results[0].Metrics.ACSUS = 100_000
 			},
 		},
+		{
+			name: "v3 trace not finalized", want: "transport trace is not sealed and finalized",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				runs[0].Results[0].ACSTrace.Transport.Finalized = false
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "scheduled terminal mismatch", want: "scheduled count",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				message := runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady]
+				message.ScheduledCount++
+				runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady] = message
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "terminal outcome mismatch", want: "terminal count",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				message := runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady]
+				message.TerminalCount++
+				runs[0].Results[0].ACSTrace.Messages[hbbft.ACSMessageReady] = message
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "missing READY trigger", want: "missing READY trigger",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = ""
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "echo READY trigger below threshold", want: "READY trigger threshold",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+				ready.ReadyTriggerEchoCount = 1
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "echo READY trigger above threshold", want: "READY trigger threshold",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+				ready.ReadyTriggerEchoCount = 3
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "relay READY trigger below threshold", want: "READY trigger threshold",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+				ready.ReadyTriggerReadyCount = 0
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
+		{
+			name: "relay READY trigger above threshold", want: "READY trigger threshold",
+			mutate: func(_ *suiteManifest, runs []EvalRun, records *[]acsTraceArtifactRecord) {
+				ready := runs[0].Results[0].ACSTrace.RBC[0]
+				ready.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+				ready.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+				ready.ReadyTriggerReadyCount = 2
+				runs[0].Results[0].ACSTrace.RBC[0] = ready
+				(*records)[0] = newACSTraceArtifactRecord(runs[0], runs[0].Results[0])
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -326,6 +449,29 @@ func TestValidateACSTraceArtifactFailsClosed(t *testing.T) {
 				t.Fatalf("validate error = %v, want category %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateACSTraceArtifactAcceptsExactV3READYTriggers(t *testing.T) {
+	manifest, runs, _ := validACSTraceArtifactFixture()
+	echo := runs[0].Results[0].ACSTrace.RBC[0]
+	echo.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+	echo.ReadyTrigger = hbbft.RBCReadyTriggerEchoQuorum
+	echo.ReadyTriggerEchoCount = 2
+	runs[0].Results[0].ACSTrace.RBC[0] = echo
+
+	relay := runs[0].Results[1].ACSTrace.RBC[1]
+	relay.ReadySent = hbbft.TracePoint{Recorded: true, OffsetUS: 1}
+	relay.ReadyTrigger = hbbft.RBCReadyTriggerRelay
+	relay.ReadyTriggerReadyCount = 1
+	runs[0].Results[1].ACSTrace.RBC[1] = relay
+
+	records := []acsTraceArtifactRecord{
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[0]),
+		newACSTraceArtifactRecord(runs[0], runs[0].Results[1]),
+	}
+	if err := validateACSTraceArtifact(manifest, runs, writeACSTraceRecords(t, records)); err != nil {
+		t.Fatalf("exact v3 READY triggers rejected: %v", err)
 	}
 }
 
@@ -397,6 +543,7 @@ func artifactTestTrace(nodeReceiptUS int64) hbbft.ACSTrace {
 	trace := hbbft.ACSTrace{
 		SchemaVersion: hbbft.ACSTraceSchemaVersion,
 		Enabled:       true,
+		Transport:     hbbft.ACSTransportTrace{Sealed: true, Finalized: true},
 		Aggregate: hbbft.ACSAggregateTrace{
 			InputStarted:    point(0),
 			FirstRBCOutput:  point(1),

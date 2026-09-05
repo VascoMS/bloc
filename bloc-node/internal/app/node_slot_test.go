@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,6 +42,17 @@ func (t *blockingSlotTransport) Send(context.Context, uint64, WireEnvelope) (tra
 		result.EncodedBytes = 17
 	}
 	return result, t.err
+}
+
+func waitForSlotCondition(t *testing.T, timeout, interval time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition did not become true before timeout")
+		}
+		time.Sleep(interval)
+	}
 }
 
 func lifecycleTestNode(t *testing.T) *Node {
@@ -248,6 +262,22 @@ func TestResultEndpointDistinguishesPendingSuccessFailureAndWrongSlot(t *testing
 		}
 	})
 
+	t.Run("trace-enabled terminal failure does not wait for finalization", func(t *testing.T) {
+		n := lifecycleTestNode(t)
+		n.slot.Close()
+		n.cfg.Diagnostics.ACSTrace = true
+		n.slotState = n.newSlotState(1)
+		n.slot.BeginTrace(time.Now())
+		n.slot.BeginACSOutbound(hbbft.ACSMessageReady)
+		n.slot.SealACSOutbound()
+		n.markSlotFailed("planning")
+		rec := httptest.NewRecorder()
+		n.handleResult(rec, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("trace-enabled failure response = %d %s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("wrong slot", func(t *testing.T) {
 		n := lifecycleTestNode(t)
 		n.markSlotFailed("decode")
@@ -436,6 +466,7 @@ func TestACSSubtypeOutboundAccountingAndSlotIsolation(t *testing.T) {
 				}),
 			})
 			<-transport.started
+			oldSlot.SealACSOutbound()
 			n.mu.Lock()
 			n.phase = slotCompleted
 			n.mu.Unlock()
@@ -479,6 +510,141 @@ func TestACSSubtypeOutboundAccountingAndSlotIsolation(t *testing.T) {
 				t.Fatalf("old send contaminated new slot: %+v", fresh)
 			}
 		})
+	}
+}
+
+func TestTraceEnabledResultWaitsForScheduledSendFinalization(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+	transport := &blockingSlotTransport{
+		started: make(chan struct{}), release: make(chan struct{}),
+		result: transportSendResult{EncodedBytes: 29},
+	}
+	n.transport = transport
+	token := n.slot.BeginACSOutbound(hbbft.ACSMessageReady)
+	n.sendEnvelopeTracked(1, WireEnvelope{
+		Kind: "acs", Slot: 1,
+		ACS: slotACSMessage(&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{RootHash: []byte("root")}}),
+	}, token)
+	<-transport.started
+	n.slot.MarkNodeOutputReceived()
+	n.slot.SealACSOutbound()
+	n.mu.Lock()
+	n.phase = slotCompleted
+	n.result = &Result{Slot: 1, NodeID: 0, Metrics: Metrics{ACSUS: 123, TotalSlotUS: 456}}
+	n.mu.Unlock()
+
+	pending := httptest.NewRecorder()
+	n.handleResult(pending, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+	if pending.Code != http.StatusAccepted {
+		t.Fatalf("pending trace result = %d %s", pending.Code, pending.Body.String())
+	}
+	trace := n.slot.Trace()
+	if trace.Messages[hbbft.ACSMessageReady].PendingAtDecision != 1 || trace.Transport.Finalized {
+		t.Fatalf("pending decision trace = %+v", trace)
+	}
+
+	close(transport.release)
+	waitForSlotCondition(t, time.Second, time.Millisecond, n.slot.TraceFinalized)
+	completed := httptest.NewRecorder()
+	n.handleResult(completed, httptest.NewRequest(http.MethodGet, "/result?slot=1", nil))
+	if completed.Code != http.StatusOK {
+		t.Fatalf("final result = %d %s", completed.Code, completed.Body.String())
+	}
+	var result Result
+	if err := json.Unmarshal(completed.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.ACSTrace.Transport.Finalized || result.Metrics.ACSUS != 123 || result.Metrics.TotalSlotUS != 456 {
+		t.Fatalf("final result changed metrics or omitted trace: %+v", result)
+	}
+}
+
+func TestTraceEnabledResultFileWaitsForFinalization(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+	transport := &blockingSlotTransport{started: make(chan struct{}), release: make(chan struct{})}
+	n.transport = transport
+	token := n.slot.BeginACSOutbound(hbbft.ACSMessageReady)
+	n.sendEnvelopeTracked(1, WireEnvelope{Kind: "acs", Slot: 1, ACS: slotACSMessage(
+		&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{RootHash: []byte("root")}},
+	)}, token)
+	<-transport.started
+	n.slot.SealACSOutbound()
+	n.mu.Lock()
+	n.phase = slotCompleted
+	n.result = &Result{Slot: 1, NodeID: 0}
+	n.mu.Unlock()
+
+	path := filepath.Join(t.TempDir(), "result.json")
+	go n.writeResultWhenReady(path)
+	time.Sleep(250 * time.Millisecond)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("result file published before trace completion: %v", err)
+	}
+	close(transport.release)
+	waitForSlotCondition(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		var result Result
+		return json.Unmarshal(data, &result) == nil && result.ACSTrace.Transport.Finalized
+	})
+}
+
+func TestPrepareSlotRejectsUnfinalizedScheduledTrace(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+	token := n.slot.BeginACSOutbound(hbbft.ACSMessageReady)
+	n.slot.SealACSOutbound()
+	n.mu.Lock()
+	n.phase = slotCompleted
+	n.result = &Result{Slot: 1, NodeID: 0}
+	n.mu.Unlock()
+
+	if err := n.prepareSlot(2); err == nil || !strings.Contains(err.Error(), "trace finalization pending") {
+		t.Fatalf("prepare with pending trace error = %v", err)
+	}
+	token.Complete(hbbft.ACSSendObservation{Err: errors.New("terminal test send")})
+	if err := n.prepareSlot(2); err != nil {
+		t.Fatalf("prepare after trace finalization: %v", err)
+	}
+}
+
+func TestCollectACSMessagesCompletesAdmittedTokensOnClassificationError(t *testing.T) {
+	n := lifecycleTestNode(t)
+	n.slot.Close()
+	n.cfg.Diagnostics.ACSTrace = true
+	n.slotState = n.newSlotState(1)
+	n.slot.BeginTrace(time.Now())
+
+	_, err := n.collectACSMessagesFrom([]hbbft.MessageTuple{
+		{
+			To: 1,
+			Payload: slotACSMessage(&hbbft.AgreementMessage{
+				Message: &hbbft.BvalRequest{Value: true},
+			}),
+		},
+		{To: 2, Payload: &hbbft.SlotMessage{}},
+	})
+	if err == nil {
+		t.Fatal("accepted an invalid emitted ACS message")
+	}
+	n.slot.SealACSOutbound()
+	trace := n.slot.Trace()
+	got := trace.Messages[hbbft.ACSMessageBVAL]
+	if got.ScheduledCount != 1 || got.TerminalCount != 1 || got.SendFailureCount != 1 || !trace.Transport.Finalized {
+		t.Fatalf("classification failure stranded an admitted token: %+v", trace)
 	}
 }
 
@@ -537,5 +703,10 @@ func TestSlotStatusIncludesACSProgress(t *testing.T) {
 	}
 	if _, ok := body["acs"].(map[string]any); !ok {
 		t.Fatalf("status did not include acs progress: %v", body)
+	}
+	for _, key := range []string{"acs_trace_enabled", "acs_trace_finalized", "acs_trace_finalization_pending"} {
+		if _, ok := body[key].(bool); !ok {
+			t.Fatalf("status %q = %T, want bool: %v", key, body[key], body)
+		}
 	}
 }

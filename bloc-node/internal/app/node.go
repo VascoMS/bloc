@@ -238,16 +238,32 @@ func (n *Node) handleResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.result != nil {
-		writeJSON(w, http.StatusOK, n.result)
+	if n.failure != nil {
+		failure := *n.failure
+		n.mu.Unlock()
+		writeJSON(w, http.StatusUnprocessableEntity, slotFailureResponse{Status: string(slotFailed), SlotFailure: failure})
 		return
 	}
-	if n.failure != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, slotFailureResponse{Status: string(slotFailed), SlotFailure: *n.failure})
+	n.mu.Unlock()
+	if result, ok := n.publishableResultLocked(); ok {
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
+}
+
+// publishableResultLocked returns a detached result carrying the latest final
+// trace. The caller must hold lifecycleMu for the active slot.
+func (n *Node) publishableResultLocked() (*Result, bool) {
+	trace := n.slot.Trace()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.result == nil || (trace.Enabled && !trace.Transport.Finalized) {
+		return nil, false
+	}
+	result := *n.result
+	result.ACSTrace = trace
+	return &result, true
 }
 
 type prepareSlotRequest struct {
@@ -297,6 +313,9 @@ func (n *Node) prepareSlotWithLimit(slotID uint64, proposalLimit int) error {
 	if phase != slotCompleted && phase != slotFailed {
 		return fmt.Errorf("slot %d is %s and cannot be replaced", n.id, phase)
 	}
+	if phase == slotCompleted && n.cfg.Diagnostics.ACSTrace && !n.slot.TraceFinalized() {
+		return fmt.Errorf("slot %d trace finalization pending", n.id)
+	}
 	n.slot.Close()
 	n.cfg.Slot = slotID
 	n.slotState = n.newSlotStateWithLimit(slotID, proposalLimit)
@@ -322,6 +341,10 @@ func (n *Node) handleSlotStatus(w http.ResponseWriter, r *http.Request) {
 	if n.slot != nil {
 		status["acs"] = n.slot.Progress()
 	}
+	trace := n.slot.Trace()
+	status["acs_trace_enabled"] = trace.Enabled
+	status["acs_trace_finalized"] = !trace.Enabled || trace.Transport.Finalized
+	status["acs_trace_finalization_pending"] = trace.Enabled && trace.Transport.Sealed && !trace.Transport.Finalized
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -599,36 +622,54 @@ func (n *Node) stepACS(step func() error) (*hbbft.SlotOutput, error) {
 		n.acsMu.Unlock()
 		return nil, err
 	}
-	messages := n.collectACSMessages()
+	messages, err := n.collectACSMessages()
+	if err != nil {
+		n.acsMu.Unlock()
+		return nil, err
+	}
 	output := n.slot.Output()
 	n.acsMu.Unlock()
 	for _, env := range messages {
-		n.sendEnvelope(env.to, env.envelope)
+		n.sendEnvelopeTracked(env.to, env.envelope, env.traceToken)
 	}
 	return output, nil
 }
 
 type pendingEnvelope struct {
-	to       uint64
-	envelope WireEnvelope
+	to         uint64
+	envelope   WireEnvelope
+	traceToken *hbbft.ACSSendToken
 }
 
 // collectACSMessages drains pending HoneyBadger ACS messages emitted by the
 // local ACS state machine. Callers must hold acsMu.
-func (n *Node) collectACSMessages() []pendingEnvelope {
+func (n *Node) collectACSMessages() ([]pendingEnvelope, error) {
+	return n.collectACSMessagesFrom(n.slot.Messages())
+}
+
+func (n *Node) collectACSMessagesFrom(messages []hbbft.MessageTuple) ([]pendingEnvelope, error) {
 	var out []pendingEnvelope
-	for _, msg := range n.slot.Messages() {
+	for _, msg := range messages {
 		slotMsg, ok := msg.Payload.(*hbbft.SlotMessage)
 		if !ok {
 			log.Printf("unexpected slot payload %T", msg.Payload)
 			continue
 		}
+		subtype, err := classifyACSMessage(slotMsg)
+		if err != nil {
+			classifyErr := fmt.Errorf("classify emitted ACS message: %w", err)
+			for _, env := range out {
+				env.traceToken.Complete(hbbft.ACSSendObservation{Err: classifyErr})
+			}
+			return nil, classifyErr
+		}
 		out = append(out, pendingEnvelope{
-			to:       msg.To,
-			envelope: WireEnvelope{From: n.self.ID, Kind: "acs", Slot: n.id, ACS: slotMsg},
+			to:         msg.To,
+			envelope:   WireEnvelope{From: n.self.ID, Kind: "acs", Slot: n.id, ACS: slotMsg},
+			traceToken: n.slot.BeginACSOutbound(subtype),
 		})
 	}
-	return out
+	return out, nil
 }
 
 // handleACSOutput processes an ACS decision. Once ACS has decided, every correct node
@@ -765,6 +806,7 @@ func (n *Node) captureACSTrace(out *hbbft.SlotOutput) {
 		return
 	}
 	n.slot.MarkNodeOutputReceived()
+	n.slot.SealACSOutbound()
 	trace := n.slot.Trace()
 	out.ACSTrace = trace
 	n.mu.Lock()
@@ -1179,10 +1221,23 @@ func (n *Node) marshalShare(d be.DecryptionShare) (WireShare, error) {
 // sendEnvelope fills in local routing fields and sends one direct envelope in a
 // goroutine so ACS state-machine progress is not blocked by network I/O.
 func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
+	var token *hbbft.ACSSendToken
+	if env.Kind == "acs" && env.ACS != nil {
+		if subtype, err := classifyACSMessage(env.ACS); err == nil {
+			token = n.slot.BeginACSOutbound(subtype)
+		}
+	}
+	n.sendEnvelopeTracked(to, env, token)
+}
+
+func (n *Node) sendEnvelopeTracked(to uint64, env WireEnvelope, token *hbbft.ACSSendToken) {
 	go func() {
 		n.lifecycleMu.RLock()
 		defer n.lifecycleMu.RUnlock()
+		observation := hbbft.ACSSendObservation{}
+		defer func() { token.Complete(observation) }()
 		if env.Slot != n.id {
+			observation.Err = fmt.Errorf("stale outbound slot %d, active slot %d", env.Slot, n.id)
 			return
 		}
 		if n.faults.Delay > 0 {
@@ -1191,30 +1246,18 @@ func (n *Node) sendEnvelope(to uint64, env WireEnvelope) {
 		env.From = n.self.ID
 		env.To = to
 		env.Direct = true
-		var (
-			acsSubtype   hbbft.ACSMessageSubtype
-			traceACSSend bool
-		)
-		if env.Kind == "acs" && env.ACS != nil {
-			var classifyErr error
-			acsSubtype, classifyErr = classifyACSMessage(env.ACS)
-			traceACSSend = classifyErr == nil
-		}
 		sendStarted := time.Now()
 		result, err := n.transport.Send(context.Background(), to, env)
-		sendDuration := time.Since(sendStarted)
-		if traceACSSend {
-			n.slot.RecordACSOutbound(acsSubtype, hbbft.ACSSendObservation{
-				Size:       result.EncodedBytes,
-				Total:      sendDuration,
-				Encode:     result.EncodeDuration,
-				QueueWait:  result.QueueWaitDuration,
-				StreamOpen: result.StreamOpenDuration,
-				Write:      result.WriteDuration,
-				Finalize:   result.FinalizeDuration,
-				Reused:     result.StreamReused,
-				Err:        err,
-			})
+		observation = hbbft.ACSSendObservation{
+			Size:       result.EncodedBytes,
+			Total:      time.Since(sendStarted),
+			Encode:     result.EncodeDuration,
+			QueueWait:  result.QueueWaitDuration,
+			StreamOpen: result.StreamOpenDuration,
+			Write:      result.WriteDuration,
+			Finalize:   result.FinalizeDuration,
+			Reused:     result.StreamReused,
+			Err:        err,
 		}
 		if err != nil {
 			log.Printf("send %s to %d failed: %v", env.Kind, to, err)
@@ -1344,16 +1387,21 @@ func (n *Node) writeResultWhenReady(path string) {
 	for range ticker.C {
 		n.lifecycleMu.RLock()
 		n.mu.Lock()
-		result := n.result
-		failure := n.failure
-		n.mu.Unlock()
-		n.lifecycleMu.RUnlock()
-		if result == nil && failure == nil {
-			continue
+		var payload any
+		if n.failure != nil {
+			failure := *n.failure
+			payload = slotFailureResponse{Status: string(slotFailed), SlotFailure: failure}
 		}
-		var payload any = result
-		if failure != nil {
-			payload = slotFailureResponse{Status: string(slotFailed), SlotFailure: *failure}
+		n.mu.Unlock()
+		if payload == nil {
+			result, ok := n.publishableResultLocked()
+			n.lifecycleMu.RUnlock()
+			if !ok {
+				continue
+			}
+			payload = result
+		} else {
+			n.lifecycleMu.RUnlock()
 		}
 		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {

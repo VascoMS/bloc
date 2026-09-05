@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-02`
+- Last reviewed: `2026-09-05`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -68,14 +68,6 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **RBC READY relay omits local self-admission:** the `N-F` ECHO trigger queues
-  READY and processes the local READY, while the `F+1` READY relay trigger
-  queues READY without adding it to `recvReadys`. For `n=4,f=1`, two matching
-  remote READYs therefore cause a relay but still leave the node dependent on a
-  third remote READY; one withholding participant can prevent output despite
-  enough matching ECHO shards. The approved correction unifies both emission
-  paths, counts the local READY exactly once, and runs the full ACS safety gate.
-  Implementation has not started.
 - **ACS transport traces are right-censored at local output:** outbound sends
   complete asynchronously after the retained trace snapshot. `ACSUS` remains
   valid, but queue and send-phase attribution can omit the slowest outstanding
@@ -520,12 +512,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Create and prioritize the M5 issue and Project item for RBC READY
-   self-admission, then implement it on a dedicated branch with the targeted
-   withholding regression and full ACS safety gate.
-2. Follow with separate tracked issues for minimal ACS trace finalization and
-   the opt-in persistent control/data stream mode. Keep current `persistent` as
-   the matched control and do not begin implementation before each issue exists.
+1. Implement minimal ACS trace finalization, including synchronous send
+   admission, terminal completion, pending-at-decision counts, READY trigger
+   reasons, and fail-closed final `bloc-acs-trace/v3` artifacts before the
+   persistent control/data stream experiment.
+2. Follow with the opt-in persistent control/data stream mode. Keep current
+   `persistent` as the matched control and do not begin implementation before
+   its tracked issue exists.
 3. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
    proposals. Do not include them in the focused READY/stream-lane program.
 4. Run the matched same-AZ/three-region `persistent` versus

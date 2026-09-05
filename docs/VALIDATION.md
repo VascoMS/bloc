@@ -290,6 +290,13 @@ After ACS/BBA safety or liveness changes, run:
 bash bloc-node/scripts/run-acs-safety-campaign.sh
 ```
 
+The RBC READY-relay regression uses `n=4,f=1`, two distinct matching ECHOs,
+and two matching remote READYs. Passing requires the local READY to become the
+third distinct READY, one READY broadcast to be queued, and the value to decode
+without a third remote READY. Companion tests prove that READY quorum alone
+cannot decode without `F+1` matching ECHOs and that later ECHO quorum does not
+emit a duplicate READY.
+
 Acceptance requires:
 
 - 1,000 fixed reordered RBC/BBA delivery schedules;

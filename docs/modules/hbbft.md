@@ -99,9 +99,14 @@ Each sender can contribute at most one stored ECHO and one stored READY.
 
 For a matching root:
 
-- `N-F` ECHOs cause a node that has not sent READY to broadcast READY.
-- `F+1` READYs cause a node that has not sent READY to relay READY.
-- `2F+1` READYs plus `F+1` ECHOs make the current implementation attempt
+- `N-F` ECHOs cause a node that has not sent READY to admit its own READY and
+  broadcast READY.
+- `F+1` READYs cause a node that has not sent READY to admit its own READY and
+  relay READY.
+- Both emission paths count the local READY exactly once before retrying
+  decoding; neither path waits for the node's broadcast to loop back through
+  the transport.
+- `2F+1` READYs plus `F+1` ECHOs make the implementation attempt
   reconstruction.
 
 `tryDecodeValue` reconstructs only from ECHOs whose root matches the selected
@@ -233,6 +238,8 @@ Once ACS returns a subset, the adapter:
 
 - Each proposer ID selects exactly one RBC/BBA pair.
 - RBC thresholds are based on distinct transport sender IDs.
+- A local READY is admitted exactly once before its corresponding broadcast is
+  exposed to the transport.
 - BBA BVAL counts are per value and distinct sender.
 - AUX counts advance only for values already admitted to `binValues`.
 - ACS membership is determined only by BBA results and requires every truthy

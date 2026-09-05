@@ -32,6 +32,17 @@ func (discardSlotTransport) Send(context.Context, uint64, WireEnvelope) (transpo
 	return transportSendResult{EncodedBytes: 1}, nil
 }
 
+type immediateQueueSlotTransport struct {
+	sends chan WireEnvelope
+}
+
+func (t *immediateQueueSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
+func (t *immediateQueueSlotTransport) Close() error                                 { return nil }
+func (t *immediateQueueSlotTransport) Send(_ context.Context, _ uint64, env WireEnvelope) (transportSendResult, error) {
+	t.sends <- env
+	return transportSendResult{EncodedBytes: 1}, nil
+}
+
 func (t *blockingSlotTransport) Start(context.Context, EnvelopeHandler) error { return nil }
 func (t *blockingSlotTransport) Close() error                                 { return nil }
 func (t *blockingSlotTransport) Send(context.Context, uint64, WireEnvelope) (transportSendResult, error) {
@@ -686,6 +697,92 @@ func TestStepACSSerializesConcurrentLocalSteps(t *testing.T) {
 	}
 	if err := <-secondDone; err != nil {
 		t.Fatalf("second ACS step failed: %v", err)
+	}
+}
+
+func TestStepACSSealsOutputBeforeImmediateDecisionSends(t *testing.T) {
+	transport := &immediateQueueSlotTransport{sends: make(chan WireEnvelope, 4096)}
+	nodes := make([]*Node, 4)
+	for id := range nodes {
+		n := lifecycleTestNode(t)
+		n.slot.Close()
+		n.self.ID = uint64(id)
+		n.cfg.Diagnostics.ACSTrace = true
+		n.slotState = n.newSlotState(1)
+		n.slot.BeginTrace(time.Now())
+		n.transport = transport
+		nodes[id] = n
+	}
+
+	for id, n := range nodes {
+		if _, err := n.stepACS(func() error { return n.slot.InputBatch([]byte{byte('a' + id)}) }); err != nil {
+			t.Fatalf("input node %d: %v", id, err)
+		}
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case env := <-transport.sends:
+			target := nodes[env.To]
+			var scheduledBefore uint64
+			if target == nodes[0] {
+				for _, subtype := range []hbbft.ACSMessageSubtype{
+					hbbft.ACSMessageProof, hbbft.ACSMessageEcho, hbbft.ACSMessageReady,
+					hbbft.ACSMessageBVAL, hbbft.ACSMessageAUX,
+				} {
+					scheduledBefore += target.slot.Trace().Messages[subtype].ScheduledCount
+				}
+			}
+			output, err := target.stepACS(func() error {
+				return target.slot.HandleMessage(env.From, env.ACS)
+			})
+			if err != nil {
+				t.Fatalf("deliver ACS message from %d to %d: %v", env.From, env.To, err)
+			}
+			if target != nodes[0] || output == nil {
+				continue
+			}
+
+			trace := target.slot.Trace()
+			if !trace.Transport.Sealed {
+				t.Fatal("output transition did not seal ACS sends")
+			}
+			var pendingAtDecision uint64
+			var scheduled uint64
+			for _, subtype := range []hbbft.ACSMessageSubtype{
+				hbbft.ACSMessageProof, hbbft.ACSMessageEcho, hbbft.ACSMessageReady,
+				hbbft.ACSMessageBVAL, hbbft.ACSMessageAUX,
+			} {
+				entry := trace.Messages[subtype]
+				pendingAtDecision += entry.PendingAtDecision
+				scheduled += entry.ScheduledCount
+			}
+			if pendingAtDecision == 0 {
+				t.Fatalf("immediate decision sends were not frozen as pending: %+v", trace)
+			}
+			decisionScheduled := scheduled - scheduledBefore
+			if decisionScheduled == 0 || pendingAtDecision < decisionScheduled {
+				t.Fatalf("decision sends were not retained as pending: scheduled_before=%d decision_scheduled=%d pending=%d trace=%+v", scheduledBefore, decisionScheduled, pendingAtDecision, trace)
+			}
+
+			if _, err := target.stepACS(func() error { return nil }); err != nil {
+				t.Fatalf("post-output ACS step: %v", err)
+			}
+			var afterScheduled uint64
+			for _, subtype := range []hbbft.ACSMessageSubtype{
+				hbbft.ACSMessageProof, hbbft.ACSMessageEcho, hbbft.ACSMessageReady,
+				hbbft.ACSMessageBVAL, hbbft.ACSMessageAUX,
+			} {
+				afterScheduled += target.slot.Trace().Messages[subtype].ScheduledCount
+			}
+			if afterScheduled != scheduled {
+				t.Fatalf("post-output ACS step admitted sends: before=%d after=%d", scheduled, afterScheduled)
+			}
+			return
+		case <-deadline:
+			t.Fatal("node 0 did not produce ACS output")
+		}
 	}
 }
 

@@ -628,6 +628,9 @@ func (n *Node) stepACS(step func() error) (*hbbft.SlotOutput, error) {
 		return nil, err
 	}
 	output := n.slot.Output()
+	if output != nil {
+		n.slot.SealACSOutbound()
+	}
 	n.acsMu.Unlock()
 	for _, env := range messages {
 		n.sendEnvelopeTracked(env.to, env.envelope, env.traceToken)
@@ -806,7 +809,6 @@ func (n *Node) captureACSTrace(out *hbbft.SlotOutput) {
 		return
 	}
 	n.slot.MarkNodeOutputReceived()
-	n.slot.SealACSOutbound()
 	trace := n.slot.Trace()
 	out.ACSTrace = trace
 	n.mu.Lock()

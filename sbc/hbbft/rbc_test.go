@@ -17,7 +17,7 @@ func TestRBCTraceRecordsThresholdAndReconstructionMilestones(t *testing.T) {
 	now := base
 	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
 	recorder.begin(base)
-	rbc := newRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
+	rbc := newRBC(Config{ID: 3, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
 	t.Cleanup(rbc.stop)
 
 	value := []byte("traceable-rbc-payload!")
@@ -141,6 +141,21 @@ func TestRBCReadyEmissionRemainsExactlyOnceAfterEchoQuorum(t *testing.T) {
 	assert.Empty(t, rbc.Messages())
 	assert.Equal(t, root, rbc.recvReadys[rbc.ID])
 	assert.Equal(t, 3, rbc.countReadys(root))
+}
+
+func TestRBCEmitReadyRejectsPreAdmittedLocalReady(t *testing.T) {
+	rbc, _, proofs := readyRelayFixture(t)
+	t.Cleanup(rbc.stop)
+	root := proofs[0].RootHash
+
+	rbc.recvReadys[rbc.ID] = root
+
+	err := rbc.emitReady(root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "local ready already admitted")
+	assert.False(t, rbc.readySent)
+	assert.Empty(t, rbc.Messages())
+	assert.Equal(t, 1, rbc.countReadys(root))
 }
 
 // Test RBC where 1 node will not provide its value. We use 4 nodes that will
@@ -293,7 +308,7 @@ func TestRBCRejectsMixedRootReconstruction(t *testing.T) {
 	now := base
 	recorder := newTraceRecorder(makeids(4), true, func() time.Time { return now })
 	recorder.begin(base)
-	rbc := newRBC(Config{ID: 0, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
+	rbc := newRBC(Config{ID: 3, N: 4, F: 1, Nodes: makeids(4)}, 0, recorder)
 	t.Cleanup(rbc.stop)
 
 	valueA := []byte("root-A-payload!!")
@@ -348,7 +363,7 @@ func TestRBCRejectsMixedRootReconstruction(t *testing.T) {
 	assert.Equal(t, valueA, rbc.Output())
 	assert.True(t, rbc.progress().OutputDecoded)
 	completed := rbc.trace.snapshot().RBC[rbc.proposerID]
-	assert.Equal(t, int64(20), completed.ReconstructionStarted.OffsetUS)
+	assert.Equal(t, int64(0), completed.ReconstructionStarted.OffsetUS)
 	assert.Equal(t, int64(40), completed.ReconstructionFinished.OffsetUS)
 	assert.Equal(t, int64(40), completed.OutputStored.OffsetUS)
 }

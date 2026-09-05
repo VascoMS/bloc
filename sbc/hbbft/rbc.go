@@ -317,13 +317,10 @@ func (r *RBC) emitReady(root []byte) error {
 	if r.readySent {
 		return r.tryDecodeValue(root)
 	}
-	if existingRoot, exists := r.recvReadys[r.ID]; exists {
-		if !bytes.Equal(existingRoot, root) {
-			return fmt.Errorf("local ready already admitted for node %d", r.ID)
-		}
-	} else {
-		r.recvReadys[r.ID] = root
+	if _, exists := r.recvReadys[r.ID]; exists {
+		return fmt.Errorf("local ready already admitted for node %d", r.ID)
 	}
+	r.recvReadys[r.ID] = root
 	r.readySent = true
 	r.trace.recordRBC(r.proposerID, traceRBCReadySent)
 	r.messages = append(r.messages, &BroadcastMessage{

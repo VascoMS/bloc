@@ -700,8 +700,37 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                             acs_stream_open_count="0", acs_stream_reuse_count="-1")
         artifacts.write_csv(node_path, node_rows, list(node_rows[0]))
 
-        with self.assertRaisesRegex(ValueError, "negative ACS transport counter"):
+        with self.assertRaisesRegex(ValueError, "nonnegative integer ACS transport counter"):
             artifacts.assert_final_phase(root, "three-region", "latency")
+
+    def test_final_v3_diagnostic_requires_integer_counters(self):
+        for name, value in (("fractional", -0.5), ("boolean", False)):
+            with self.subTest(name=name):
+                root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                                       stream_mode="persistent-lanes", topology="three-region")
+                self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
+                try:
+                    trace_path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+                    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+                    trace = records[0]["messages"][0]["trace"]
+                    trace.update(outbound_count=value, send_count=value, send_failure_count=2,
+                                 stream_open_count=0, stream_reuse_count=value)
+                    for phase in ("encode", "queue_wait", "stream_open", "write", "finalize"):
+                        trace[phase]["count"] = value
+                    trace_path.write_text(
+                        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+                    )
+
+                    node_path = next(root.glob("scenarios/**/node_measurements.csv"))
+                    node_rows = artifacts.read_csv(node_path)
+                    node_rows[0].update(acs_outbound_messages="0", acs_send_count="0", acs_send_failures="2",
+                                        acs_stream_open_count="0", acs_stream_reuse_count="0")
+                    artifacts.write_csv(node_path, node_rows, list(node_rows[0]))
+
+                    with self.assertRaisesRegex(ValueError, "nonnegative integer ACS transport counter"):
+                        artifacts.assert_final_phase(root, "three-region", "latency")
+                finally:
+                    shutil.rmtree(root)
 
     def test_final_diagnostic_rejects_unbalanced_measurement_blocks(self):
         root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,

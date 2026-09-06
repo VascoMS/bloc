@@ -672,6 +672,11 @@ FINAL_ECR_IMAGE = re.compile(
 )
 ACS_TRACE_SCHEMAS = {"bloc-acs-trace/v1", "bloc-acs-trace/v2", "bloc-acs-trace/v3"}
 ACS_MESSAGE_SUBTYPES = {"proof", "echo", "ready", "bval", "aux"}
+ACS_SEND_PHASES = ("encode", "queue_wait", "stream_open", "write", "finalize")
+
+
+def _is_nonnegative_json_integer(value: Any) -> bool:
+    return type(value) is int and value >= 0
 
 
 def _assert_nonnegative_trace_offsets(value: Any, location: str) -> None:
@@ -763,6 +768,29 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
         subtypes = [str(item.get("subtype", "")) for item in messages]
         if len(subtypes) != len(set(subtypes)) or set(subtypes) != ACS_MESSAGE_SUBTYPES:
             raise ValueError(f"{trace_path}: invalid fixed ACS message subtypes for {key}")
+        if trace_schema == "bloc-acs-trace/v3":
+            count_fields = (
+                "scheduled_count", "terminal_count", "pending_at_decision",
+                "inbound_count", "inbound_bytes", "outbound_count", "outbound_bytes",
+                "send_count", "send_total_us", "send_max_us", "send_failure_count",
+                "stream_open_count", "stream_reuse_count",
+            )
+            for item in messages:
+                subtype, trace = item["subtype"], item["trace"]
+                phases = [trace.get(phase) for phase in ACS_SEND_PHASES]
+                valid_phases = all(
+                    isinstance(phase, dict)
+                    and all(_is_nonnegative_json_integer(phase.get(field)) for field in ("count", "total_us", "max_us"))
+                    for phase in phases
+                )
+                if (
+                    any(not _is_nonnegative_json_integer(trace.get(field)) for field in count_fields)
+                    or not valid_phases
+                ):
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} must use a "
+                        f"nonnegative integer ACS transport counter for {key}"
+                    )
         _assert_nonnegative_trace_offsets(record, f"{trace_path} {key}")
         core = record.get("aggregate", {}).get("core_decision", {})
         received = record.get("adapter", {}).get("node_output_received", {})
@@ -827,22 +855,6 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
                 raise ValueError(f"{trace_path}: aggregate/detail ACS transport mismatch for {key}")
             for item in messages:
                 subtype, trace = item["subtype"], item["trace"]
-                count_fields = (
-                    "scheduled_count", "terminal_count", "pending_at_decision",
-                    "inbound_count", "inbound_bytes", "outbound_count", "outbound_bytes",
-                    "send_count", "send_total_us", "send_max_us", "send_failure_count",
-                    "stream_open_count", "stream_reuse_count",
-                )
-                if any(int(trace.get(field, -1)) < 0 for field in count_fields):
-                    raise ValueError(
-                        f"{trace_path}: ACS message subtype {subtype!r} has a negative "
-                        f"ACS transport counter for {key}"
-                    )
-                if any(int(trace[phase]["count"]) < 0 for phase in phase_fields):
-                    raise ValueError(
-                        f"{trace_path}: ACS message subtype {subtype!r} has a negative "
-                        f"ACS transport counter for {key}"
-                    )
                 scheduled = int(trace.get("scheduled_count", -1))
                 terminal = int(trace.get("terminal_count", -1))
                 pending = int(trace.get("pending_at_decision", -1))

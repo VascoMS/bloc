@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-05`
+- Last reviewed: `2026-09-06`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
@@ -68,15 +68,17 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **ACS transport traces are right-censored at local output:** outbound sends
-  complete asynchronously after the retained trace snapshot. `ACSUS` remains
-  valid, but queue and send-phase attribution can omit the slowest outstanding
-  messages. The approved minimal trace correction records synchronous send
+- **ACS transport traces remain right-censored at local output:** issue #25's
+  branch-scoped v3 implementation reached `1f2e026`, including synchronous
   admission, terminal completion, pending-at-decision counts, READY trigger
-  reasons, and fail-closed final `bloc-acs-trace/v3` artifacts before the
-  persistent-lane experiment. The approved scope and acceptance contract are
-  in the [READY/stream-lane design](superpowers/specs/2026-09-02-rbc-ready-stream-lanes-design.md).
-  Implementation has not started.
+  context, and fail-closed artifacts. Its normal/race suites and local ACS
+  safety campaign passed, but the exact ten-sample matched observer gate failed:
+  trace-on medians were `+7.673%` at `n4/batch8` and `+2.015%` at
+  `n7/batch128`, exceeding the `<=2%` limit. Final v3 smoke, canonical
+  documentation, issue closure, and persistent control/data lanes remain
+  blocked. `ACSUS` remains valid, but the accepted v2 trace can omit the
+  slowest outstanding sends. The approved scope and acceptance contract are in
+  the [READY/stream-lane design](superpowers/specs/2026-09-02-rbc-ready-stream-lanes-design.md).
 
 - **Issue #23 phase one is accepted; GossipSub phase two is deferred:** the final
   n4 four-arm campaign used source
@@ -512,10 +514,9 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Implement minimal ACS trace finalization, including synchronous send
-   admission, terminal completion, pending-at-decision counts, READY trigger
-   reasons, and fail-closed final `bloc-acs-trace/v3` artifacts before the
-   persistent control/data stream experiment.
+1. Reduce or characterize `bloc-acs-trace/v3` observer overhead and rerun the
+   exact ten-sample matched gate before final smoke, canonical documentation,
+   issue closure, or the persistent control/data stream experiment.
 2. Follow with the opt-in persistent control/data stream mode. Keep current
    `persistent` as the matched control and do not begin implementation before
    its tracked issue exists.

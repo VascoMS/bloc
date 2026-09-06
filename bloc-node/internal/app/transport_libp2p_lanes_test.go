@@ -1,15 +1,190 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anthdm/hbbft"
+	protocol "github.com/libp2p/go-libp2p/core/protocol"
 )
+
+func TestPersistentLaneTransportRoutesControlAroundBlockedData(t *testing.T) {
+	dataStream := newBlockingPersistentStream()
+	controlStream := &capturePersistentStream{}
+	codec := &countingEnvelopeCodec{delegate: ProtoEnvelopeCodec{}}
+	transport := newControlledPersistentLaneTransport(codec, controlStream, dataStream)
+	var releaseOnce sync.Once
+	releaseData := func() { releaseOnce.Do(func() { close(dataStream.writeRelease) }) }
+	t.Cleanup(func() {
+		releaseData()
+		_ = transport.Close()
+	})
+
+	dataDone := sendTransportAsync(transport, WireEnvelope{
+		Kind: "share",
+		Slot: 10,
+		Share: &WireShare{
+			OperatorID: 0,
+			PointHex:   "data-payload",
+		},
+	})
+	<-dataStream.writeStarted
+	if got := codec.encodes.Load(); got != 1 {
+		t.Fatalf("codec Encode calls after data Send = %d, want 1", got)
+	}
+	controlDone := sendTransportAsync(transport, WireEnvelope{
+		Kind: "acs",
+		Slot: 11,
+		ACS:  slotACSMessage(&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{RootHash: []byte("ready-root")}}),
+	})
+
+	var control transportSendCompletion
+	select {
+	case control = <-controlDone:
+		if control.err != nil {
+			t.Fatal(control.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("READY sent through LibP2PTransport.Send waited for blocked data lane")
+	}
+	if got := codec.encodes.Load(); got != 2 {
+		t.Fatalf("codec Encode calls = %d, want one per Send", got)
+	}
+	select {
+	case <-dataDone:
+		t.Fatal("blocked data Send completed before release")
+	default:
+	}
+	controlEnvelope, controlBytes := decodeCapturedPersistentFrame(t, controlStream.bytes())
+	if control.result.EncodedBytes != controlBytes || controlEnvelope.Kind != "acs" || controlEnvelope.Slot != 11 {
+		t.Fatalf("control result=%+v envelope=%+v bytes=%d", control.result, controlEnvelope, controlBytes)
+	}
+	broadcast, ok := controlEnvelope.ACS.Payload.Payload.(*hbbft.BroadcastMessage)
+	if !ok {
+		t.Fatalf("control payload = %T, want broadcast", controlEnvelope.ACS.Payload.Payload)
+	}
+	ready, ok := broadcast.Payload.(*hbbft.ReadyRequest)
+	if !ok || string(ready.RootHash) != "ready-root" {
+		t.Fatalf("control broadcast payload = %#v, want READY", broadcast.Payload)
+	}
+
+	releaseData()
+	data := <-dataDone
+	if data.err != nil {
+		t.Fatal(data.err)
+	}
+	dataEnvelope, dataBytes := decodeCapturedPersistentFrame(t, dataStream.bytes())
+	if data.result.EncodedBytes != dataBytes || dataEnvelope.Kind != "share" || dataEnvelope.Slot != 10 ||
+		dataEnvelope.Share == nil || dataEnvelope.Share.PointHex != "data-payload" {
+		t.Fatalf("data result=%+v envelope=%+v bytes=%d", data.result, dataEnvelope, dataBytes)
+	}
+}
+
+func TestPersistentLaneTransportReadyRequiresBothWritersAndProtocols(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistent, streamModePersistent, true)
+	pair.sender.node.cfg.Network.StreamMode = streamModePersistentLanes
+	writers := newPeerStreamLaneWriters(1, func(context.Context, uint64, persistentStreamLane) (persistentWriteStream, error) {
+		return &capturePersistentStream{}, nil
+	}, pair.sender.persistentStop)
+	pair.sender.persistentLaneWriters[1] = writers
+
+	writers.control.ready.Store(true)
+	writers.data.ready.Store(true)
+	for index, protocolID := range []protocol.ID{blocEnvelopeProtocolControl, blocEnvelopeProtocolData} {
+		if pair.sender.Ready() {
+			t.Fatalf("lane transport ready with only %d of 2 protocols", index)
+		}
+		if err := pair.sender.host.Peerstore().AddProtocols(pair.receiver.host.ID(), protocolID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !pair.sender.Ready() {
+		t.Fatal("lane transport not ready with both protocols and writers")
+	}
+	writers.data.ready.Store(false)
+	if pair.sender.Ready() {
+		t.Fatal("lane transport ready while data writer was not ready")
+	}
+	writers.data.ready.Store(true)
+	writers.control.ready.Store(false)
+	if pair.sender.Ready() {
+		t.Fatal("lane transport ready while control writer was not ready")
+	}
+}
+
+func TestPersistentLaneTransportCloseWaitsForBothWorkers(t *testing.T) {
+	dataStream := newBlockingPersistentStream()
+	controlStream := newBlockingPersistentStream()
+	transport := newControlledPersistentLaneTransport(ProtoEnvelopeCodec{}, controlStream, dataStream)
+	var releaseDataOnce sync.Once
+	var releaseControlOnce sync.Once
+	releaseData := func() { releaseDataOnce.Do(func() { close(dataStream.writeRelease) }) }
+	releaseControl := func() { releaseControlOnce.Do(func() { close(controlStream.writeRelease) }) }
+	t.Cleanup(func() {
+		releaseControl()
+		releaseData()
+		_ = transport.Close()
+	})
+
+	dataDone := sendTransportAsync(transport, WireEnvelope{Kind: "share", Share: &WireShare{OperatorID: 0}})
+	controlDone := sendTransportAsync(transport, WireEnvelope{
+		Kind: "acs",
+		ACS:  slotACSMessage(&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{}}),
+	})
+	<-dataStream.writeStarted
+	<-controlStream.writeStarted
+	closed := make(chan error, 1)
+	go func() { closed <- transport.Close() }()
+
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before either lane worker exited: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseControl()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned while data lane worker remained blocked: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseData()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not return after both lane workers exited")
+	}
+	for name, done := range map[string]<-chan struct{}{
+		"control": transport.persistentLaneWriters[1].control.done,
+		"data":    transport.persistentLaneWriters[1].data.done,
+	} {
+		select {
+		case <-done:
+		default:
+			t.Fatalf("%s lane worker still running after Close", name)
+		}
+	}
+	if !controlStream.reset || !dataStream.reset {
+		t.Fatalf("Close reset control=%t data=%t, want both", controlStream.reset, dataStream.reset)
+	}
+	for name, completion := range map[string]transportSendCompletion{
+		"control": <-controlDone,
+		"data":    <-dataDone,
+	} {
+		if !errors.Is(completion.err, errPersistentWriterClosed) {
+			t.Fatalf("%s send error = %v, want writer closed", name, completion.err)
+		}
+	}
+}
 
 func TestPersistentLaneControlBypassesBlockedDataWriter(t *testing.T) {
 	stop := make(chan struct{})
@@ -146,4 +321,73 @@ func TestClassifyEnvelopeLaneRejectsInvalidEnvelope(t *testing.T) {
 
 func laneACS(payload any) WireEnvelope {
 	return WireEnvelope{Kind: "acs", ACS: slotACSMessage(payload)}
+}
+
+type countingEnvelopeCodec struct {
+	delegate EnvelopeCodec
+	encodes  atomic.Int64
+}
+
+func (c *countingEnvelopeCodec) Encode(envelope WireEnvelope) ([]byte, error) {
+	c.encodes.Add(1)
+	return c.delegate.Encode(envelope)
+}
+
+func (c *countingEnvelopeCodec) Decode(data []byte) (WireEnvelope, error) {
+	return c.delegate.Decode(data)
+}
+
+type transportSendCompletion struct {
+	result transportSendResult
+	err    error
+}
+
+func sendTransportAsync(transport *LibP2PTransport, envelope WireEnvelope) <-chan transportSendCompletion {
+	done := make(chan transportSendCompletion, 1)
+	go func() {
+		result, err := transport.Send(context.Background(), 1, envelope)
+		done <- transportSendCompletion{result: result, err: err}
+	}()
+	return done
+}
+
+func newControlledPersistentLaneTransport(
+	codec EnvelopeCodec,
+	controlStream persistentWriteStream,
+	dataStream persistentWriteStream,
+) *LibP2PTransport {
+	node := &Node{
+		cfg: ConfigFile{
+			Network: NetworkConfig{Mode: "libp2p", StreamMode: streamModePersistentLanes},
+			Limits:  ResourceLimits{MaxEnvelopeBytes: 1 << 20},
+		},
+		self:  NodeConfig{ID: 0},
+		peers: map[uint64]NodeConfig{0: {ID: 0}, 1: {ID: 1}},
+	}
+	transport := newLibP2PTransport(node, codec)
+	transport.persistentLaneWriters[1] = newPeerStreamLaneWriters(1,
+		func(_ context.Context, _ uint64, lane persistentStreamLane) (persistentWriteStream, error) {
+			if lane == persistentLaneControl {
+				return controlStream, nil
+			}
+			return dataStream, nil
+		}, transport.persistentStop)
+	return transport
+}
+
+func decodeCapturedPersistentFrame(t *testing.T, wire []byte) (WireEnvelope, int) {
+	t.Helper()
+	reader := bufio.NewReader(bytes.NewReader(wire))
+	data, err := readEnvelopeFrame(reader, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readEnvelopeFrame(reader, 1<<20); !errors.Is(err, io.EOF) {
+		t.Fatalf("captured stream has an extra frame: %v", err)
+	}
+	envelope, err := (ProtoEnvelopeCodec{}).Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return envelope, len(data)
 }

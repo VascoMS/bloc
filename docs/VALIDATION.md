@@ -216,8 +216,9 @@ go run ./cmd/bloc-node eval-suite \
   --out-dir results/local/acs-persistent-lanes/smoke
 ```
 
-Acceptance requires a successful and consistent measured run, manifest schema
-`bloc-acs-trace/v3` for new artifacts, and exactly one validated
+Acceptance requires a successful and consistent measured run, manifest
+`schema_version=bloc-eval-suite/v3`, manifest
+`acs_trace_schema=bloc-acs-trace/v3`, and exactly one validated
 `acs_trace.jsonl` record per node. Every record must be sealed and finalized,
 and every subtype must satisfy
 `scheduled_count = terminal_count = send_count + send_failure_count`.

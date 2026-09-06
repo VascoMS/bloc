@@ -60,7 +60,7 @@ func TestNormalizeNetworkConfigDefaultsStreamModeToFresh(t *testing.T) {
 }
 
 func TestValidateNetworkConfigAcceptsSupportedStreamModes(t *testing.T) {
-	for _, mode := range []string{"fresh", "persistent"} {
+	for _, mode := range []string{streamModeFresh, streamModePersistent, streamModePersistentLanes} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := NetworkConfig{Mode: "libp2p", StreamMode: mode}
 			if err := validateNetworkConfig(cfg); err != nil {

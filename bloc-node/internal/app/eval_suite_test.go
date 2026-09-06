@@ -113,6 +113,13 @@ func TestEvalSuiteStreamModeDefaultsAndOverrides(t *testing.T) {
 	if persistent.StreamMode != streamModePersistent {
 		t.Fatalf("explicit stream mode = %q, want persistent", persistent.StreamMode)
 	}
+	lanes, err := parseEvalSuiteOptions([]string{"--stream-mode", "persistent-lanes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lanes.StreamMode != streamModePersistentLanes {
+		t.Fatalf("lane stream mode = %q, want persistent-lanes", lanes.StreamMode)
+	}
 	if _, err := parseEvalSuiteOptions([]string{"--stream-mode", "reuse"}); err == nil {
 		t.Fatal("unknown evaluator stream mode was accepted")
 	}

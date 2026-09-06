@@ -227,10 +227,11 @@ func validateNetworkConfig(network NetworkConfig) error {
 		return fmt.Errorf("unsupported network mode %q: only libp2p is supported", network.Mode)
 	}
 	switch network.StreamMode {
-	case streamModeFresh, streamModePersistent:
+	case streamModeFresh, streamModePersistent, streamModePersistentLanes:
 		return nil
 	default:
-		return fmt.Errorf("network.stream_mode must be %q or %q, got %q", streamModeFresh, streamModePersistent, network.StreamMode)
+		return fmt.Errorf("network.stream_mode must be %q, %q, or %q, got %q",
+			streamModeFresh, streamModePersistent, streamModePersistentLanes, network.StreamMode)
 	}
 }
 

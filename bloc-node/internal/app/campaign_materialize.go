@@ -198,7 +198,7 @@ func materializeCampaignConfig(args []string) error {
 	fs.StringVar(&options.HTTPHostMode, "http-host-mode", "private-ip", "inventory HTTP host field")
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "inventory P2P host field")
 	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
-	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh, persistent, or persistent-lanes")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

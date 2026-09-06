@@ -26,8 +26,9 @@ const (
 	absoluteMaxCombineAttemptsPerSubBatch       = 4096
 	minimumEnvelopeHeadroomBytes                = 64 << 10
 
-	streamModeFresh      = "fresh"
-	streamModePersistent = "persistent"
+	streamModeFresh           = "fresh"
+	streamModePersistent      = "persistent"
+	streamModePersistentLanes = "persistent-lanes"
 )
 
 // ConfigFile is the public JSON configuration shared by all BLOC nodes in a

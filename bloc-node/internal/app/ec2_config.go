@@ -111,7 +111,7 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.StringVar(&options.HTTPHostMode, "http-host-mode", "private-ip", "HTTP advertised host: private-ip, private-dns, public-ip, or public-dns")
 	fs.StringVar(&options.P2PHostMode, "p2p-host-mode", "private-ip", "libp2p advertised host: private-ip, private-dns, public-ip, or public-dns")
 	fs.StringVar(&options.ProviderMode, "provider", "direct", "inclusion-list provider: direct or mempool-http")
-	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh, persistent, or persistent-lanes")
 	fs.StringVar(&options.MempoolURL, "mempool-url", "", "mempool-il base URL for provider=mempool-http")
 	fs.Int64Var(&options.MempoolTimeoutMS, "mempool-timeout-ms", defaultMempoolTimeoutMS, "mempool-il request timeout in milliseconds; 0 uses the 2000 ms default")
 	fs.Uint64Var(&options.MaxDecryptedGas, "max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")

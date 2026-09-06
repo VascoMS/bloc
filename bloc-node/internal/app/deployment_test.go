@@ -313,6 +313,13 @@ func TestParseEC2ConfigStreamModeDefaultsAndRejectsUnknown(t *testing.T) {
 	if options.StreamMode != streamModeFresh {
 		t.Fatalf("default EC2 stream mode = %q, want fresh", options.StreamMode)
 	}
+	lanes, err := parseEC2ConfigOptions([]string{"--stream-mode", "persistent-lanes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lanes.StreamMode != streamModePersistentLanes {
+		t.Fatalf("EC2 lane stream mode = %q", lanes.StreamMode)
+	}
 	if _, err := parseEC2ConfigOptions([]string{"--stream-mode", "reuse"}); err == nil {
 		t.Fatal("unknown EC2 stream mode was accepted")
 	}

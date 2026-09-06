@@ -31,7 +31,7 @@ func genConfig(args []string) error {
 	maxEnvelopeBytes := fs.Int("max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
 	maxCombineAttempts := fs.Int("max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
 	acsTrace := fs.Bool("acs-trace", false, "enable bounded ACS diagnostic tracing")
-	streamMode := fs.String("stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
+	streamMode := fs.String("stream-mode", streamModeFresh, "libp2p envelope streams: fresh, persistent, or persistent-lanes")
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
 	mempoolURL := fs.String("mempool-url", "", "mempool-il base URL for provider=mempool-http")
 	mempoolTimeoutMS := fs.Int64("mempool-timeout-ms", defaultMempoolTimeoutMS, "mempool-il request timeout in milliseconds; 0 uses the 2000 ms default")

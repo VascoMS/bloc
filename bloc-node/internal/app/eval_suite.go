@@ -434,7 +434,7 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.StringVar(&options.OutDir, "out-dir", "", "experiment directory; defaults below results/m1-local")
 	fs.StringVar(&options.ExperimentID, "experiment-id", "", "stable experiment label")
 	fs.StringVar(&options.ExecutionMode, "execution-mode", "isolated", "cluster lifecycle: isolated or persistent")
-	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh or persistent")
+	fs.StringVar(&options.StreamMode, "stream-mode", streamModeFresh, "libp2p envelope streams: fresh, persistent, or persistent-lanes")
 	fs.IntVar(&options.MaxRestarts, "max-restarts", 3, "maximum consecutive persistent-cluster recovery attempts")
 	fs.BoolVar(&options.ACSTrace, "acs-trace", false, "enable bounded ACS diagnostic tracing")
 	if err := fs.Parse(args); err != nil {

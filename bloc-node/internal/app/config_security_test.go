@@ -211,20 +211,24 @@ func TestGenConfigEnablesACSTraceOnlyWhenRequested(t *testing.T) {
 }
 
 func TestGenConfigRetainsRequestedStreamMode(t *testing.T) {
-	dir := t.TempDir()
-	clusterPath := filepath.Join(dir, "cluster.json")
-	if err := genConfig([]string{
-		"--nodes", "4", "--threshold", "3", "--bmax", "8",
-		"--stream-mode", "persistent", "--out", clusterPath,
-	}); err != nil {
-		t.Fatalf("gen config: %v", err)
-	}
-	cfg, err := readConfig(clusterPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Network.StreamMode != streamModePersistent {
-		t.Fatalf("generated stream mode = %q, want persistent", cfg.Network.StreamMode)
+	for _, mode := range []string{streamModePersistent, streamModePersistentLanes} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			clusterPath := filepath.Join(dir, "cluster.json")
+			if err := genConfig([]string{
+				"--nodes", "4", "--threshold", "3", "--bmax", "8",
+				"--stream-mode", mode, "--out", clusterPath,
+			}); err != nil {
+				t.Fatalf("gen config: %v", err)
+			}
+			cfg, err := readConfig(clusterPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Network.StreamMode != mode {
+				t.Fatalf("generated stream mode = %q, want %q", cfg.Network.StreamMode, mode)
+			}
+		})
 	}
 }
 

@@ -452,11 +452,11 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                         "acs_stream_open_total_us": "0", "acs_stream_open_max_us": "0",
                         "acs_write_total_us": "2", "acs_write_max_us": "1",
                         "acs_finalize_total_us": "0", "acs_finalize_max_us": "0",
-                        "acs_stream_open_count": "0" if run["stream_mode"] == "persistent" else "2",
-                        "acs_stream_reuse_count": "2" if run["stream_mode"] == "persistent" else "0",
+                        "acs_stream_open_count": "0" if run["stream_mode"] in {"persistent", "persistent-lanes"} else "2",
+                        "acs_stream_reuse_count": "2" if run["stream_mode"] in {"persistent", "persistent-lanes"} else "0",
                     })
                     point = lambda offset: {"recorded": True, "offset_us": offset}
-                    trace_records.append({
+                    trace_record = {
                         "key": {
                             "measurement_block": int(run["measurement_block"]),
                             "run_id": run["run_id"], "node_id": node_id,
@@ -489,8 +489,8 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                                 "stream_open": {"count": 2, "total_us": 0, "max_us": 0},
                                 "write": {"count": 2, "total_us": 2, "max_us": 1},
                                 "finalize": {"count": 2, "total_us": 0, "max_us": 0},
-                                "stream_open_count": 0 if run["stream_mode"] == "persistent" else 2,
-                                "stream_reuse_count": 2 if run["stream_mode"] == "persistent" else 0,
+                                "stream_open_count": 0 if run["stream_mode"] in {"persistent", "persistent-lanes"} else 2,
+                                "stream_reuse_count": 2 if run["stream_mode"] in {"persistent", "persistent-lanes"} else 0,
                             }},
                             *[{"subtype": subtype, "trace": {
                                 "inbound_count": 0, "inbound_bytes": 0,
@@ -505,7 +505,15 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                                 "stream_open_count": 0, "stream_reuse_count": 0,
                             }} for subtype in ("echo", "ready", "bval", "aux")],
                         ],
-                    })
+                    }
+                    if trace_schema == "bloc-acs-trace/v3":
+                        trace_record["transport"] = {"sealed": True, "finalized": True}
+                        for message in trace_record["messages"]:
+                            trace = message["trace"]
+                            trace["scheduled_count"] = trace["send_count"] + trace["send_failure_count"]
+                            trace["terminal_count"] = trace["scheduled_count"]
+                            trace["pending_at_decision"] = 0
+                    trace_records.append(trace_record)
             artifacts.write_csv(scenario_root / "node_measurements.csv", node_rows, list(node_rows[0]))
             with (scenario_root / "acs_trace.jsonl").open("w", encoding="utf-8") as handle:
                 for record in trace_records:
@@ -556,6 +564,52 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         self.add_acs_trace_artifacts(root, "bloc-acs-trace/v2")
 
         artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_control_diagnostic_accepts_v3_mode_provenance(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
+
+        artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_lanes_diagnostic_accepts_v3_mode_provenance(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent-lanes")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
+
+        artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_lanes_diagnostic_rejects_v2_trace(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent-lanes")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v2")
+
+        with self.assertRaisesRegex(ValueError, "persistent-lanes stream mode requires ACS trace schema"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_v3_diagnostic_rejects_unfinalized_transport(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent-lanes")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
+        trace_path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+        records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        records[0]["transport"]["finalized"] = False
+        trace_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "not sealed and finalized"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_v3_diagnostic_rejects_unbalanced_message_lifecycle(self):
+        root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,
+                               stream_mode="persistent-lanes")
+        self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
+        trace_path = next(root.glob("scenarios/**/acs_trace.jsonl"))
+        records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        records[0]["messages"][0]["trace"]["terminal_count"] = 1
+        trace_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "scheduled count"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
 
     def test_final_persistent_stream_diagnostic_rejects_v1_trace(self):
         root = self.make_phase("latency", attempts=30, blocks_override=3, warmups_override=5,

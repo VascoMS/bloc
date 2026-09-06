@@ -7,8 +7,8 @@ Usage: run-final-campaign.sh --topology same-az|three-region
   --bundle-root DIR --node-count 4|7 --source-sha SHA
   --bloc-image ECR@DIGEST --mempool-image ECR@DIGEST
   --experiment-id ID --admin-cidr CIDR --aws-profile PROFILE
-  [--stream-mode fresh|persistent]
-  [--acs-trace-schema bloc-acs-trace/v1|bloc-acs-trace/v2]
+  [--stream-mode fresh|persistent|persistent-lanes]
+  [--acs-trace-schema bloc-acs-trace/v1|bloc-acs-trace/v2|bloc-acs-trace/v3]
   [--validate-only | --execute-live]
 EOF
 }
@@ -65,9 +65,10 @@ final_validate_campaign_contract() {
   [[ ${#FINAL_EXPERIMENT_ID} -le 47 ]] || final_die "experiment id must be at most 47 characters" || return
   [[ "$FINAL_ADMIN_CIDR" == */* ]] || final_die "admin CIDR is required" || return
   [[ -n "$FINAL_AWS_PROFILE" ]] || final_die "AWS profile is required" || return
-  [[ "$FINAL_STREAM_MODE" == fresh || "$FINAL_STREAM_MODE" == persistent ]] || final_die "stream mode must be fresh or persistent" || return
-  [[ -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v1 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 ]] || final_die "unsupported ACS trace schema" || return
-  [[ "$FINAL_STREAM_MODE" != persistent || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 ]] || final_die "persistent stream mode requires ACS trace schema bloc-acs-trace/v2" || return
+  [[ "$FINAL_STREAM_MODE" == fresh || "$FINAL_STREAM_MODE" == persistent || "$FINAL_STREAM_MODE" == persistent-lanes ]] || final_die "stream mode must be fresh, persistent, or persistent-lanes" || return
+  [[ -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v1 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "unsupported ACS trace schema" || return
+  [[ "$FINAL_STREAM_MODE" != persistent || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "persistent stream mode requires ACS trace schema bloc-acs-trace/v2 or bloc-acs-trace/v3" || return
+  [[ "$FINAL_STREAM_MODE" != persistent-lanes || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "persistent-lanes stream mode requires ACS trace schema bloc-acs-trace/v3" || return
   [[ -f "$manifest" ]] || final_die "bundle manifest is missing" || return
   [[ $((FINAL_VALIDATE_ONLY + FINAL_EXECUTE_LIVE)) -eq 1 ]] || final_die "choose exactly one of --validate-only and --execute-live" || return
   [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$FINAL_SOURCE_SHA" ]] || final_die "source SHA does not match local HEAD" || return

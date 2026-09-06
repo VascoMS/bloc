@@ -93,6 +93,16 @@ release-candidate configuration contract are defined in
   artifacts are under `bloc-node/results/local/acs-persistent-lanes/` and
   `results/local/acs-common-subset-safety/acs-safety-20260906t09581788688726z/`.
 
+  The user has now authorized the short matched n4 three-region control/treatment
+  campaign: batches `8/32/128`, five warmups, 30 measured attempts, three
+  balanced blocks, seed `20260621`, deadline `12s`, and sampler off. Preflight
+  found that the EC2 wrapper and final recovered-artifact validator had not been
+  extended for the already implemented v3 lane mode. The bounded correction now
+  accepts persistent/v3 and persistent-lanes/v3, retains historical contracts,
+  and requires sealed/finalized balanced v3 traces. The live control arm remains
+  pending immutable source/image/bundle and authenticated empty-environment
+  preflight; no campaign resources were allocated during the correction.
+
 - **Issue #23 phase one is accepted; GossipSub phase two is deferred:** the final
   n4 four-arm campaign used source
   `7720b1f5bfce1997f611c1db95cead394b0349c4`, immutable BLOC image

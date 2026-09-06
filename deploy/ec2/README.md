@@ -138,13 +138,33 @@ common arguments shown above:
 ```
 
 `--stream-mode` defaults to `fresh` for historical contracts. Persistent mode
-is accepted only with `bloc-acs-trace/v2`. Materialization and final acceptance
+is accepted with `bloc-acs-trace/v2` for the historical fresh/persistent
+experiment and with `bloc-acs-trace/v3` when it is the matched control for
+`persistent-lanes`; lane mode requires v3. Materialization and final acceptance
 require exact mode agreement across the public cluster config, remote evaluator
 config, phase manifest, evaluator manifests, and retained run/node rows. Phase
-v2 validation also reconciles encode, queue-wait, stream-open, write,
+v2/v3 validation also reconciles encode, queue-wait, stream-open, write,
 finalization, and stream open/reuse aggregates. The comparison surface is
 p50/p95/max ACS and milestone/transport phases; 30 observations do not support
 p99.
+
+Issue #26's matched lane diagnostic uses two separate n4 three-region latency
+deployments from one committed source, image pair, bundle, schedule, and seed.
+Use these mode/ID pairs with the common three-region arguments above:
+
+```sh
+--experiment-id bloc-ec2-i26-tr-ps-v3-p1 --stream-mode persistent \
+  --acs-trace-schema bloc-acs-trace/v3
+--experiment-id bloc-ec2-i26-tr-ln-v3-p1 --stream-mode persistent-lanes \
+  --acs-trace-schema bloc-acs-trace/v3
+```
+
+The v3 validator additionally requires every recovered transport trace to be
+sealed and finalized, with each subtype satisfying
+`scheduled_count = terminal_count = send_count + send_failure_count`. Run the
+control first, prove final artifacts and authenticated cleanup, and only then
+launch treatment. The fixed trace diagnostic contract supplies five warmups,
+30 measured attempts, and three balanced blocks for every batch.
 
 Evaluator invocations do not remain attached to a long-lived SSH session. The
 runner stages `run-final-remote-job.sh` on the controller, atomically claims one

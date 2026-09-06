@@ -670,7 +670,7 @@ def commands_json(records: Path) -> list[dict[str, Any]]:
 FINAL_ECR_IMAGE = re.compile(
     r"^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$"
 )
-ACS_TRACE_SCHEMAS = {"bloc-acs-trace/v1", "bloc-acs-trace/v2"}
+ACS_TRACE_SCHEMAS = {"bloc-acs-trace/v1", "bloc-acs-trace/v2", "bloc-acs-trace/v3"}
 ACS_MESSAGE_SUBTYPES = {"proof", "echo", "ready", "bval", "aux"}
 
 
@@ -751,6 +751,10 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
     for key, record in records.items():
         if record.get("schema_version") != trace_schema or record.get("enabled") is not True:
             raise ValueError(f"{trace_path}: disabled or mismatched ACS trace {key}")
+        if trace_schema == "bloc-acs-trace/v3":
+            transport = record.get("transport", {})
+            if transport.get("sealed") is not True or transport.get("finalized") is not True:
+                raise ValueError(f"{trace_path}: transport trace is not sealed and finalized for {key}")
         for name in ("rbc", "bba"):
             proposer_ids = [int(item["proposer_id"]) for item in record.get(name, [])]
             if len(proposer_ids) != len(set(proposer_ids)) or set(proposer_ids) != membership:
@@ -779,7 +783,7 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
         }
         if any(int(expected[key].get(field, -1)) != value for field, value in totals.items()):
             raise ValueError(f"{trace_path}: aggregate/detail ACS message mismatch for {key}")
-        if trace_schema == "bloc-acs-trace/v2":
+        if trace_schema in {"bloc-acs-trace/v2", "bloc-acs-trace/v3"}:
             phase_fields = {
                 "encode": ("acs_encode_total_us", "acs_encode_max_us"),
                 "queue_wait": ("acs_queue_wait_total_us", "acs_queue_wait_max_us"),
@@ -807,6 +811,30 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
             phase_totals["acs_stream_reuse_count"] = reuse_count
             if any(int(expected[key].get(field, -1)) != value for field, value in phase_totals.items()):
                 raise ValueError(f"{trace_path}: aggregate/detail ACS send phase mismatch for {key}")
+        if trace_schema == "bloc-acs-trace/v3":
+            for item in messages:
+                subtype, trace = item["subtype"], item["trace"]
+                scheduled = int(trace.get("scheduled_count", -1))
+                terminal = int(trace.get("terminal_count", -1))
+                pending = int(trace.get("pending_at_decision", -1))
+                outbound = int(trace["outbound_count"])
+                sent = int(trace["send_count"])
+                failed = int(trace["send_failure_count"])
+                if scheduled != terminal:
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} scheduled count {scheduled} "
+                        f"does not match terminal count {terminal} for {key}"
+                    )
+                if outbound > terminal or failed != terminal - outbound:
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} terminal count does not "
+                        f"match successful plus failed outcomes for {key}"
+                    )
+                if sent != outbound or pending < 0 or pending > scheduled:
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} has inconsistent "
+                        f"successful or pending counts for {key}"
+                    )
 
 
 def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase: str) -> None:
@@ -828,10 +856,17 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if trace_schema and trace_schema not in ACS_TRACE_SCHEMAS:
         raise ValueError(f"{manifest_path}: unsupported ACS trace schema {trace_schema!r}")
     stream_mode = str(manifest.get("stream_mode", ""))
-    if stream_mode not in {"fresh", "persistent"}:
+    if stream_mode not in {"fresh", "persistent", "persistent-lanes"}:
         raise ValueError(f"{manifest_path}: missing or unsupported stream mode")
-    if stream_mode == "persistent" and trace_schema != "bloc-acs-trace/v2":
-        raise ValueError(f"{manifest_path}: persistent stream mode requires ACS trace schema bloc-acs-trace/v2")
+    if stream_mode == "persistent" and trace_schema not in {"bloc-acs-trace/v2", "bloc-acs-trace/v3"}:
+        raise ValueError(
+            f"{manifest_path}: persistent stream mode requires ACS trace schema "
+            "bloc-acs-trace/v2 or bloc-acs-trace/v3"
+        )
+    if stream_mode == "persistent-lanes" and trace_schema != "bloc-acs-trace/v3":
+        raise ValueError(
+            f"{manifest_path}: persistent-lanes stream mode requires ACS trace schema bloc-acs-trace/v3"
+        )
     cluster_path = phase_root / "generated-public" / "cluster.json"
     remote_path = phase_root / "generated-public" / "remote-eval.json"
     cluster = json.loads(cluster_path.read_text(encoding="utf-8-sig"))

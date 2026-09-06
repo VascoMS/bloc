@@ -161,13 +161,17 @@ func TestPersistentLanesPrewarmBothProtocolsAndReuseStreams(t *testing.T) {
 
 func TestPersistentLaneHandlerRejectsWrongLane(t *testing.T) {
 	tests := []struct {
-		name       string
-		protocolID protocol.ID
-		envelope   func() WireEnvelope
+		name                 string
+		protocolID           protocol.ID
+		envelope             func() WireEnvelope
+		unaffectedProtocolID protocol.ID
+		validEnvelope        func() WireEnvelope
 	}{
 		{
 			name: "share on control", protocolID: blocEnvelopeProtocolControl,
-			envelope: func() WireEnvelope { return validPersistentTestEnvelope(0, 1, 1) },
+			envelope:             func() WireEnvelope { return validPersistentTestEnvelope(0, 1, 1) },
+			unaffectedProtocolID: blocEnvelopeProtocolData,
+			validEnvelope:        func() WireEnvelope { return validPersistentTestEnvelope(0, 1, 2) },
 		},
 		{
 			name: "ready on data", protocolID: blocEnvelopeProtocolData,
@@ -177,11 +181,23 @@ func TestPersistentLaneHandlerRejectsWrongLane(t *testing.T) {
 						Payload: &hbbft.ReadyRequest{RootHash: []byte("root")},
 					})}
 			},
+			unaffectedProtocolID: blocEnvelopeProtocolControl,
+			validEnvelope: func() WireEnvelope {
+				return WireEnvelope{Kind: "acs", Slot: 2, ACS: slotACSMessage(
+					&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{RootHash: []byte("next")}},
+				)}
+			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pair := newLibP2PTransportPair(t, streamModePersistentLanes, streamModePersistentLanes, true)
+			waitForTransportReady(t, pair.sender)
+			unaffectedStreams := countOpenProtocolStreams(
+				pair.sender, pair.receiver.host.ID(), test.unaffectedProtocolID)
+			if unaffectedStreams != 1 {
+				t.Fatalf("prewarmed unaffected streams = %d, want 1", unaffectedStreams)
+			}
 			stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), test.protocolID)
 			if err != nil {
 				t.Fatal(err)
@@ -196,8 +212,84 @@ func TestPersistentLaneHandlerRejectsWrongLane(t *testing.T) {
 			waitForPersistentRejection(t, pair.receiver.node, "lane", 1)
 			assertPersistentStreamReset(t, stream)
 			assertNoPersistentDelivery(t, pair.deliveries)
+			if connectedness := pair.sender.host.Network().Connectedness(pair.receiver.host.ID()); connectedness != network.Connected {
+				t.Fatalf("peer connectedness after wrong-lane rejection = %s, want connected", connectedness)
+			}
+
+			result, err := pair.sender.Send(t.Context(), 1, test.validEnvelope())
+			if err != nil {
+				t.Fatalf("send on unaffected lane: %v", err)
+			}
+			if !result.StreamReused || result.StreamOpenDuration != 0 {
+				t.Fatalf("unaffected lane send = %+v, want prewarmed stream reuse", result)
+			}
+			select {
+			case delivery := <-pair.deliveries:
+				if delivery.envelope.Slot != 2 || delivery.encodedBytes <= 0 {
+					t.Fatalf("unaffected lane delivery = %+v", delivery)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("timed out waiting for unaffected lane delivery")
+			}
+			if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), test.unaffectedProtocolID); got != unaffectedStreams {
+				t.Fatalf("unaffected protocol streams after send = %d, want unchanged %d", got, unaffectedStreams)
+			}
+			if connectedness := pair.sender.host.Network().Connectedness(pair.receiver.host.ID()); connectedness != network.Connected {
+				t.Fatalf("peer connectedness after unaffected send = %s, want connected", connectedness)
+			}
 		})
 	}
+}
+
+func TestPersistentLaneHandlerAuthenticatesBeforeLaneValidation(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistentLanes, streamModePersistentLanes, true)
+	waitForTransportReady(t, pair.sender)
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := validPersistentTestEnvelope(0, 1, 1)
+	envelope.From = 9
+	data, err := (ProtoEnvelopeCodec{}).Encode(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnvelopeFrame(stream, data); err != nil && !errors.Is(err, network.ErrReset) {
+		t.Fatal(err)
+	}
+	waitForPersistentRejection(t, pair.receiver.node, "authentication", 1)
+	if got := persistentRejectionCount(t, pair.receiver.node, "lane"); got != 0 {
+		t.Fatalf("lane rejection count = %d, want 0", got)
+	}
+	assertPersistentStreamReset(t, stream)
+	assertNoPersistentDelivery(t, pair.deliveries)
+}
+
+func TestPersistentLaneHandlerRejectsUnclassifiableSubtypeAsPayload(t *testing.T) {
+	envelope := WireEnvelope{
+		From: 0, To: 1, Direct: true, Kind: "acs", Slot: 1,
+		ACS: &hbbft.SlotMessage{Payload: &hbbft.ACSMessage{}},
+	}
+	if err := validateEnvelopePayload(envelope); err != nil {
+		t.Fatalf("unclassifiable fixture did not pass payload-union validation: %v", err)
+	}
+	pair := newLibP2PTransportPairWithReceiverCodec(
+		t, streamModePersistentLanes, streamModePersistentLanes, true,
+		fixedDecodedEnvelopeCodec{envelope: envelope})
+	waitForTransportReady(t, pair.sender)
+	stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), blocEnvelopeProtocolControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnvelopeFrame(stream, []byte("unclassifiable-acs")); err != nil && !errors.Is(err, network.ErrReset) {
+		t.Fatal(err)
+	}
+	waitForPersistentRejection(t, pair.receiver.node, "payload", 1)
+	if got := persistentRejectionCount(t, pair.receiver.node, "lane"); got != 0 {
+		t.Fatalf("lane rejection count = %d, want 0", got)
+	}
+	assertPersistentStreamReset(t, stream)
+	assertNoPersistentDelivery(t, pair.deliveries)
 }
 
 func TestPersistentLanesReadyRejectsPersistentOnlyPeer(t *testing.T) {
@@ -423,6 +515,18 @@ func laneACS(payload any) WireEnvelope {
 type countingEnvelopeCodec struct {
 	delegate EnvelopeCodec
 	encodes  atomic.Int64
+}
+
+type fixedDecodedEnvelopeCodec struct {
+	envelope WireEnvelope
+}
+
+func (fixedDecodedEnvelopeCodec) Encode(WireEnvelope) ([]byte, error) {
+	return nil, errors.New("fixed decoded envelope codec does not encode")
+}
+
+func (c fixedDecodedEnvelopeCodec) Decode([]byte) (WireEnvelope, error) {
+	return c.envelope, nil
 }
 
 func (c *countingEnvelopeCodec) Encode(envelope WireEnvelope) ([]byte, error) {

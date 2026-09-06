@@ -563,6 +563,27 @@ func newLibP2PTransportPairWithHandler(
 	receiverKnowsSender bool,
 	receiverHandler EnvelopeHandler,
 ) libP2PTransportPair {
+	return newLibP2PTransportPairWithHandlerAndCodec(
+		t, senderMode, receiverMode, receiverKnowsSender, receiverHandler, ProtoEnvelopeCodec{})
+}
+
+func newLibP2PTransportPairWithReceiverCodec(
+	t *testing.T,
+	senderMode, receiverMode string,
+	receiverKnowsSender bool,
+	receiverCodec EnvelopeCodec,
+) libP2PTransportPair {
+	return newLibP2PTransportPairWithHandlerAndCodec(
+		t, senderMode, receiverMode, receiverKnowsSender, nil, receiverCodec)
+}
+
+func newLibP2PTransportPairWithHandlerAndCodec(
+	t *testing.T,
+	senderMode, receiverMode string,
+	receiverKnowsSender bool,
+	receiverHandler EnvelopeHandler,
+	receiverCodec EnvelopeCodec,
+) libP2PTransportPair {
 	t.Helper()
 	senderPrivate, senderPeerID, err := generateLibP2PIdentity()
 	if err != nil {
@@ -582,7 +603,7 @@ func newLibP2PTransportPairWithHandler(
 	senderNode := persistentTestNode(senderConfig, senderPeers, senderPrivate, senderMode)
 	receiverNode := persistentTestNode(receiverConfig, receiverPeers, receiverPrivate, receiverMode)
 	sender := newLibP2PTransport(senderNode, ProtoEnvelopeCodec{})
-	receiver := newLibP2PTransport(receiverNode, ProtoEnvelopeCodec{})
+	receiver := newLibP2PTransport(receiverNode, receiverCodec)
 	deliveries := make(chan persistentTestDelivery, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	if receiverHandler == nil {

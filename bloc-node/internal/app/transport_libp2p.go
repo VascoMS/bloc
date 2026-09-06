@@ -38,15 +38,16 @@ type LibP2PTransport struct {
 	openStream    func(context.Context, uint64) (outboundStream, error)
 	handler       EnvelopeHandler
 
-	persistentWriters map[uint64]*peerStreamWriter
-	persistentStop    chan struct{}
-	lifecycleCancel   context.CancelFunc
-	lifecycleMu       sync.Mutex
-	closing           bool
-	closeOnce         sync.Once
-	closeErr          error
-	prewarmWG         sync.WaitGroup
-	inboundWG         sync.WaitGroup
+	persistentWriters     map[uint64]*peerStreamWriter
+	persistentLaneWriters map[uint64]*peerStreamLaneWriters
+	persistentStop        chan struct{}
+	lifecycleCancel       context.CancelFunc
+	lifecycleMu           sync.Mutex
+	closing               bool
+	closeOnce             sync.Once
+	closeErr              error
+	prewarmWG             sync.WaitGroup
+	inboundWG             sync.WaitGroup
 }
 
 type outboundStream interface {
@@ -59,10 +60,11 @@ type outboundStream interface {
 
 func newLibP2PTransport(node *Node, codec EnvelopeCodec) *LibP2PTransport {
 	return &LibP2PTransport{
-		node:              node,
-		codec:             codec,
-		persistentWriters: make(map[uint64]*peerStreamWriter),
-		persistentStop:    make(chan struct{}),
+		node:                  node,
+		codec:                 codec,
+		persistentWriters:     make(map[uint64]*peerStreamWriter),
+		persistentLaneWriters: make(map[uint64]*peerStreamLaneWriters),
+		persistentStop:        make(chan struct{}),
 	}
 }
 
@@ -290,6 +292,17 @@ func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope)
 	ctx, cancel := withTransportSendDeadline(ctx)
 	defer cancel()
 	env = authenticatedOutboundEnvelope(t.node.self.ID, to, env)
+	var (
+		lane persistentStreamLane
+		err  error
+	)
+	if t.node.cfg.Network.StreamMode == streamModePersistentLanes {
+		lane, err = classifyEnvelopeLane(env)
+		if err != nil {
+			t.node.recordProtocolRejected("outbound", "payload")
+			return result, err
+		}
+	}
 	started := time.Now()
 	data, err := t.codec.Encode(env)
 	result.EncodeDuration = time.Since(started)
@@ -302,13 +315,24 @@ func (t *LibP2PTransport) Send(ctx context.Context, to uint64, env WireEnvelope)
 		return result, fmt.Errorf("%w: encoded %d bytes, maximum %d", errEnvelopeTooLarge, len(data), t.node.cfg.Limits.MaxEnvelopeBytes)
 	}
 	var streamResult transportSendResult
-	if t.node.cfg.Network.StreamMode == streamModePersistent {
+	switch t.node.cfg.Network.StreamMode {
+	case streamModePersistent:
 		writer, ok := t.persistentWriters[to]
 		if !ok {
 			return result, fmt.Errorf("persistent stream writer for peer %d is not running", to)
 		}
 		streamResult, err = writer.send(ctx, data)
-	} else {
+	case streamModePersistentLanes:
+		writers, ok := t.persistentLaneWriters[to]
+		if !ok {
+			return result, fmt.Errorf("persistent lane writers for peer %d are not running", to)
+		}
+		writer, laneErr := writers.writer(lane)
+		if laneErr != nil {
+			return result, laneErr
+		}
+		streamResult, err = writer.send(ctx, data)
+	default:
 		streamResult, err = t.sendStream(ctx, to, data)
 	}
 	result.QueueWaitDuration = streamResult.QueueWaitDuration
@@ -370,6 +394,18 @@ func (t *LibP2PTransport) Ready() bool {
 			}
 			writer, ok := t.persistentWriters[cfg.ID]
 			if !ok || !writer.ready.Load() {
+				return false
+			}
+		}
+		if t.node.cfg.Network.StreamMode == streamModePersistentLanes {
+			supported, err := t.host.Peerstore().SupportsProtocols(
+				id, blocEnvelopeProtocolControl, blocEnvelopeProtocolData)
+			if err != nil || len(supported) != len(persistentStreamLanes) {
+				return false
+			}
+			writers, ok := t.persistentLaneWriters[cfg.ID]
+			if !ok || writers.control == nil || writers.data == nil ||
+				!writers.control.ready.Load() || !writers.data.ready.Load() {
 				return false
 			}
 		}
@@ -462,6 +498,10 @@ func (t *LibP2PTransport) Close() error {
 		for _, writer := range t.persistentWriters {
 			<-writer.done
 		}
+		for _, writers := range t.persistentLaneWriters {
+			<-writers.control.done
+			<-writers.data.done
+		}
 		t.prewarmWG.Wait()
 		t.inboundWG.Wait()
 	})
@@ -479,12 +519,49 @@ func (t *LibP2PTransport) startPersistentWriters(ctx context.Context) {
 		t.prewarmWG.Add(1)
 		go func(operatorID uint64, writer *peerStreamWriter) {
 			defer t.prewarmWG.Done()
-			t.prewarmPersistentWriter(ctx, operatorID, writer)
+			t.prewarmPersistentWriter(ctx, operatorID, writer, blocEnvelopeProtocolPersistent, "single")
 		}(operatorID, writer)
 	}
 }
 
-func (t *LibP2PTransport) prewarmPersistentWriter(ctx context.Context, operatorID uint64, writer *peerStreamWriter) {
+func (t *LibP2PTransport) startPersistentLaneWriters(ctx context.Context) {
+	for operatorID := range t.node.peers {
+		if operatorID == t.node.self.ID {
+			continue
+		}
+		writers := newPeerStreamLaneWriters(operatorID, t.openPersistentLaneOutboundStream, t.persistentStop)
+		writers.control.prewarmOpen = func(ctx context.Context, to uint64) (persistentWriteStream, error) {
+			return t.openPersistentLaneOutboundStreamWithoutDial(ctx, to, persistentLaneControl)
+		}
+		writers.data.prewarmOpen = func(ctx context.Context, to uint64) (persistentWriteStream, error) {
+			return t.openPersistentLaneOutboundStreamWithoutDial(ctx, to, persistentLaneData)
+		}
+		t.persistentLaneWriters[operatorID] = writers
+		for _, lane := range persistentStreamLanes {
+			writer, err := writers.writer(lane)
+			if err != nil {
+				panic(err)
+			}
+			protocolID, err := persistentLaneProtocol(lane)
+			if err != nil {
+				panic(err)
+			}
+			t.prewarmWG.Add(1)
+			go func(operatorID uint64, writer *peerStreamWriter, protocolID protocol.ID, lane persistentStreamLane) {
+				defer t.prewarmWG.Done()
+				t.prewarmPersistentWriter(ctx, operatorID, writer, protocolID, string(lane))
+			}(operatorID, writer, protocolID, lane)
+		}
+	}
+}
+
+func (t *LibP2PTransport) prewarmPersistentWriter(
+	ctx context.Context,
+	operatorID uint64,
+	writer *peerStreamWriter,
+	protocolID protocol.ID,
+	lane string,
+) {
 	peerConfig := t.node.peers[operatorID]
 	peerID, err := peer.Decode(peerConfig.P2PPeerID)
 	if err != nil {
@@ -495,13 +572,13 @@ func (t *LibP2PTransport) prewarmPersistentWriter(ctx context.Context, operatorI
 			return
 		}
 		if t.host.Network().Connectedness(peerID) == network.Connected {
-			supported, supportsErr := t.host.Peerstore().SupportsProtocols(peerID, blocEnvelopeProtocolPersistent)
+			supported, supportsErr := t.host.Peerstore().SupportsProtocols(peerID, protocolID)
 			if supportsErr == nil && len(supported) > 0 {
 				openCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 				err = writer.prewarmStream(openCtx)
 				cancel()
 				if err == nil {
-					log.Printf("event=libp2p_persistent_stream_ready node_id=%d peer_id=%d", t.node.self.ID, operatorID)
+					log.Printf("event=libp2p_persistent_stream_ready node_id=%d peer_id=%d lane=%s", t.node.self.ID, operatorID, lane)
 					return
 				}
 			}
@@ -540,6 +617,33 @@ func (t *LibP2PTransport) openPersistentOutboundStreamWithContext(ctx context.Co
 		return nil, errors.New("libp2p transport is not started")
 	}
 	return t.host.NewStream(ctx, peerID, blocEnvelopeProtocolPersistent)
+}
+
+func (t *LibP2PTransport) openPersistentLaneOutboundStream(ctx context.Context, to uint64, lane persistentStreamLane) (persistentWriteStream, error) {
+	return t.openPersistentLaneOutboundStreamWithContext(ctx, to, lane)
+}
+
+func (t *LibP2PTransport) openPersistentLaneOutboundStreamWithoutDial(ctx context.Context, to uint64, lane persistentStreamLane) (persistentWriteStream, error) {
+	return t.openPersistentLaneOutboundStreamWithContext(network.WithNoDial(ctx, "bloc persistent lane prewarm"), to, lane)
+}
+
+func (t *LibP2PTransport) openPersistentLaneOutboundStreamWithContext(ctx context.Context, to uint64, lane persistentStreamLane) (persistentWriteStream, error) {
+	config, ok := t.node.peers[to]
+	if !ok {
+		return nil, fmt.Errorf("unknown peer %d", to)
+	}
+	peerID, err := peer.Decode(config.P2PPeerID)
+	if err != nil {
+		return nil, err
+	}
+	protocolID, err := persistentLaneProtocol(lane)
+	if err != nil {
+		return nil, err
+	}
+	if t.host == nil {
+		return nil, errors.New("libp2p transport is not started")
+	}
+	return t.host.NewStream(ctx, peerID, protocolID)
 }
 
 func (t *LibP2PTransport) connectStaticPeers(ctx context.Context) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/anthdm/hbbft"
@@ -20,6 +21,39 @@ const (
 var persistentStreamLanes = [...]persistentStreamLane{
 	persistentLaneControl,
 	persistentLaneData,
+}
+
+type persistentLaneStreamOpener func(context.Context, uint64, persistentStreamLane) (persistentWriteStream, error)
+
+type peerStreamLaneWriters struct {
+	control *peerStreamWriter
+	data    *peerStreamWriter
+}
+
+func newPeerStreamLaneWriters(operatorID uint64, open persistentLaneStreamOpener, stop <-chan struct{}) *peerStreamLaneWriters {
+	newWriter := func(lane persistentStreamLane) *peerStreamWriter {
+		return newPeerStreamWriter(operatorID, func(ctx context.Context, to uint64) (persistentWriteStream, error) {
+			return open(ctx, to, lane)
+		}, stop)
+	}
+	return &peerStreamLaneWriters{
+		control: newWriter(persistentLaneControl),
+		data:    newWriter(persistentLaneData),
+	}
+}
+
+func (w *peerStreamLaneWriters) writer(lane persistentStreamLane) (*peerStreamWriter, error) {
+	if w == nil {
+		return nil, fmt.Errorf("persistent lane writers are nil")
+	}
+	switch lane {
+	case persistentLaneControl:
+		return w.control, nil
+	case persistentLaneData:
+		return w.data, nil
+	default:
+		return nil, fmt.Errorf("unknown persistent stream lane %q", lane)
+	}
 }
 
 func persistentLaneProtocol(lane persistentStreamLane) (protocol.ID, error) {

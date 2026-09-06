@@ -812,6 +812,19 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
             if any(int(expected[key].get(field, -1)) != value for field, value in phase_totals.items()):
                 raise ValueError(f"{trace_path}: aggregate/detail ACS send phase mismatch for {key}")
         if trace_schema == "bloc-acs-trace/v3":
+            scheduled_total = sum(int(item["trace"].get("scheduled_count", -1)) for item in messages)
+            terminal_total = sum(int(item["trace"].get("terminal_count", -1)) for item in messages)
+            pending_total = sum(int(item["trace"].get("pending_at_decision", -1)) for item in messages)
+            transport_summary = expected[key]
+            if (
+                not _true(transport_summary.get("acs_trace_sealed", ""))
+                or not _true(transport_summary.get("acs_trace_finalized", ""))
+                or int(transport_summary.get("acs_scheduled_sends", -1)) != scheduled_total
+                or int(transport_summary.get("acs_terminal_sends", -1)) != terminal_total
+                or int(transport_summary.get("acs_pending_at_decision", -1)) != pending_total
+                or min(scheduled_total, terminal_total, pending_total) < 0
+            ):
+                raise ValueError(f"{trace_path}: aggregate/detail ACS transport mismatch for {key}")
             for item in messages:
                 subtype, trace = item["subtype"], item["trace"]
                 scheduled = int(trace.get("scheduled_count", -1))
@@ -892,6 +905,16 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
         raise ValueError(f"{manifest_path}: repetitions or warmups are invalid")
     if int(manifest.get("blocks", -1)) != blocks or manifest.get("sampler") != sampler:
         raise ValueError(f"{manifest_path}: blocks or sampler phase is invalid")
+    if trace_schema == "bloc-acs-trace/v3" and (
+        expected_topology != "three-region"
+        or expected_phase != "latency"
+        or nodes != 4
+        or stream_mode not in {"persistent", "persistent-lanes"}
+    ):
+        raise ValueError(
+            f"{manifest_path}: v3 diagnostic is restricted to n=4 three-region "
+            "persistent/persistent-lanes latency"
+        )
 
     inventory = json.loads((phase_root / "inventory.json").read_text(encoding="utf-8-sig"))
     placement = inventory.get("nodes", [])
@@ -914,8 +937,6 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if not run_paths:
         raise ValueError(f"{phase_root}: run measurements are missing")
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
-    for path in run_paths:
-        assert_acs_trace_artifacts(path.parent, nodes, trace_schema, stream_mode)
     for batch in (8, 32, 128):
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
         attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}
@@ -923,8 +944,25 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
             raise ValueError(f"batch {batch}: expected {repetitions} retained attempts")
         if {int(row.get("measurement_block", 0)) for row in selected} != set(range(1, blocks + 1)):
             raise ValueError(f"batch {batch}: measurement block coverage is incomplete")
+        expected_per_block = repetitions // blocks
+        block_counts = {
+            block: sum(int(row.get("measurement_block", 0)) == block for row in selected)
+            for block in range(1, blocks + 1)
+        }
+        if repetitions % blocks != 0 or any(count != expected_per_block for count in block_counts.values()):
+            raise ValueError(f"batch {batch}: measurement blocks are not balanced")
         if any(int(row.get("planned_scenario_runs", 0)) != repetitions for row in selected):
             raise ValueError(f"batch {batch}: planned attempt count is invalid")
+        if any(int(row.get("schedule_seed", -1)) != int(manifest["seed"]) for row in selected):
+            raise ValueError(f"batch {batch}: per-row schedule seed is invalid")
+        for block in range(1, blocks + 1):
+            block_iterations = {
+                int(row.get("block_iteration", 0))
+                for row in selected
+                if int(row.get("measurement_block", 0)) == block
+            }
+            if block_iterations != set(range(1, expected_per_block + 1)):
+                raise ValueError(f"batch {batch}: block iteration schedule is invalid")
         for row in selected:
             success = _true(row.get("success", "")) and _true(row.get("consistent", ""))
             if success and int(row.get("selected_ciphertexts", 0)) != batch:
@@ -933,6 +971,8 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
                 raise ValueError(f"batch {batch}: failed row was not retained with a classification")
             if row.get("outcome") == "timed_out" and not _true(row.get("timed_out", "")):
                 raise ValueError(f"batch {batch}: timeout classification is inconsistent")
+    for path in run_paths:
+        assert_acs_trace_artifacts(path.parent, nodes, trace_schema, stream_mode)
     if expected_phase == "resource":
         assert_final_resource_artifacts(phase_root)
 

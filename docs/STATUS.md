@@ -538,8 +538,8 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run the separately authorized matched same-AZ/three-region `persistent`
-   versus `persistent-lanes` campaign under the finalized v3 trace contract.
+1. Run the separately authorized matched n4 three-region `persistent` versus
+   `persistent-lanes` campaign under the finalized v3 trace contract.
    Keep current `persistent` as the control; do not claim WAN improvement or
    adopt the experimental lane mode before that evidence is accepted.
 2. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization

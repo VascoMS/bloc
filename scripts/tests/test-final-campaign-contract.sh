@@ -107,6 +107,10 @@ expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixt
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent --acs-trace-schema bloc-acs-trace/v1 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --acs-trace-schema bloc-acs-trace/v2 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --validate-only
+expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent --acs-trace-schema bloc-acs-trace/v3 --validate-only
+expect_failure "$runner" --topology three-region --phase latency --bundle-root "$fixture/n7" --node-count 7 "${common_args[@]}" --stream-mode persistent-lanes --acs-trace-schema bloc-acs-trace/v3 --validate-only
+expect_failure "$runner" --topology three-region --phase readiness-pilot --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --acs-trace-schema bloc-acs-trace/v3 --validate-only
+expect_failure "$runner" --topology three-region --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode fresh --acs-trace-schema bloc-acs-trace/v3 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root
 
 [[ ! -s "$call_log" ]] || { echo "validate-only invoked lifecycle tools" >&2; cat "$call_log" >&2; exit 1; }

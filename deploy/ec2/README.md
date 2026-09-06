@@ -196,7 +196,8 @@ off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and
 `resource` (0 warmups, 1,000 attempts, 10 blocks, sampler on). All use batches
 8/32/128, seed 20260621, and the 12-second boundary. The extension phase remains
 rejected until a later n10/batch-512 30-observation decision. An explicit
-`bloc-acs-trace/v1` or `bloc-acs-trace/v2` latency diagnostic is the narrow
+`bloc-acs-trace/v1`, `bloc-acs-trace/v2`, or approved n4 three-region
+`bloc-acs-trace/v3` latency diagnostic is the narrow
 exception: it uses the 5-warmup/30-attempt/3-block contract above and does not
 run a resource phase.
 

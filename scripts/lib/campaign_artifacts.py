@@ -827,6 +827,22 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
                 raise ValueError(f"{trace_path}: aggregate/detail ACS transport mismatch for {key}")
             for item in messages:
                 subtype, trace = item["subtype"], item["trace"]
+                count_fields = (
+                    "scheduled_count", "terminal_count", "pending_at_decision",
+                    "inbound_count", "inbound_bytes", "outbound_count", "outbound_bytes",
+                    "send_count", "send_total_us", "send_max_us", "send_failure_count",
+                    "stream_open_count", "stream_reuse_count",
+                )
+                if any(int(trace.get(field, -1)) < 0 for field in count_fields):
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} has a negative "
+                        f"ACS transport counter for {key}"
+                    )
+                if any(int(trace[phase]["count"]) < 0 for phase in phase_fields):
+                    raise ValueError(
+                        f"{trace_path}: ACS message subtype {subtype!r} has a negative "
+                        f"ACS transport counter for {key}"
+                    )
                 scheduled = int(trace.get("scheduled_count", -1))
                 terminal = int(trace.get("terminal_count", -1))
                 pending = int(trace.get("pending_at_decision", -1))

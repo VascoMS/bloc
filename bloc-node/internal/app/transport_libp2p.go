@@ -114,6 +114,26 @@ func (t *LibP2PTransport) Start(ctx context.Context, handler EnvelopeHandler) er
 			t.handlePersistentStream(stream)
 		})
 		t.startPersistentWriters(lifecycleCtx)
+	case streamModePersistentLanes:
+		for _, lane := range persistentStreamLanes {
+			protocolID, err := persistentLaneProtocol(lane)
+			if err != nil {
+				lifecycleCancel()
+				_ = h.Close()
+				t.host = nil
+				return err
+			}
+			lane := lane
+			h.SetStreamHandler(protocolID, func(stream network.Stream) {
+				if !t.beginInboundHandler() {
+					_ = stream.Reset()
+					return
+				}
+				defer t.inboundWG.Done()
+				t.handlePersistentLaneStream(stream, lane)
+			})
+		}
+		t.startPersistentLaneWriters(lifecycleCtx)
 	default:
 		lifecycleCancel()
 		_ = h.Close()
@@ -175,6 +195,14 @@ func (t *LibP2PTransport) handleFreshStream(stream network.Stream) {
 }
 
 func (t *LibP2PTransport) handlePersistentStream(stream network.Stream) {
+	t.handlePersistentStreamForLane(stream, "")
+}
+
+func (t *LibP2PTransport) handlePersistentLaneStream(stream network.Stream, lane persistentStreamLane) {
+	t.handlePersistentStreamForLane(stream, lane)
+}
+
+func (t *LibP2PTransport) handlePersistentStreamForLane(stream network.Stream, expectedLane persistentStreamLane) {
 	defer stream.Close()
 	remotePeer := stream.Conn().RemotePeer()
 	operatorID, known := t.peerOperators[remotePeer]
@@ -224,6 +252,18 @@ func (t *LibP2PTransport) handlePersistentStream(stream network.Stream) {
 		if err := validateAuthenticatedEnvelope(operatorID, t.node.self.ID, envelope); err != nil {
 			t.rejectPersistentStream(stream, "authentication", err)
 			return
+		}
+		if expectedLane != "" {
+			actualLane, err := classifyEnvelopeLane(envelope)
+			if err != nil {
+				t.rejectPersistentStream(stream, "payload", err)
+				return
+			}
+			if actualLane != expectedLane {
+				t.rejectPersistentStream(stream, "lane", fmt.Errorf(
+					"envelope lane %q does not match protocol lane %q", actualLane, expectedLane))
+				return
+			}
 		}
 		select {
 		case deliveries <- inboundEnvelope{envelope: envelope, encodedBytes: len(data)}:

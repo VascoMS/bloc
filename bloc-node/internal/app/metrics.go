@@ -156,7 +156,7 @@ func newNodeMetrics(clusterID string, nodeID uint64) *nodeMetrics {
 	for _, reason := range []string{"proposal", "acs", "decode", "planning", "share", "combine", "unknown"} {
 		m.slotFailedTotal.WithLabelValues(m.clusterID, m.nodeID, reason)
 	}
-	for _, reason := range []string{"oversize", "decode", "authentication", "payload", "unknown"} {
+	for _, reason := range []string{"oversize", "decode", "authentication", "payload", "lane", "unknown"} {
 		m.protocolRejected.WithLabelValues(m.clusterID, m.nodeID, "inbound", reason)
 		m.protocolRejected.WithLabelValues(m.clusterID, m.nodeID, "outbound", reason)
 	}
@@ -286,7 +286,7 @@ func normalizeMessageKind(kind string) string {
 
 func normalizeProtocolRejection(reason string) string {
 	switch reason {
-	case "oversize", "decode", "authentication", "payload":
+	case "oversize", "decode", "authentication", "payload", "lane":
 		return reason
 	default:
 		return "unknown"

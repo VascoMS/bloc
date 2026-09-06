@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthdm/hbbft"
+	network "github.com/libp2p/go-libp2p/core/network"
 	protocol "github.com/libp2p/go-libp2p/core/protocol"
 )
 
@@ -116,6 +117,102 @@ func TestPersistentLaneTransportReadyRequiresBothWritersAndProtocols(t *testing.
 	writers.control.ready.Store(false)
 	if pair.sender.Ready() {
 		t.Fatal("lane transport ready while control writer was not ready")
+	}
+}
+
+func TestPersistentLanesPrewarmBothProtocolsAndReuseStreams(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistentLanes, streamModePersistentLanes, true)
+	waitForTransportReady(t, pair.sender)
+	waitForTransportReady(t, pair.receiver)
+	for _, protocolID := range []protocol.ID{blocEnvelopeProtocolControl, blocEnvelopeProtocolData} {
+		if !transportAdvertisesProtocol(pair.receiver, protocolID) {
+			t.Fatalf("missing advertised protocol %s", protocolID)
+		}
+		if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), protocolID); got != 1 {
+			t.Fatalf("prewarmed streams for %s = %d, want 1", protocolID, got)
+		}
+	}
+	if transportAdvertisesProtocol(pair.receiver, blocEnvelopeProtocolFresh) ||
+		transportAdvertisesProtocol(pair.receiver, blocEnvelopeProtocolPersistent) {
+		t.Fatalf("lane mode advertised legacy protocols: %v", pair.receiver.host.Mux().Protocols())
+	}
+
+	ready := WireEnvelope{Kind: "acs", Slot: 1, ACS: slotACSMessage(
+		&hbbft.BroadcastMessage{Payload: &hbbft.ReadyRequest{RootHash: []byte("root")}},
+	)}
+	share := validPersistentTestEnvelope(0, 1, 2)
+	for name, env := range map[string]WireEnvelope{"ready": ready, "share": share} {
+		result, err := pair.sender.Send(t.Context(), 1, env)
+		if err != nil || !result.StreamReused || result.StreamOpenDuration != 0 {
+			t.Fatalf("%s send = %+v, %v", name, result, err)
+		}
+	}
+	for index := 0; index < 2; index++ {
+		select {
+		case delivery := <-pair.deliveries:
+			if delivery.encodedBytes <= 0 {
+				t.Fatalf("delivery omitted encoded size: %+v", delivery)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for lane delivery %d", index)
+		}
+	}
+}
+
+func TestPersistentLaneHandlerRejectsWrongLane(t *testing.T) {
+	tests := []struct {
+		name       string
+		protocolID protocol.ID
+		envelope   func() WireEnvelope
+	}{
+		{
+			name: "share on control", protocolID: blocEnvelopeProtocolControl,
+			envelope: func() WireEnvelope { return validPersistentTestEnvelope(0, 1, 1) },
+		},
+		{
+			name: "ready on data", protocolID: blocEnvelopeProtocolData,
+			envelope: func() WireEnvelope {
+				return WireEnvelope{From: 0, To: 1, Direct: true, Kind: "acs", Slot: 1,
+					ACS: slotACSMessage(&hbbft.BroadcastMessage{
+						Payload: &hbbft.ReadyRequest{RootHash: []byte("root")},
+					})}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pair := newLibP2PTransportPair(t, streamModePersistentLanes, streamModePersistentLanes, true)
+			stream, err := pair.sender.host.NewStream(t.Context(), pair.receiver.host.ID(), test.protocolID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := (ProtoEnvelopeCodec{}).Encode(test.envelope())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeEnvelopeFrame(stream, data); err != nil && !errors.Is(err, network.ErrReset) {
+				t.Fatal(err)
+			}
+			waitForPersistentRejection(t, pair.receiver.node, "lane", 1)
+			assertPersistentStreamReset(t, stream)
+			assertNoPersistentDelivery(t, pair.deliveries)
+		})
+	}
+}
+
+func TestPersistentLanesReadyRejectsPersistentOnlyPeer(t *testing.T) {
+	pair := newLibP2PTransportPair(t, streamModePersistentLanes, streamModePersistent, true)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pair.sender.Ready() {
+			t.Fatal("lane transport became ready with a v2-only peer")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, protocolID := range []protocol.ID{blocEnvelopeProtocolControl, blocEnvelopeProtocolData} {
+		if got := countOpenProtocolStreams(pair.sender, pair.receiver.host.ID(), protocolID); got != 0 {
+			t.Fatalf("mixed-mode streams for %s = %d, want 0", protocolID, got)
+		}
 	}
 }
 

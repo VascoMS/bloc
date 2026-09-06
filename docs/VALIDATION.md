@@ -363,13 +363,14 @@ regression. Run-level ACS p50 changed from `1.480/1.648/2.938 ms` to
 `1.496/1.681/2.981 ms` (`+0.016/+0.033/+0.043 ms`). This is a passed local
 mechanism/regression gate with no local ACS improvement claim.
 
-Adoption requires a separately authorized, source- and workload-matched
-same-AZ/three-region campaign under the finalized-v3 contract. Keep
-`persistent` as the control and require 30 successful consistent observations
-per batch/mode/topology, zero deadline misses and send failures, exact
-provenance/schedule equality, complete final traces, and balanced subtype
-lifecycles. Until that evidence exists, keep `persistent-lanes` experimental
-and make no WAN-improvement or mode-adoption claim.
+The original adoption gate required a separately authorized, source- and
+workload-matched same-AZ/three-region campaign under the finalized-v3 contract,
+with 30 successful consistent observations per batch/mode/topology, zero
+deadline misses and send failures, exact provenance/schedule equality, complete
+final traces, and balanced subtype lifecycles. The user authorized only the
+three-region arm needed to answer the WAN question. Because that arm did not
+meet the ACS improvement gate, the mode is not adopted; same-AZ evidence would
+still be required before any future reconsideration.
 
 The authorized 2026-09-06 short three-region campaign used frozen source
 `0caecb9298cb14923bfb07b63483ae90f864bba6`, one immutable BLOC image, one
@@ -673,6 +674,19 @@ The accepted artifact root is
 p50/p95 latency, pairwise-network, stage, and critical-node-region claims. A
 matched current-build same-region control is required before causal topology
 claims.
+
+The retained pairwise network fields need precise interpretation. Each attempt
+launched a new plain-HTTP `curl` process and requested `/healthz` with no request
+body. A ready n4 node returned a 26-byte JSON body plus ordinary HTTP headers.
+`avg_connect_ms` is the TCP-connect duration and is the closest retained RTT
+approximation; `avg_total_ms` includes both the TCP handshake and the subsequent
+HTTP request/response, so it is approximately two RTTs for these tiny probes.
+Pre-phase p50 connect/total values were `0.182/0.644 ms` intra-region,
+`20.135/40.534 ms` Ireland--Frankfurt, `69.133/138.483 ms` US--Ireland, and
+`91.554/183.329 ms` US--Frankfurt. These health checks establish connectivity
+and small-message path delay. They do not measure throughput or the transfer
+time of 50--202 KiB RBC shards/proposals, and must not be described as an RBC
+payload benchmark.
 
 ## BTE Benchmarks
 

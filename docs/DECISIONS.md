@@ -599,9 +599,16 @@ Use this file for major architecture, protocol, and workflow decisions.
   local mechanism gate passed all correctness, race, trace, and ACS safety
   checks; READY queue-wait p50 decreased in all three local batches, while ACS
   p50 changed by only `+0.016/+0.033/+0.043 ms`. This supports local mechanism
-  validation, not a WAN improvement or mode adoption. `persistent` remains the
-  deployed comparison control until the separately authorized matched
-  same-AZ/three-region campaign is accepted.
+  validation, not a WAN improvement or mode adoption. The later authorized n4
+  three-region campaign retained 90/90 successful, consistent, deadline-met
+  measurements and 420 finalized traces per arm with zero send failures. At
+  batch 128 the lane mode reduced READY queue-wait p50 from `126.493 ms` to
+  `0.044 ms` and first-RBC-output p50 from `422.542 ms` to `307.503 ms`, but
+  RBC-output-quorum p50 remained `435.707/433.699 ms` and ACS p50 changed from
+  `518.620 ms` to `525.464 ms`. The result is mechanism-only: do not adopt the
+  lane mode, keep `persistent` as the default, and do not spend further focused
+  effort on direct-stream queue tuning. Same-AZ lane evidence was not collected
+  and would still be required before any future adoption reconsideration.
 - Related files: `bloc-node/internal/app/transport_libp2p.go`,
   `bloc-node/internal/app/transport_libp2p_lanes.go`,
   `bloc-node/internal/app/transport_libp2p_lanes_test.go`,

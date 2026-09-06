@@ -3,6 +3,48 @@
 Add one short dated section per meeting. Keep each entry focused on the problem,
 the implemented solution, the evidence produced, and any remaining boundary.
 
+## 2026-09-06 — ACS WAN Latency Diagnosis
+
+### Question And Evidence
+
+Recent work tested whether the high three-region ACS latency came from RBC
+correctness, per-message libp2p stream negotiation, or application-stream
+head-of-line blocking. Issues #23--#26 added matched same-AZ/WAN stream tests,
+fixed READY self-admission, finalized transport traces, and tested separate
+authenticated control/data lanes.
+
+For n4 three-region `persistent`, the reproducible ACS p50 baseline is about
+`232/258/519 ms` for batches `8/32/128`. A batch-128 proposal is about 202 KiB;
+PROOF+ECHO contributes about 1.48 MiB of outbound application data per node,
+with ECHO near 80% of ACS application bytes. In the lane experiment, READY
+queue-wait p50 fell from `126.493 ms` to `0.044 ms` and first-RBC-output p50
+fell from `422.542 ms` to `307.503 ms`, but RBC-output-quorum p50 stayed
+`435.707/433.699 ms` and ACS p50 changed `518.620/525.464 ms`.
+
+### Network-Measurement Correction
+
+The earlier `40.5/138.5/183.3 ms` Ireland--Frankfurt/US--Ireland/US--Frankfurt
+figures are complete tiny HTTP health-request times, not pure RTTs and not RBC
+payload transfers. Each probe opens TCP, sends a bodyless `/healthz` request,
+and receives a 26-byte JSON body. The corresponding TCP-connect RTT
+approximations are `20.1/69.1/91.6 ms`; intra-region connect/total values are
+about `0.18/0.64 ms`. The evidence establishes path delay but does not separate
+available bandwidth, serialization, flow control, or retransmission cost for
+the real RBC payloads.
+
+### Conclusion And Boundary
+
+Persistent prewarmed streams remove per-envelope negotiation, and two lanes
+remove READY application-queue blocking, but neither improves the multi-region
+RBC quorum or end-to-end ACS. Treat the current numbers as a scoped baseline,
+keep single-stream `persistent` as the default, and stop incremental stream
+tuning. Meaningful further reduction would require a separately scoped
+protocol-level change such as smaller BTE proposals or decoupled data
+availability/dissemination. The lane campaign has 30 observations per cell and
+supports p50 plus exploratory p95/maximum, not p99.
+
+Detailed evidence: [September ACS communication findings](archive/ACS_COMMUNICATION_LATENCY_FINDINGS_2026-09.md).
+
 ## 2026-08-26 — Progress Over the Previous Month
 
 ### Summary

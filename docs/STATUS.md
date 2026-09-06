@@ -30,6 +30,8 @@ and data application streams while retaining fresh and single-stream modes.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
+The cumulative issue #23--#26 communication diagnosis is retained in
+[ACS_COMMUNICATION_LATENCY_FINDINGS_2026-09.md](archive/ACS_COMMUNICATION_LATENCY_FINDINGS_2026-09.md).
 
 This remains a research prototype. It does not provide production DKG or key
 custody, public decryption-share verification, a cryptographic common coin,
@@ -161,12 +163,12 @@ release-candidate configuration contract are defined in
   `72.434/144.454/428.540 ms`, and true-BBA-quorum p50 is
   `209.100/235.958/508.608 ms`. Direct persistent streams neither reduce the
   all-to-all message pattern nor remove those WAN-dependent rounds, and a
-  single per-peer stream can serialize large concurrent messages. The locally
-  validated experimental lane mode isolates that application-level mechanism;
-  a separately authorized matched same-AZ/three-region campaign is still needed
-  before any adoption decision. GossipSub remains a possible later
-  dissemination experiment but is not an immediate action. No n7 or p99 claim
-  is made from this 30-observation diagnostic.
+  single per-peer stream can serialize large concurrent messages. The later
+  accepted issue #26 three-region lane diagnostic, summarized above, resolves
+  the WAN question: isolating control traffic advances first RBC output but not
+  RBC quorum or ACS completion. Same-AZ lane evidence was not collected, the
+  mode was not adopted, and GossipSub is not an immediate action. No n7 or p99
+  claim is made from either 30-observation diagnostic.
 
   All four runs completed recovery and teardown. Terraform destroyed 15
   resources per same-AZ arm and 39 per three-region arm; retained and
@@ -561,11 +563,12 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Keep current `persistent` as the default after issue #26's accepted
-   mechanism-only result. Before selecting another ACS optimization, review the
-   evidence that lanes remove READY queueing and accelerate first RBC output but
-   do not move RBC quorum or end-to-end ACS; any next WAN experiment should
-   target the remaining payload-dissemination/quorum critical path.
+1. Treat the measured n4 three-region persistent ACS p50 values of approximately
+   `232/258/519 ms` for batches `8/32/128` as the scoped baseline for the current
+   architecture. Keep `persistent` as the default and stop focused direct-stream
+   tuning. Any future latency-reduction task must be separately selected as a
+   protocol-level payload-dissemination/quorum redesign rather than an incremental
+   transport adjustment.
 2. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
    proposals. Do not include them in the focused READY/stream-lane program.
 3. Leave issue #15 open and paused for resource collection. Do not admit any

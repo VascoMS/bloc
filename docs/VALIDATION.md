@@ -371,6 +371,50 @@ provenance/schedule equality, complete final traces, and balanced subtype
 lifecycles. Until that evidence exists, keep `persistent-lanes` experimental
 and make no WAN-improvement or mode-adoption claim.
 
+The authorized 2026-09-06 short three-region campaign used frozen source
+`0caecb9298cb14923bfb07b63483ae90f864bba6`, one immutable BLOC image, one
+unchanged mempool image, and one verified n4 identity/corpus bundle. The
+`persistent` and `persistent-lanes` arms each completed 5 warmups and 30
+measurements per batch across three balanced blocks. Both roots retained 90/90
+successful, consistent, deadline-met measured slots, 420 sealed/finalized v3
+node traces including warmups, exact measured schedules, balanced subtype
+lifecycles, and zero send failures. Each separate deployment destroyed all 39
+Terraform resources and passed retained plus authenticated cleanup checks.
+
+For batches `8/32/128`, Type-7 run-level ACS p50 changed from
+`231.933/258.217/518.620 ms` to `232.113/246.287/525.464 ms`
+(`+0.1%/-4.6%/+1.3%`). At the primary batch-128 cell, Type-7 per-node-trace
+READY queue-wait p50 fell from `126.493 ms` to `0.044 ms` (`-99.97%`), and the
+critical node's first-RBC-output p50 fell from `422.542 ms` to `307.503 ms`
+(`-27.2%`). RBC-output-quorum p50, however, changed only from `435.707 ms` to
+`433.699 ms` (`-0.5%`). A deterministic 100,000-replicate paired percentile
+bootstrap resampled the 30 matched runs, keeping each run's four node traces as
+one cluster. Its 95% median-difference intervals were `[-315.570, -0.686] ms`
+for READY queue wait, `[-118.857, -72.453] ms` for first RBC output,
+`[-42.469, +4.424] ms` for RBC-output quorum, and
+`[+0.758, +19.291] ms` for ACS.
+
+This is accepted **mechanism-only** evidence: the application-lane split
+removes the batch-128 READY head-of-line queue and advances the first RBC
+output, but it neither advances the RBC quorum nor meets the specified `>=5%`
+batch-128 ACS improvement gate. The observed batch-128 ACS p50 instead rose
+`6.845 ms`. Its p95 moved from `566.092 ms` to `555.132 ms`, while the maximum
+moved from `572.826 ms` to `700.215 ms`; with 30 observations these are
+exploratory and support neither a tail nor p99 claim.
+
+Full-slot p50 also rose in every treatment cell, including
+`1957.121 ms` to `2619.001 ms` (`+33.8%`) at batch 128. The shift was dominated
+by later CPU-heavy work that lanes do not change: merge-plan p50 rose `51.5%`
+and combine p50 rose `48.6%`. Because control and treatment intentionally used
+sequential, separately provisioned fleets, this is a deployment-performance
+confound rather than evidence that lanes caused the downstream regression. It
+does mean the campaign observed no end-to-end improvement. Keep
+`persistent-lanes` experimental and `persistent` as the default. Same-AZ was
+not run, so the full adoption matrix remains unassessed. Retained roots are
+`results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
+`results/ec2/bloc-ec2-i26-tr-ln-v3-p1/`; the reproducible ignored comparison is
+under `results/local/acs-lane-campaign/issue-26-0caecb9/aws-analysis/`.
+
 ## ACS Safety Gate
 
 After ACS/BBA safety or liveness changes, run:

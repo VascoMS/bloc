@@ -3,7 +3,7 @@
 - Last reviewed: `2026-09-06`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Last known good source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
+- Last known good source: `0caecb9298cb14923bfb07b63483ae90f864bba6`
 
 ## Current Prototype State
 
@@ -70,8 +70,9 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Persistent control/data lanes remain experimental pending matched VM
-  evidence:** issue #25's finalized `bloc-acs-trace/v3` implementation now
+- **Persistent control/data lanes have accepted mechanism-only three-region
+  evidence and remain experimental:** issue #25's finalized
+  `bloc-acs-trace/v3` implementation now
   synchronously admits sends, seals at local ACS output, publishes only after
   terminal accounting completes, and records immutable pending-at-decision and
   READY trigger context. The combined lane smoke retained four sealed/finalized
@@ -93,15 +94,37 @@ release-candidate configuration contract are defined in
   artifacts are under `bloc-node/results/local/acs-persistent-lanes/` and
   `results/local/acs-common-subset-safety/acs-safety-20260906t09581788688726z/`.
 
-  The user has now authorized the short matched n4 three-region control/treatment
-  campaign: batches `8/32/128`, five warmups, 30 measured attempts, three
-  balanced blocks, seed `20260621`, deadline `12s`, and sampler off. Preflight
-  found that the EC2 wrapper and final recovered-artifact validator had not been
-  extended for the already implemented v3 lane mode. The bounded correction now
-  accepts persistent/v3 and persistent-lanes/v3, retains historical contracts,
-  and requires sealed/finalized balanced v3 traces. The live control arm remains
-  pending immutable source/image/bundle and authenticated empty-environment
-  preflight; no campaign resources were allocated during the correction.
+  The authorized short matched n4 three-region control/treatment campaign is
+  now accepted from frozen source `0caecb9298cb14923bfb07b63483ae90f864bba6`,
+  one immutable BLOC image, one unchanged mempool image, and one verified
+  identity/corpus bundle. Each arm retained 90/90 successful, consistent,
+  deadline-met measured slots and 420 sealed/finalized v3 node traces including
+  warmups, with exact measured schedules, balanced subtype lifecycles, and zero
+  send failures. Both independent deployments destroyed all 39 Terraform
+  resources and passed retained plus authenticated cleanup checks.
+
+  At batch 128, per-node-trace READY queue-wait p50 fell from `126.493 ms` to
+  `0.044 ms` (`-99.97%`); a 100,000-replicate paired run-cluster bootstrap puts
+  the median difference at `[-315.570, -0.686] ms`. Critical-node first-RBC-
+  output p50 fell from `422.542 ms` to `307.503 ms` (`-27.2%`), but RBC-output-
+  quorum p50 was unchanged within uncertainty (`435.707 ms` to `433.699 ms`),
+  and run-level ACS p50 moved from `518.620 ms` to `525.464 ms` (`+1.3%`,
+  median-difference interval `[+0.758, +19.291] ms`). Batch-8 ACS was flat and
+  batch-32's `-4.6%` p50 change was inconclusive. The mechanism therefore works,
+  but it did not improve observed multi-region ACS latency and fails the
+  specified `>=5%` batch-128 ACS gate. Keep single-stream `persistent` as the
+  control/default and do not adopt the lane mode. Same-AZ evidence was not
+  collected, and no p99 or WAN tail claim is made from 30 observations.
+
+  Full-slot latency also worsened in the later treatment deployment, reaching
+  `+33.8%` at batch 128. Most of that shift occurred outside ACS in CPU-heavy
+  merge/combine work (`+51.5%`/`+48.6%` p50), so the sequential, separately
+  provisioned fleets do not support attributing that regression to stream
+  lanes. It remains an explicit deployment-performance confound and reinforces
+  the no-end-to-end-improvement conclusion. Accepted roots are
+  `results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
+  `results/ec2/bloc-ec2-i26-tr-ln-v3-p1/`; reproducible ignored comparison
+  output is under `results/local/acs-lane-campaign/issue-26-0caecb9/aws-analysis/`.
 
 - **Issue #23 phase one is accepted; GossipSub phase two is deferred:** the final
   n4 four-arm campaign used source
@@ -538,10 +561,11 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Run the separately authorized matched n4 three-region `persistent` versus
-   `persistent-lanes` campaign under the finalized v3 trace contract.
-   Keep current `persistent` as the control; do not claim WAN improvement or
-   adopt the experimental lane mode before that evidence is accepted.
+1. Keep current `persistent` as the default after issue #26's accepted
+   mechanism-only result. Before selecting another ACS optimization, review the
+   evidence that lanes remove READY queueing and accelerate first RBC output but
+   do not move RBC quorum or end-to-end ACS; any next WAN experiment should
+   target the remaining payload-dissemination/quorum critical path.
 2. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
    proposals. Do not include them in the focused READY/stream-lane program.
 3. Leave issue #15 open and paused for resource collection. Do not admit any

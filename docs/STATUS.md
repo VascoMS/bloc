@@ -23,8 +23,10 @@ validation, p99-capable Type-7/order-statistic reporting, balanced seeded
 long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
 500-transaction balanced client corpus with one plaintext/encrypted measurement
 per target, a separate nested 512-target representative protocol corpus,
-Prometheus metrics, local evaluators, VM/EC2 remote evaluation, and opt-in
-bounded `bloc-acs-trace/v2` diagnostics with fail-closed evaluator artifacts.
+Prometheus metrics, local evaluators, VM/EC2 remote evaluation, opt-in finalized
+`bloc-acs-trace/v3` diagnostics with fail-closed evaluator artifacts, and a
+locally validated experimental `persistent-lanes` mode that isolates control
+and data application streams while retaining fresh and single-stream modes.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -68,17 +70,28 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **ACS transport traces remain right-censored at local output:** issue #25's
-  branch-scoped v3 implementation reached `1f2e026`, including synchronous
-  admission, terminal completion, pending-at-decision counts, READY trigger
-  context, and fail-closed artifacts. Its normal/race suites and local ACS
-  safety campaign passed, but the exact ten-sample matched observer gate failed:
-  trace-on medians were `+7.673%` at `n4/batch8` and `+2.015%` at
-  `n7/batch128`, exceeding the `<=2%` limit. Final v3 smoke, canonical
-  documentation, issue closure, and persistent control/data lanes remain
-  blocked. `ACSUS` remains valid, but the accepted v2 trace can omit the
-  slowest outstanding sends. The approved scope and acceptance contract are in
-  the [READY/stream-lane design](superpowers/specs/2026-09-02-rbc-ready-stream-lanes-design.md).
+- **Persistent control/data lanes remain experimental pending matched VM
+  evidence:** issue #25's finalized `bloc-acs-trace/v3` implementation now
+  synchronously admits sends, seals at local ACS output, publishes only after
+  terminal accounting completes, and records immutable pending-at-decision and
+  READY trigger context. The combined lane smoke retained four sealed/finalized
+  v3 records with balanced lifecycles and zero send failures, removing the
+  accepted-v2 right-censoring blocker. The ten-sample observer result remains a
+  warning: trace-on medians were `+7.673%` (`+0.120 ms`) at `n4/batch8` and
+  `+2.015%` (`+1.419 ms`) at `n7/batch128`. Those absolute deltas are accepted
+  as negligible for the matched multi-region objective, where both arms use the
+  same tracing; the relative values remain visible.
+
+  Issue #26's local gate passed complete normal/race suites, the lane smoke,
+  and the ACS safety campaign. Matched persistent/lane diagnostics each
+  retained 90/90 successful, consistent, deadline-met measured slots, 420
+  finalized v3 traces including warmups, balanced lifecycles, and zero send
+  failures. READY queue-wait p50 changed by
+  `-24.3%/-36.1%/-16.7%` for batches `8/32/128`, while ACS p50 changed only
+  `+0.016/+0.033/+0.043 ms`. This validates the local mechanism without
+  demonstrating an ACS or WAN improvement and does not adopt the mode. Ignored
+  artifacts are under `bloc-node/results/local/acs-persistent-lanes/` and
+  `results/local/acs-common-subset-safety/acs-safety-20260906t09581788688726z/`.
 
 - **Issue #23 phase one is accepted; GossipSub phase two is deferred:** the final
   n4 four-arm campaign used source
@@ -115,11 +128,12 @@ release-candidate configuration contract are defined in
   `72.434/144.454/428.540 ms`, and true-BBA-quorum p50 is
   `209.100/235.958/508.608 ms`. Direct persistent streams neither reduce the
   all-to-all message pattern nor remove those WAN-dependent rounds, and a
-  single per-peer stream can serialize large concurrent messages. The selected
-  next experiment isolates that application-level head-of-line mechanism with
-  separate persistent control and data streams. GossipSub remains a possible
-  later dissemination experiment but is not an immediate action. No n7 or p99
-  claim is made from this 30-observation diagnostic.
+  single per-peer stream can serialize large concurrent messages. The locally
+  validated experimental lane mode isolates that application-level mechanism;
+  a separately authorized matched same-AZ/three-region campaign is still needed
+  before any adoption decision. GossipSub remains a possible later
+  dissemination experiment but is not an immediate action. No n7 or p99 claim
+  is made from this 30-observation diagnostic.
 
   All four runs completed recovery and teardown. Terraform destroyed 15
   resources per same-AZ arm and 39 per three-region arm; retained and
@@ -514,23 +528,18 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Reduce or characterize `bloc-acs-trace/v3` observer overhead and rerun the
-   exact ten-sample matched gate before final smoke, canonical documentation,
-   issue closure, or the persistent control/data stream experiment.
-2. Follow with the opt-in persistent control/data stream mode. Keep current
-   `persistent` as the matched control and do not begin implementation before
-   its tracked issue exists.
-3. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
+1. Run the separately authorized matched same-AZ/three-region `persistent`
+   versus `persistent-lanes` campaign under the finalized v3 trace contract.
+   Keep current `persistent` as the control; do not claim WAN improvement or
+   adopt the experimental lane mode before that evidence is accepted.
+2. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
    proposals. Do not include them in the focused READY/stream-lane program.
-4. Run the matched same-AZ/three-region `persistent` versus
-   `persistent-lanes` campaign only after local, race, and ACS safety gates pass
-   and separate cloud authorization is granted.
-5. Leave issue #15 open and paused for resource collection. Do not admit any
+3. Leave issue #15 open and paused for resource collection. Do not admit any
    resource-phase latency rows or rejected campaign attempts into the p99
    dataset.
-6. Do not combine measurements from different source, image, corpus,
+4. Do not combine measurements from different source, image, corpus,
    configuration, or schema revisions into one final campaign.
-7. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

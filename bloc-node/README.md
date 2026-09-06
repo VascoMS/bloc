@@ -87,14 +87,21 @@ multiplexed libp2p streams. The generated bindings live in
 `proto/bloc/v1/messages.proto` and `internal/pb/blocv1/messages.pb.go`. The
 local multiaddresses use TCP underneath; libp2p is not gRPC.
 
-`network.stream_mode` selects the envelope-stream lifecycle. Omission and
-`fresh` retain the compatibility path: protocol `/bloc/envelope/1.0.0`, one
-logical stream per envelope, and one protobuf message terminated by the stream
-boundary. `persistent` selects `/bloc/envelope/2.0.0`, prewarms one outbound
-stream per peer, confirms libp2p's lazy protocol handshake before readiness,
-and carries repeated length-delimited protobuf frames on it.
-The underlying libp2p peer connections are persistent in both modes; this
-experiment isolates reuse of the logical envelope streams.
+`network.stream_mode` selects the envelope-stream lifecycle:
+
+| Stream mode | Protocols | Writers per remote peer | Routing |
+| --- | --- | ---: | --- |
+| `fresh` | `/bloc/envelope/1.0.0` | 0 persistent | one stream per envelope |
+| `persistent` | `/bloc/envelope/2.0.0` | 1 | all envelope types share one FIFO |
+| `persistent-lanes` | `/bloc/envelope/3.0.0/control`, `/bloc/envelope/3.0.0/data` | 2 | READY/BVAL/AUX on control; PROOF/ECHO/share on data |
+
+Omission retains the `fresh` compatibility path. Both persistent modes prewarm
+their outbound stream or streams, confirm libp2p's lazy protocol handshake
+before readiness, and carry repeated length-delimited protobuf frames. The
+underlying libp2p peer connections are persistent in all modes.
+`persistent-lanes` is an experimental application-stream isolation mode, not a
+bandwidth optimization: payload volume, recipient counts, protocol rounds,
+libp2p connection congestion, and TCP loss head-of-line blocking are unchanged.
 
 The v2 defaults are 8 MiB per encoded proposal, 16 MiB per inbound/outbound
 envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
@@ -137,12 +144,25 @@ go run ./cmd/bloc-node eval-local \
 
 For a bounded ACS diagnostic artifact, use `eval-suite --acs-trace`. The flag
 is opt-in and propagates to generated isolated and persistent configs; new
-evaluator runs write validated `bloc-acs-trace/v2` records to
-`acs_trace.jsonl`. Version 2 adds successful-send phase aggregates for encode,
-queue wait, stream open, write, and finalization plus stream open/reuse counts;
-the reader remains compatible with historical v1 artifacts. See the ACS trace
-diagnostic gate in [docs/VALIDATION.md](../docs/VALIDATION.md) before
-interpreting or comparing those offsets.
+evaluator runs write validated `bloc-acs-trace/v3` records to
+`acs_trace.jsonl`; readers retain historical v1/v2 compatibility. The trace
+admits ACS sends synchronously when they are emitted, seals at local ACS output,
+and finalizes after every admitted send terminates. Per-subtype
+`pending_at_decision` is an immutable historical count, while final artifacts
+require `scheduled_count = terminal_count = send_count + send_failure_count`.
+Successful phase totals describe sender-side completion, not remote receipt.
+
+When tracing is enabled, result publication waits for finalization; `ACSUS`,
+protocol progress, merge/plan, share generation, and materialization retain
+their existing boundaries. Each RBC entry records whether its first READY was
+triggered by `echo_quorum` or `ready_relay`, together with matching ECHO/READY
+counts before local self-admission. The ten-repetition v3 observer check showed
+trace-on medians of `+7.673%` at `n4/batch8` (`+0.120 ms`) and `+2.015%` at
+`n7/batch128` (`+1.419 ms`). Those relative increases remain an explicit
+observer warning, while their absolute cost is accepted as negligible for the
+matched multi-region lane objective. See the ACS trace diagnostic gate in
+[docs/VALIDATION.md](../docs/VALIDATION.md) before interpreting or comparing
+these diagnostics.
 
 Run the professor-facing demo flow:
 
@@ -248,6 +268,13 @@ cd latency-charts
 The analyzer rejects mode, schedule, trace, failure, consistency, and retained
 provenance mismatches. Its p50/p95 confidence-interval classifications are
 diagnostic rather than a causal proof; 30 observations do not support p99.
+
+For the follow-up application-stream isolation experiment, keep `persistent`
+as the control and compare it with `persistent-lanes` using the finalized v3
+trace contract. The local `n=4` batches `8/32/128` gate is a correctness and
+queue-regression diagnostic only. The mode remains experimental until a
+separately authorized matched same-AZ/three-region campaign supports adoption;
+local results make no WAN-improvement claim.
 
 ## Frozen Campaign Bundles
 

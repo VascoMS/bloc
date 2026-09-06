@@ -564,3 +564,45 @@ Use this file for major architecture, protocol, and workflow decisions.
   `bloc-node/internal/app/transport_libp2p_persistent.go`,
   `sbc/hbbft/trace.go`, `latency-charts/src/bloc_latency_charts/transport_attribution.py`,
   `docs/VALIDATION.md`
+
+## 0027. Isolate control and data on two persistent application streams
+
+- Date: 2026-09-06
+- Status: Accepted
+- Context: Issue #23's accepted three-region persistent arm exposed
+  batch-128 sender queue wait on the single application stream. READY, BVAL,
+  and AUX control messages could therefore wait behind an already-started
+  PROOF, ECHO, or decryption-share frame even though the underlying libp2p peer
+  connection remained open.
+- Options considered: retain the single persistent FIFO; add a priority queue
+  in front of one writer; migrate consensus dissemination; or add independent
+  persistent control and data streams while preserving the direct-message
+  protocol.
+- Decision: Use two persistent application streams per peer for the lane
+  experiment rather than a priority queue on one stream. A priority queue
+  cannot preempt a large frame already being written. The existing single
+  persistent stream remains the control, wrong-lane inbound frames fail closed,
+  and adoption requires matched same-AZ/three-region evidence under the
+  finalized v3 trace contract. Protocol
+  `/bloc/envelope/3.0.0/control` carries READY/BVAL/AUX and
+  `/bloc/envelope/3.0.0/data` carries PROOF/ECHO/share. Each lane owns one
+  capacity-one writer, readiness/prewarm state, reset/no-replay lifecycle, and
+  inbound FIFO.
+- Rationale: Separate writers let admitted control work bypass application
+  backpressure on the data stream. A priority queue would only reorder frames
+  that have not started and cannot interrupt a large in-progress stream write.
+  Exact protocol IDs and authenticated fail-closed lane checks prevent peers
+  from silently disagreeing about framing or routing.
+- Consequences: The mode isolates only application-stream head-of-line
+  blocking. Payload volume, recipient counts, protocol rounds, libp2p connection
+  congestion, and TCP loss head-of-line blocking are unchanged. The 2026-09-06
+  local mechanism gate passed all correctness, race, trace, and ACS safety
+  checks; READY queue-wait p50 decreased in all three local batches, while ACS
+  p50 changed by only `+0.016/+0.033/+0.043 ms`. This supports local mechanism
+  validation, not a WAN improvement or mode adoption. `persistent` remains the
+  deployed comparison control until the separately authorized matched
+  same-AZ/three-region campaign is accepted.
+- Related files: `bloc-node/internal/app/transport_libp2p.go`,
+  `bloc-node/internal/app/transport_libp2p_lanes.go`,
+  `bloc-node/internal/app/transport_libp2p_lanes_test.go`,
+  `docs/VALIDATION.md`

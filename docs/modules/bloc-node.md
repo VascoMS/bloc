@@ -181,42 +181,53 @@ to identify the same non-nil ACS or share payload before routing.
 
 ### libp2p transport
 
-The transport creates a host from the configured static Ed25519 private key and
-uses one of two intentionally separate protocols. `network.stream_mode=fresh`
-and omitted legacy values select `/bloc/envelope/1.0.0`: each envelope uses a
-fresh logical stream over a multiplexed persistent peer connection, `writeAll`
-handles short writes, and `CloseWrite` plus `Close` terminates the one-message
-stream. `network.stream_mode=persistent` selects `/bloc/envelope/2.0.0`: each
-ordered peer pair has one outbound worker and one prewarmed logical stream that
-carries repeated `uvarint(length) || protobuf` frames. A frame length must be
-nonzero and no greater than `limits.max_envelope_bytes` before allocation.
+The transport creates a host from the configured static Ed25519 private key.
+The compatibility and routing matrix is:
 
-The persistent worker, rather than a caller mutex, is the sole stream writer.
-Its queue capacity is one, and `Send` waits synchronously for that request's
-write result. Every request has an effective ten-second deadline. A failed or
-uncertain write resets the stream, does not replay the envelope, and causes the
-next request to open a replacement. This preserves the existing application
-ordering and accounting while making any queue pressure explicit; it is not a
-general-purpose transport queue or delivery acknowledgement.
+| Stream mode | Protocols | Writers per remote peer | Routing |
+| --- | --- | ---: | --- |
+| `fresh` | `/bloc/envelope/1.0.0` | 0 persistent | one stream per envelope |
+| `persistent` | `/bloc/envelope/2.0.0` | 1 | all envelope types share one FIFO |
+| `persistent-lanes` | `/bloc/envelope/3.0.0/control`, `/bloc/envelope/3.0.0/data` | 2 | READY/BVAL/AUX on control; PROOF/ECHO/share on data |
 
-Each authenticated inbound v2 stream has one FIFO dispatcher behind a bounded
-32-frame handoff. The stream reader can therefore continue draining a normal
-n4 ACS burst while the node's serialized ACS state machine handles an earlier
-frame. The bound prevents an unbounded application queue; if it fills, normal
-stream flow control reaches the sender and the existing write deadline exposes
-the pressure. Shutdown closes the handoff, drains admitted frames in order, and
-waits for that dispatcher before returning.
+`fresh` and omitted legacy values open a logical stream over the multiplexed
+persistent peer connection for each envelope; `writeAll` handles short writes,
+and `CloseWrite` plus `Close` terminates the one-message stream. Both persistent
+modes carry repeated `uvarint(length) || protobuf` frames. A frame length must
+be nonzero and no greater than `limits.max_envelope_bytes` before allocation.
 
-Lower-ID peers repeatedly connect to higher-ID peers in both modes. Fresh-mode
+Each persistent worker, rather than a caller mutex, is the sole writer for its
+stream. Its queue capacity is one, and `Send` waits synchronously for that
+request's write result. Every request has an effective ten-second deadline. A
+failed or uncertain write resets only its owned stream, does not replay the
+envelope, and causes the next request on that stream to open a replacement.
+The v2 mode has one such FIFO; lane mode has independent control and data FIFOs,
+so an unwritten data frame does not occupy the control queue. This preserves
+within-stream ordering and explicit backpressure; it is not a general-purpose
+transport queue or delivery acknowledgement.
+
+Each authenticated inbound v2 or v3 stream has one FIFO dispatcher behind a
+bounded 32-frame handoff. The stream reader can therefore continue draining a
+normal n4 ACS burst while the node's serialized ACS state machine handles an
+earlier frame. The bound prevents an unbounded application queue; if it fills,
+normal stream flow control reaches the sender and the existing write deadline
+exposes the pressure. A v3 handler accepts only payloads assigned to its lane;
+a wrong-lane frame fails closed and resets that stream without resetting or
+reopening the sibling lane. Shutdown closes each handoff, drains admitted
+frames in order, and waits for every dispatcher before returning.
+
+Lower-ID peers repeatedly connect to higher-ID peers in every mode. Fresh-mode
 health becomes ready once every configured peer is connected. Persistent-mode
-health additionally requires peerstore support for protocol v2 and a cached
-prewarmed stream for every peer. Because libp2p negotiates a known protocol
-lazily, prewarm forces the handshake and waits for its response before marking
-the writer ready; it never initiates a new peer dial.
-Shutdown stops admission, cancels prewarming, closes the host, drains/fails
-workers, and waits for active inbound streams plus their dispatchers. Protocol
-v1 remains fresh-only and v2 persistent-only so mixed configurations fail
-readiness instead of silently changing framing.
+health additionally requires peerstore support for protocol v2 and one cached
+prewarmed stream per peer. Lane-mode health requires peerstore support for both
+v3 protocols and both cached prewarmed writers per peer. Because libp2p
+negotiates a known protocol lazily, prewarm forces each handshake and waits for
+its response before marking the writer ready; it never initiates a new peer
+dial. Shutdown stops admission, cancels prewarming, closes the host,
+drains/fails every worker, and waits for active inbound streams plus their
+dispatchers. Protocol v1 remains fresh-only, v2 remains single-persistent-only,
+and v3 remains lane-only, so mixed configurations fail readiness instead of
+silently changing framing.
 
 Before reading an inbound stream, the handler maps
 `stream.Conn().RemotePeer()` through the unique configured peer-ID membership
@@ -227,7 +238,14 @@ Outbound routing overwrites `From`, `To`, and `Direct` from local transport
 state rather than trusting caller-populated fields. Both directions enforce the
 shared `limits.max_envelope_bytes`; inbound reads stop at one byte beyond the
 limit and reset oversized streams before protobuf decoding. Rejections use the
-bounded reasons `oversize`, `decode`, `authentication`, and `payload`.
+bounded reasons `oversize`, `decode`, `authentication`, `payload`, and `lane`.
+
+Lane classification occurs only after payload validation and authenticated
+sender binding. Unclassifiable payloads are rejected as `payload` rather than
+defaulting to a lane. `persistent-lanes` is an experimental
+application-stream isolation mode, not a bandwidth optimization: payload
+volume, recipient counts, protocol rounds, libp2p connection congestion, and
+TCP loss head-of-line blocking remain unchanged.
 
 Encoded inclusion-list proposals are independently bounded by
 `limits.max_proposal_bytes` and `BMax`. The defaults are 8 MiB and 128 items;
@@ -384,16 +402,31 @@ generation accepts `--acs-trace`, and `eval-suite --acs-trace` propagates the
 flag to both isolated and generated persistent clusters. Final VM campaigns
 enable the same setting through topology materialization.
 
-Every newly traced node result carries `bloc-acs-trace/v2`; the artifact reader
-continues to accept historical v1 results. Evaluator output retains aggregate
+Every newly traced node result carries `bloc-acs-trace/v3`; the artifact reader
+continues to accept historical v1/v2 results. Evaluator output retains aggregate
 columns in `node_measurements.csv` and one deterministic JSONL record per
-`(measurement_block, run_id, node_id, slot)` in `acs_trace.jsonl`. Version 2
-records successful-send totals and maxima for encode, queue wait, stream open,
-write, and finalization, plus open/reuse counts for each ACS message subtype.
-A failed send increments only the bounded failure counter so partial phase
-timings cannot be mistaken for delivered work. Fresh-mode finalization is local
-`CloseWrite`/`Close`; persistent mode has no per-message finalization. Neither
-is a remote receipt or ACS-progress acknowledgement.
+`(measurement_block, run_id, node_id, slot)` in `acs_trace.jsonl`. Version 3
+admits each outbound ACS send synchronously when the state machine emits it,
+seals admission at local ACS output, and finalizes after every admitted send has
+terminated. Per-subtype `pending_at_decision` is the immutable count captured at
+the seal; it is not reduced as sends finish. A final record requires
+`scheduled_count = terminal_count = send_count + send_failure_count`.
+
+Successful-send totals and maxima cover encode, queue wait, stream open, write,
+and finalization, plus open/reuse counts for each ACS message subtype. A failed
+send increments only the bounded failure counter so partial phase timings
+cannot be mistaken for delivered work. Fresh-mode finalization is local
+`CloseWrite`/`Close`; persistent modes have no per-message finalization. These
+phases describe sender-side completion, not remote receipt or an ACS-progress
+acknowledgement. Each RBC trace also records `echo_quorum` or `ready_relay` as
+the first READY trigger, with its matching ECHO/READY counts before local
+self-admission.
+
+Trace-enabled result publication waits until both the materialized result and
+the sealed trace are final. This publication gate does not change `ACSUS`,
+protocol progress, merge/plan, share generation, or materialization boundaries;
+trace-disabled result behavior is unchanged. A completed trace-enabled slot
+cannot be replaced while its admitted send accounting remains unfinished.
 
 The validator rejects missing or duplicate node records, unsupported schemas,
 negative or impossible offsets, proposer membership errors, incomplete message
@@ -513,9 +546,13 @@ Current `bloc-node` tests cover:
   cumulative subset-attempt budgets, and successful-result finality;
 - deterministic signed Ethereum test transactions;
 - authenticated envelope/share sender validation, complete transport writes,
-  fresh/v1 and persistent/v2 protocol separation, hostile frame lengths,
-  bounded per-peer writer queues, no-replay stream replacement, readiness,
-  shutdown, and HTTP connection reuse; and
+  fresh/v1, persistent/v2, and lane/v3 protocol separation, hostile frame
+  lengths, subtype routing, independent bounded lane queues, wrong-lane
+  rejection, mixed-mode failure, no-replay lane-local stream replacement,
+  readiness, shutdown, and HTTP connection reuse;
+- trace-v3 synchronous admission, sealing/finalization, immutable
+  pending-at-decision counts, exactly-once terminal accounting, slot isolation,
+  result-publication gating, and READY trigger context; and
 - evaluator scheduling, consistency, metrics boundaries, and artifact policy.
 
 The suite tests sender binding, exact/oversized envelope reads, outbound size

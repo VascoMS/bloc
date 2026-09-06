@@ -186,14 +186,38 @@ output IDs, all known BBA results, truthy proposer IDs, per-instance compact
 state, queued-message count, and one waiting reason. `SlotProgress` adds the
 slot. These snapshots are diagnostic and do not drive protocol transitions.
 
-`SlotConfig.Trace.Enabled` opts one slot into the bounded
-`bloc-acs-trace/v1` recorder. Its process-local monotonic offsets share the
-proposal-ready origin used by the node's legacy ACS timer. The recorder stores
-fixed aggregate milestones, one RBC and BBA entry per configured proposer, and
-one message counter entry for each of PROOF, ECHO, READY, BVAL, and AUX. A
-disabled recorder returns an empty trace and avoids its clock, mutex, map, and
-snapshot work. Trace snapshots are detached copies and never feed a protocol
-transition.
+`SlotConfig.Trace.Enabled` opts one slot into the bounded recorder. New
+diagnostics use `bloc-acs-trace/v3`; v1/v2 remain readable historical formats.
+Its process-local monotonic offsets share the proposal-ready origin used by the
+node's legacy ACS timer. The recorder stores fixed aggregate milestones, one
+RBC and BBA entry per configured proposer, and one message entry for each of
+PROOF, ECHO, READY, BVAL, and AUX. A disabled recorder returns an empty trace
+and avoids its clock, mutex, map, and snapshot work. Trace snapshots are
+detached copies and never feed a protocol transition.
+
+The trace admits each outbound ACS send synchronously when the state machine
+emits it, before asynchronous transport work begins. Local ACS output seals
+admission and snapshots `pending_at_decision`; this historical count is not
+reduced as sends finish. Exactly-once tokens terminalize the recorder captured
+at admission, even if the node has moved to a later slot. The trace finalizes
+only after every admitted send terminates. For every subtype a published v3
+record therefore satisfies:
+
+```text
+scheduled_count = terminal_count
+scheduled_count = send_count + send_failure_count
+```
+
+Successful phase totals describe sender-side completion, not remote receipt.
+Trace-enabled result publication in `bloc-node` waits for finalization, but
+`ACSUS`, protocol progress, merge/plan, share generation, and materialization
+retain their existing boundaries. The transport's bounded send deadline keeps
+admitted sends from holding the diagnostic publication gate indefinitely.
+
+Each RBC entry records its first READY emission trigger as `echo_quorum` or
+`ready_relay`, plus the matching ECHO and READY counts immediately before local
+self-admission. These fields expose which existing threshold caused the
+transition without changing READY admission or broadcast behavior.
 
 `input_started` records admission of this node's local proposal, not a
 cluster-wide ACS start barrier. Because evaluators trigger nodes concurrently,
@@ -306,7 +330,9 @@ Existing tests cover:
   and epoch advancement;
 - ACS common-subset agreement, required truthy RBC outputs, all-BBA completion,
   progress diagnostics, and fixed reordered-delivery schedules;
-- atomic message-queue draining;
+- atomic message-queue draining and trace-v3 send admission, terminalization,
+  sealing, finalization, immutable decision-time counts, READY trigger context,
+  and cross-slot recorder isolation;
 - slot common-subset output, wrong-slot rejection, close idempotence, progress,
   and post-agreement hooks; and
 - the inherited HoneyBadger driver and local transport separately.

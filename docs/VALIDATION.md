@@ -209,18 +209,23 @@ smoke is:
 ```sh
 cd bloc-node
 go run ./cmd/bloc-node eval-suite \
-  --execution-mode isolated --node-counts 4 --batch-sizes 8 --bmax 8 \
-  --warmups 0 --repetitions 1 --repetition-blocks 1 \
-  --timeout 30s --deadline 12s --acs-trace \
-  --experiment-id issue-23-trace-smoke --out-dir results/local/issue-23-trace-smoke
+  --execution-mode persistent --node-counts 4 --batch-sizes 8 --bmax 8 \
+  --warmups 0 --repetitions 1 --repetition-blocks 1 --seed 20260621 \
+  --timeout 30s --deadline 12s --acs-trace --stream-mode persistent-lanes \
+  --experiment-id local-lane-smoke \
+  --out-dir results/local/acs-persistent-lanes/smoke
 ```
 
 Acceptance requires a successful and consistent measured run, manifest schema
-`bloc-acs-trace/v2` for new artifacts, and exactly one validated
-`acs_trace.jsonl` record per node. Historical v1 artifacts remain readable but
-cannot support transport-phase attribution. Local listener-based evaluation may
-need to run outside a restricted network sandbox; preserve any failed
-environmental attempt rather than rewriting it as protocol evidence.
+`bloc-acs-trace/v3` for new artifacts, and exactly one validated
+`acs_trace.jsonl` record per node. Every record must be sealed and finalized,
+and every subtype must satisfy
+`scheduled_count = terminal_count = send_count + send_failure_count`.
+`pending_at_decision` is historical and remains unchanged after the admitted
+sends finish. Historical v1/v2 artifacts remain readable, but neither satisfies
+the finalized-v3 contract. Local listener-based evaluation may need to run
+outside a restricted network sandbox; preserve any failed environmental
+attempt rather than rewriting it as protocol evidence.
 
 Measure observer overhead from `sbc/hbbft` with:
 
@@ -231,10 +236,14 @@ go test -run '^$' -bench '^BenchmarkACSTrace$' -benchmem -count 10
 The paired cases use the retained encoded proposal sizes 12,234, 50,982, and
 201,622 bytes for batch 8, 32, and 128 at `n=4/7`, with identical input and FIFO
 delivery schedules for trace-off and trace-on. Retain raw output under ignored
-`results/local/acs-latency-attribution/`. The VM gate remains closed if any
-cell's trace-on median local ACS time exceeds its trace-off median by more than
-2%. Report allocation and byte deltas as observer-cost context; do not promote
-these local benchmark timings to VM or topology evidence.
+`results/local/acs-latency-attribution/`. The finalized-v3 run exceeded the
+original relative-only 2% threshold at `n4/batch8` (`+7.673%`) and
+`n7/batch128` (`+2.015%`). The corresponding absolute trace-on median deltas
+were only `+0.120 ms` and `+1.419 ms`; these remain an explicit observer-cost
+warning but are accepted as negligible for the matched multi-region lane
+objective, where both arms use the same tracing. Report both absolute and
+relative deltas, keep instrumentation matched, and do not promote these local
+benchmark timings to VM or topology evidence.
 
 ## Persistent Envelope-Stream Experiment Gate
 
@@ -282,6 +291,85 @@ Only after the local gate has no new failures, consistency errors, or stable
 queue regression should a separately authorized same-AZ/three-region canary be
 prepared. Cloud allocation is never implied by this gate.
 
+## Persistent Control/Data Stream Lane Experiment Gate
+
+`persistent-lanes` is an experimental application-stream isolation mode. It
+uses `/bloc/envelope/3.0.0/control` for READY/BVAL/AUX and
+`/bloc/envelope/3.0.0/data` for PROOF/ECHO/share, with one independent
+capacity-one writer queue per lane and remote peer. It does not change payload
+volume, recipient count, ACS rounds, libp2p connection congestion, or TCP loss
+head-of-line blocking, so local validation cannot establish a bandwidth or WAN
+latency improvement.
+
+Before the mode may advance beyond local validation, require all of these
+gates:
+
+- subtype routing covers READY/BVAL/AUX on control, PROOF/ECHO/share on data,
+  and fail-closed unclassifiable payloads before encoding or writer selection;
+- independent-queue coverage proves a control Send can complete while a data
+  write and the data queue are blocked;
+- authenticated inbound wrong-lane coverage rejects and resets only the
+  offending stream, preserves the sibling lane, and reports bounded reason
+  `lane` only after payload and peer authentication;
+- mixed-mode coverage proves v3/v2 peers fail readiness rather than silently
+  changing framing;
+- readiness/prewarm coverage requires both exact v3 protocol advertisements
+  and both confirmed cached writers without initiating a new peer dial;
+- lane-local reset/no-replay and shutdown coverage proves an uncertain write
+  is not replayed, does not reset its sibling, and both workers/dispatchers are
+  awaited;
+- the complete normal `hbbft` and `bloc-node` suites and the focused transport,
+  trace, slot, and evaluator race selection pass;
+- a real four-node local evaluation succeeds consistently with four sealed and
+  finalized v3 trace records, balanced subtype lifecycles, and zero send
+  failures; and
+- the full ACS safety campaign passes its 1,000 deterministic schedules,
+  100-slot sustained gate, 180-slot n4/n7 matrix, compatibility/identity
+  checks, races, and retained trace validation.
+
+The required normal and race commands are:
+
+```sh
+cd sbc/hbbft && go test ./... -count=1
+cd bloc-node && go test ./... -count=1
+cd bloc-node && go test -race ./internal/app \
+  -run 'Test(ACS|Trace|Persistent|LibP2P|PrepareSlot|Eval)' -count=1
+bash bloc-node/scripts/run-acs-safety-campaign.sh
+```
+
+The matched local mechanism diagnostic runs `n=4`, batches `8/32/128`, five
+warmups, 30 measured repetitions, one repetition block, seed `20260621`, a
+12-second completion deadline, ACS tracing, and persistent evaluator processes
+for both `persistent` and `persistent-lanes`. Acceptance requires 30 successful,
+cross-node-consistent and deadline-met measured slots per batch/mode, exact
+schedule equality, a finalized v3 trace for every node, balanced
+`scheduled_count = terminal_count = send_count + send_failure_count`, zero send
+failures, and no stable READY queue-wait regression. A null local ACS change is
+allowed; correctness or send failure, or stable READY queue regression, blocks
+cloud escalation.
+
+The 2026-09-06 local gate retained ignored artifacts under
+`bloc-node/results/local/acs-persistent-lanes/`. The smoke had one successful,
+consistent run and four finalized v3 node traces. Control and treatment each
+had 90/90 successful, consistent, deadline-met measured runs and 420 finalized
+v3 traces including warmups, with zero send failures and balanced lifecycles.
+The Type-7 per-node-trace READY queue-wait p50 changed from
+`0.074/0.097/0.045 ms` in `persistent` to `0.056/0.062/0.038 ms` in
+`persistent-lanes` for batches `8/32/128` (`-24.3%/-36.1%/-16.7%`). The
+corresponding p95 changed from `0.539/0.563/0.293 ms` to
+`0.516/0.476/0.338 ms`; the batch-128 tail increase is not a stable cross-batch
+regression. Run-level ACS p50 changed from `1.480/1.648/2.938 ms` to
+`1.496/1.681/2.981 ms` (`+0.016/+0.033/+0.043 ms`). This is a passed local
+mechanism/regression gate with no local ACS improvement claim.
+
+Adoption requires a separately authorized, source- and workload-matched
+same-AZ/three-region campaign under the finalized-v3 contract. Keep
+`persistent` as the control and require 30 successful consistent observations
+per batch/mode/topology, zero deadline misses and send failures, exact
+provenance/schedule equality, complete final traces, and balanced subtype
+lifecycles. Until that evidence exists, keep `persistent-lanes` experimental
+and make no WAN-improvement or mode-adoption claim.
+
 ## ACS Safety Gate
 
 After ACS/BBA safety or liveness changes, run:
@@ -309,7 +397,9 @@ Acceptance requires:
 
 The gate includes mixed-root RBC rejection and post-decode Merkle commitment
 checks. Its evaluator stages enable `--acs-trace`, so a passing diagnostic
-campaign also proves complete per-node trace artifact retention. It does not
+campaign also proves complete per-node trace artifact retention. New campaign
+artifacts must be v3, sealed and finalized, with balanced terminal send
+accounting and zero send failures for successful measured slots. It does not
 cover conflicting AUX equivocation or sufficiently delayed future-epoch
 messages.
 

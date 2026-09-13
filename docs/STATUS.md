@@ -131,6 +131,14 @@ release-candidate configuration contract are defined in
   state is empty. Its provider-cache-free, 446-entry checksummed artifact is
   under `results/ec2/bloc-ec2-i30-tr-n10-b8-p1/`.
 
+  The next pilot, `bloc-ec2-i30-tr-n10-b32-p1`, is accepted under the same
+  contract with `30/30` successful, consistent, deadline-met observations.
+  Total-slot p50 was `751.841 ms` and ACS p50 was `412.075 ms`; it qualifies
+  for a later full continuation and is not p99-eligible. All lifecycle/jobs,
+  phase/cleanup validators, the 45-resource destroy, fresh authenticated audit,
+  empty state, and all 446 retained checksum entries pass. The preserved root
+  is `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`.
+
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
   has a 16-vCPU Standard On-Demand quota, and the largest three-region n10 cell
@@ -143,7 +151,7 @@ release-candidate configuration contract are defined in
   authorized the complete AWS campaign after finalization and subsequently
   selected pilot-first ordering: run all six 30-observation extension cells
   before any 1,000-observation primary or extension continuation. The n10/batch
-  8 pilot is accepted; n10/batch 32 is the next preliminary cell.
+  8 and 32 pilots are accepted; n10/batch 128 is the next preliminary cell.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -639,11 +647,11 @@ release-candidate configuration contract are defined in
 ## Immediate Next Actions
 
 1. Continue the user-authorized three-region extension pilots before any
-   1,000-observation phase: run `n=10,b=32`, then `n=10,b=128`, then batch
-   `512` at `n=4/7/10`. Run one cell at a time with 5 warmups, 30 measured
+   1,000-observation phase: run `n=10,b=128`, then batch `512` at `n=4/7/10`.
+   Run one cell at a time with 5 warmups, 30 measured
    attempts, 3 blocks, a conservative `USD 15` per-phase ceiling, artifact
-   validation, and mandatory authenticated cleanup. The accepted `n=10,b=8`
-   pilot remains queued for a later qualifying continuation.
+   validation, and mandatory authenticated cleanup. The accepted `n=10,b=8/32`
+   pilots remain queued for later qualifying continuations.
 2. Apply issue #30's continuation rule independently to every pilot, preserve
    only complete provenance-valid evidence from source `95a3d039` and the
    frozen images, and do not publish p99 from a 30- or 100-observation cell.
@@ -674,6 +682,8 @@ release-candidate configuration contract are defined in
   `results/ec2/bloc-ec2-i30-tr-n4-ready-p1/`
 - Accepted issue #30 n10/batch-8 pilot evidence:
   `results/ec2/bloc-ec2-i30-tr-n10-b8-p1/`
+- Accepted issue #30 n10/batch-32 pilot evidence:
+  `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`
 - Historical M4 local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
 - Historical M4 accepted distributed-campaign preflight:

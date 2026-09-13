@@ -76,6 +76,19 @@ authenticated regional/IAM queries are empty, and the state file contains zero
 resources. The provider-cache-free retained artifact has 115 checksummed files
 under `results/ec2/bloc-ec2-i30-tr-n4-ready-p1/`.
 
+Issue #30 extension pilot `bloc-ec2-i30-tr-n10-b8-p1` is accepted from the
+same frozen source and image pair with the exact n10 BMax-128 bundle. All
+`30/30` measured observations were successful, cross-node consistent, and
+within the 12-second deadline across three balanced blocks. Aggregate
+total-slot p50 was `380.934 ms` and ACS p50 was `290.982 ms`; these preliminary
+observations qualify the cell for a later full continuation but remain
+p99-ineligible. All 11 lifecycle events, three controller jobs, the independent
+phase/cleanup validators, a fresh authenticated regional/IAM absence audit,
+and the zero-resource Terraform state pass. Terraform destroyed all 45
+resources. The provider-cache-free retained root is
+`results/ec2/bloc-ec2-i30-tr-n10-b8-p1/`, whose 446-entry checksum manifest has
+SHA-256 `b94da25b0f50335a10d47719549aa445360bd0745242c14c6d93dffaa11ff75a`.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

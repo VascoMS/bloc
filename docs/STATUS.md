@@ -75,18 +75,32 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #30 implementation and clean freeze are in progress:** the approved
-  campaign replaces the earlier primary rows with one provenance-consistent
-  trace-off `persistent-lanes`/broadcast-ECHO candidate across same-AZ and
-  three-region topologies. The primary n4/n7 batches `8/32/128` require 1,000
-  measurements per cell. The unique n10 and batch-512 cells first require
-  30-observation pilots and may continue to 1,000 observations or a documented
-  100-observation boundary; p99 is prohibited below 1,000 successful samples.
-  The campaign contract, BMax-512/n10 bundle path, artifact validation, topology
-  capacity, immutable image, quotas, and cost ceiling must pass before any live
-  phase is proposed. Earlier n4/n7 evidence remains historical and cannot be
-  merged into the replacement matrix. No AWS phase is authorized by the
-  architecture selection or issue creation.
+- **Issue #30 is locally ready for the image-publication freeze, with one live
+  capacity blocker:** source `df7468cd8ae53b85637c614f345f98c3cccbd5b9`
+  implements and validates the deterministic 24-cell trace-off
+  `persistent-lanes`/broadcast-ECHO matrix. All normal module/chart suites,
+  focused contracts, both Terraform topologies, zero-AWS validation paths, the
+  n10/batch-512 local smoke, and the split Linux/ARM64 race gate pass. Local
+  non-root `linux/amd64` BLOC and mempool images were built and inspected, and
+  six private pre-manifest bundles cover `(n,t)=(4,3),(7,5),(10,7)` at exact
+  BMax 128 and 512. Their identity, CRS, corpus, prefix, self-decryption,
+  secret-permission, and public-checksum gates pass under
+  `results/release-candidate/df7468cd8ae53b85637c614f345f98c3cccbd5b9/issue-30-predeployment/`.
+  The images have not been published and the write-once bundle manifests remain
+  intentionally absent until immutable private-ECR digests exist.
+
+  Fixed-zone `t3.small` offerings pass and no running or pending instances were
+  found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
+  has a 16-vCPU Standard On-Demand quota. Three-region n10 fits at `10/6/6`
+  vCPUs, but same-AZ n10 requires 22 vCPUs in `us-east-1` and is blocked by a
+  6-vCPU shortfall. The `bloc` IAM principal can read quota values but cannot
+  inspect quota-request history, so an existing request is not proven absent or
+  present. Conservative per-phase ceilings include maximum T3 unlimited surplus
+  credits, EBS, public IPv4, and a three-region transfer reserve: n10 extension
+  pilot `USD 5/15` and full-or-boundary `USD 10/20` for same-AZ/three-region.
+  Earlier n4/n7 evidence remains historical and cannot be merged into the
+  replacement matrix. No ECR publication, Terraform plan/apply, EC2 resource,
+  or live campaign phase was authorized or executed by this preflight.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -581,14 +595,18 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Complete issue #30's test-first campaign implementation for trace-off
-   `persistent-lanes`, n10/t7, BMax/batch 512, single-cell extension phases,
-   artifact provenance, and both topology contracts.
-2. Pass module, chart, runner, race, Terraform, zero-AWS validate-only, and local
-   n10/batch-512 preflight gates; then freeze one clean source commit and
-   immutable image set for the replacement matrix.
-3. Before each live phase, post the exact provenance, cells, quota result, cost
-   ceiling, and cleanup plan to issue #30 and obtain separate authorization.
+1. Obtain separate authorization to publish the locally inspected
+   `linux/amd64` BLOC and mempool images from frozen source `df7468c` to the two
+   existing immutable private-ECR repositories. Pull back and inspect both exact
+   digests, then bind and reverify all six write-once bundle manifests.
+2. Have a principal with quota-request visibility confirm or request at least
+   22 Standard On-Demand vCPUs in `us-east-1` before proposing same-AZ n10.
+   Do not treat the currently feasible three-region n10 arm as a substitute for
+   the matched same-AZ cell.
+3. After the image/bundle freeze, post the exact provenance, first phase, quota
+   result, cost ceiling, artifact boundary, and cleanup scope to issue #30 and
+   obtain separate live authorization. Start with the n4 same-AZ readiness
+   pilot; validate and destroy it before proposing any measured matrix phase.
 4. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

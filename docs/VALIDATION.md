@@ -112,6 +112,23 @@ provider-cache-free retained root is
 `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`; its 446-entry checksum manifest has
 SHA-256 `97d5c30fd8e3b1b1fdf0a6f820a399fd35f49d320d4bb4962857b164751fda5b`.
 
+Issue #30 extension pilot `bloc-ec2-i30-tr-n4-b512-p1` is retained as complete
+but rejected negative evidence. All 5 warmups and all `30/30` measured attempts
+terminated consistently at node 0 with `reason=proposal`; zero attempts were
+successful, consistent, or deadline-met, so the artifact supports no latency
+quantile or continuation. The failure is a deployment-contract defect rather
+than a measured WAN timeout: the frozen EC2 operator Compose command fixes
+mempool-il at `-max-items 128`, while the batch-512 evaluator requests and
+requires exactly 512 candidates. The same defect applies at n7 and n10, so
+those two live pilots must remain held until the cap is parameterized and the
+corrected provenance contract is refrozen or otherwise explicitly resolved.
+Artifact completeness still passes: all 11 lifecycle events and three
+controller jobs exited cleanly, Terraform destroyed all 39 resources, the
+phase and cleanup validators plus a fresh authenticated absence audit passed,
+and state is empty. The provider-cache-free retained root is
+`results/ec2/bloc-ec2-i30-tr-n4-b512-p1/`; its 125-entry checksum manifest has
+SHA-256 `f0f9f760293bdca51e14d046be62f87325f1cd1d63475a695252cda5f9acbdc0`.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

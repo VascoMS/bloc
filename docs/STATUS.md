@@ -150,6 +150,23 @@ release-candidate configuration contract are defined in
   `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`, with all 446 checksum entries
   verified.
 
+  The first batch-512 pilot, `bloc-ec2-i30-tr-n4-b512-p1`, completed as
+  complete but rejected negative evidence. All 5 warmups and all 30 measured
+  attempts terminated consistently at node 0 with `reason=proposal`; no
+  attempt completed, met the deadline, or contributes a latency quantile. The
+  cause is a frozen deployment-contract defect: `deploy/ec2/operator-compose.yaml`
+  still starts mempool-il with `-max-items 128`, while the evaluator requests
+  512 candidates and requires the exact count. This defect is independent of
+  `n`, so the n7/batch-512 and n10/batch-512 pilots are held rather than run
+  with a known-invalid deployment. The negative artifact itself is complete:
+  all 11 lifecycle events and three controller jobs passed, Terraform
+  destroyed all 39 resources, the phase/cleanup completeness validators and a
+  fresh authenticated absence audit passed, state is empty, and all 125
+  provider-cache-free checksum entries verify under
+  `results/ec2/bloc-ec2-i30-tr-n4-b512-p1/`. Correcting the deployment cap
+  requires an explicit frozen-source/provenance decision before more live
+  batch-512 work.
+
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
   has a 16-vCPU Standard On-Demand quota, and the largest three-region n10 cell
@@ -162,8 +179,8 @@ release-candidate configuration contract are defined in
   authorized the complete AWS campaign after finalization and subsequently
   selected pilot-first ordering: run all six 30-observation extension cells
   before any 1,000-observation primary or extension continuation. The n10/batch
-  8, 32, and 128 pilots are accepted; n4/batch 512 is the next preliminary
-  cell.
+  8, 32, and 128 pilots are accepted. The n4/batch-512 attempt is rejected and
+  the remaining batch-512 cells are blocked on the frozen deployment cap.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -658,24 +675,30 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Continue the user-authorized three-region extension pilots before any
-   1,000-observation phase: run batch `512` at `n=4/7/10`.
-   Run one cell at a time with 5 warmups, 30 measured
-   attempts, 3 blocks, a conservative `USD 15` per-phase ceiling, artifact
-   validation, and mandatory authenticated cleanup. The accepted
-   `n=10,b=8/32/128` pilots remain queued for later qualifying continuations.
-2. Apply issue #30's continuation rule independently to every pilot, preserve
+1. Hold the n7/batch-512 and n10/batch-512 pilots. Parameterize the EC2
+   mempool `-max-items` value from the frozen bundle BMax, add a regression
+   proving a 512 request can return exactly 512 corpus items, and rerun all
+   side-effect-free deployment/campaign gates before another live attempt.
+2. Make the resulting frozen-source/provenance decision explicit: either
+   refreeze the corrected source and determine which earlier preliminary cells
+   must be rerun, or document a narrowly justified deployment-only provenance
+   transition. Do not silently mix the two source contracts.
+3. After that decision, rerun n4/batch-512 first. Only a successful,
+   consistent, deadline-met pilot with mandatory cleanup may unblock the
+   n7/batch-512 and n10/batch-512 cells. The accepted `n=10,b=8/32/128`
+   pilots remain queued for later qualifying continuations.
+4. Apply issue #30's continuation rule independently to every pilot, preserve
    only complete provenance-valid evidence from source `95a3d039` and the
    frozen images, and do not publish p99 from a 30- or 100-observation cell.
-3. After all preliminary pilots are classified, run the replacement n4 and n7
+5. After all preliminary pilots are classified, run the replacement n4 and n7
    primary latency phases, followed by any qualifying extension continuations.
-4. Leave issue #15 open and paused for resource collection. Do not admit its
+6. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.
-5. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
+7. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
    changes outside this campaign so the architectural comparison remains
    attributable.
-6. Track granular work in the [BLOC Thesis Prototype GitHub
+8. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
@@ -698,6 +721,8 @@ release-candidate configuration contract are defined in
   `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`
 - Accepted issue #30 n10/batch-128 pilot evidence:
   `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`
+- Rejected issue #30 n4/batch-512 negative evidence:
+  `results/ec2/bloc-ec2-i30-tr-n4-b512-p1/`
 - Historical M4 local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
 - Historical M4 accepted distributed-campaign preflight:

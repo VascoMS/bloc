@@ -76,25 +76,26 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #30 is locally ready for a three-region-only source refreeze:** the
-  user narrowed the active scope to the deterministic 12-cell trace-off
+- **Issue #30 is locally ready for the three-region-only image-publication
+  freeze:** clean source `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
+  implements the user-approved deterministic 12-cell trace-off
   `persistent-lanes`/broadcast-ECHO matrix for `n=4/7/10` and batches
   `8/32/128/512`. The planner's red/green contract, complete lifecycle and
   remote-job suites, race-gate contract, 62 artifact tests, and both Terraform
-  topology contracts pass without cloud access. The previously validated
-  24-cell source
-  `df7468cd8ae53b85637c614f345f98c3cccbd5b9` and its local images are
-  superseded for publication because the executable planner changed. Its
-  unchanged runtime, bundle, module, chart, Terraform, zero-AWS, local-smoke,
-  and Linux/ARM64 race evidence remains relevant to the refreeze. Six private
-  pre-manifest bundles cover `(n,t)=(4,3),(7,5),(10,7)` at exact BMax 128 and
-  512. Their identity, CRS, corpus, prefix, self-decryption, secret-permission,
-  and public-checksum gates pass under
+  topology contracts pass without cloud access. New non-root `linux/amd64`
+  BLOC and mempool images were built and inspected locally from that source;
+  their checksummed local-only manifest is under
+  `results/release-candidate/95a3d039ca3c3a6079baa33ce78a5de4fc31e72d/issue-30-predeployment/`.
+  The earlier 24-cell source `df7468cd8ae53b85637c614f345f98c3cccbd5b9`
+  and its images are superseded for publication, while its unchanged runtime,
+  bundle, module, chart, zero-AWS, local-smoke, and Linux/ARM64 race evidence
+  remains relevant. Six topology-independent private pre-manifest bundles cover
+  `(n,t)=(4,3),(7,5),(10,7)` at exact BMax 128 and 512. Their identity, CRS,
+  corpus, prefix, self-decryption, secret-permission, and public-checksum gates
+  pass under
   `results/release-candidate/df7468cd8ae53b85637c614f345f98c3cccbd5b9/issue-30-predeployment/`.
-  They are topology-independent and remain usable, but the local images must be
-  rebuilt from the new clean source. No image has been published and the
-  write-once bundle manifests remain intentionally absent until immutable
-  private-ECR digests exist.
+  No image has been published and the write-once bundle manifests remain
+  intentionally absent until immutable private-ECR digests exist.
 
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
@@ -601,22 +602,21 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Commit the validated 12-cell three-region-only campaign planner, then rebuild
-   and inspect both `linux/amd64` images from that clean source.
-2. Obtain separate authorization to publish those images to the two existing
-   immutable private-ECR repositories. Pull back and inspect both exact digests,
-   then bind and reverify all six write-once bundle manifests.
-3. After the image/bundle freeze, post the exact provenance, first phase, quota
+1. Obtain separate authorization to publish the two locally inspected images
+   from source `95a3d03` to the existing immutable private-ECR repositories.
+   Pull back and inspect both exact digests, then bind and reverify all six
+   write-once bundle manifests.
+2. After the image/bundle freeze, post the exact provenance, first phase, quota
    result, cost ceiling, artifact boundary, and cleanup scope to issue #30 and
    obtain separate live authorization. Start with the n4 three-region readiness
    pilot; validate and destroy it before proposing any measured matrix phase.
-4. Leave issue #15 open and paused for resource collection. Do not admit its
+3. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.
-5. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
+4. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
    changes outside this campaign so the architectural comparison remains
    attributable.
-6. Track granular work in the [BLOC Thesis Prototype GitHub
+5. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

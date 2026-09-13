@@ -75,6 +75,7 @@ cd mempool-il && go test ./...
 cd bte/btd-impl-main && go test ./...
 cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
+cd economics && python -m pytest
 ```
 
 For a fast integrated check:
@@ -135,6 +136,117 @@ results/charts/<campaign-id>/
 `<environment>` is `local`, `distributed`, or `ec2`. Node-count and scenario
 directories are children of one campaign. Link the canonical campaign root in
 reports rather than a temporary phase-staging directory.
+
+## Historical MEV Pilot
+
+Keep downloaded data and generated reports in ignored `results/` directories.
+The initial issue #31 raw acquisition is `results/economics-source-audit/` in
+the original checkout; its reports are under `results/economic-mev-pilot/` in
+the isolated economics worktree. Paths and hashes are recorded on the issue.
+This is an offline descriptive method pilot; evidence semantics and the source
+audit belong to [VALIDATION.md](VALIDATION.md#historical-detected-mev-concentration-pilot).
+
+Acquisition contract for `bloc_economics.mev_inspect`:
+
+1. Save bounded HTTP range responses for `arbitrages.csv`, `sandwiches.csv`, and
+   `sandwiched_swaps.csv` from a chosen MEV-inspect archive period. Inspect
+   `liquidations.csv` separately; it has no supported profit field. Preserve
+   exact raw bytes. For a partial object, the extracted CSV must equal the raw
+   prefix through its last newline and parse as complete CSV records; for a
+   full object, it must equal the entire raw body. An incomplete quoted record
+   fails parsing and requires a new bounded acquisition.
+2. Save `provenance.json` with retrieval time and `sources`. Each source includes
+   `url`, `requested_range`, `status`, `content_range`, `etag`, `last_modified`,
+   `downloaded_bytes`, `full_object_bytes`, `is_full_object`, `raw_file`,
+   `raw_sha256`, `complete_rows_file`, `complete_rows_sha256`, and `row_count`.
+   Preserve sampling rules and license uncertainty; an accessible object is not
+   proof of representative or complete coverage.
+3. Save full ordered transaction hashes from canonical
+   `eth_getBlockByNumber(number,false)` and one `finalized` reference. Retain
+   request and response JSON, URL, UTC request time, HTTP status, and SHA-256 in
+   a request manifest. Entries bind `request`, `request_file`,
+   `request_sha256`, `response_file`, and `response_sha256`; failed requests keep
+   their error/status without a fabricated response.
+4. Build `enrichment.json` with `selection`, `request_manifest`,
+   `finalized_reference` (`number`, `hash`), and `blocks`. Each block contains
+   `number`, `hash`, `timestamp`, `block_gas_used`, `transaction_hashes`, and
+   `gas_used_by_transaction` (null unless complete receipts exist). The adapter
+   rechecks these against raw responses and the finalized height. Retain
+   independent block-hash/time cross-checks as additional provenance.
+5. If collecting receipts, save `eth_getBlockReceipts` responses in the same
+   request manifest. Gas maps require every transaction's receipt, matching
+   block hash/number, transaction hash/index, cumulative gas, and block total.
+   Record provider/method failures and withhold the gas axis if unavailable.
+
+From an installed [economics](../economics/README.md) environment, use new output paths:
+
+```sh
+python -m bloc_economics.mev_inspect <raw-directory> --output <new-normalized.json>
+python -m bloc_economics.concentration <new-normalized.json> --output <new-report-directory>
+python -m pytest
+```
+
+The adapter verifies raw/derived bytes, acquisition hashes, and canonical RPC
+bindings before exporting normalized evidence. The analyzer verifies the saved
+source hashes again and writes `REPORT.md`, `concentration.csv`,
+`strategy_positions.csv`, `coverage.json`, `concentration.png`, and
+`manifest.json`. The manifest binds input and analysis hashes, runtime versions,
+and output hashes; normalized provenance binds the adapter hash. Record the
+source commit and exact invocation on the issue. Retained absolute source paths
+must resolve when reproducing an artifact; relocating a bundle requires a new
+normalized artifact and manifest with the same verified raw hashes.
+
+Do not publish raw dataset files without establishing redistribution terms.
+Do not silently expand this pilot into large archive downloads, paid access,
+execution-node deployment, or a new detector.
+
+### Complete-Month Dune MEV Labels
+
+The predefined first cohort is Ethereum from `2026-07-01 00:00:00 UTC`
+inclusive through `2026-08-01 00:00:00 UTC` exclusive. This period was selected
+before inspecting individual transactions and is a completed historical month.
+It does not change the active milestone.
+
+From the [economics module](../economics/README.md), set a Dune API key with Read
+scope only in the local environment and run:
+
+```sh
+python -m bloc_economics.dune_collect results/dune-mev-2026-07 --month 2026-07
+```
+
+The collector executes three versioned SQL templates:
+
+1. `sandwiches.csv` contains all returned attacker outer-trade rows from
+   `dex.sandwiches` and victim-trade rows from `dex.sandwiched`, with an explicit
+   leg role.
+2. `atomic_arbitrages.csv` contains all returned trade legs from
+   `dex.atomic_arbitrages`. Group legs by transaction hash before deriving a
+   transaction-level strategy.
+3. `liquidations.csv` contains all returned liquidation debt-repayment events
+   from `lending.borrow` and collateral-seizure events from `lending.supply`,
+   with an explicit side. Pair them by protocol, transaction hash, and event
+   evidence; do not treat either side alone as liquidator profit.
+
+Each query filters both the partition month and exact block timestamp, and joins
+the canonical Ethereum transaction row to retain block hash, transaction index,
+success, gas used, priority fee per gas, and top-level ETH value. The query
+result is accepted only when every row is Ethereum, lies within the requested
+month, has a valid block/event identity and transaction hash, and the required
+columns are present. An empty result is an acquisition failure.
+
+Keep all generated files in the new ignored results directory. `manifest.json`
+records the half-open sampling frame, source limitation, redacted request and
+response evidence, raw CSV hashes and byte counts, row counts, and observed time
+bounds. The API key must appear only in the request header and never in saved
+files. The collector refuses to replace existing evidence files; choose a new
+directory for a rerun. Dune API execution uses account credits.
+
+These tables are curated detector outputs and do not establish exhaustive MEV
+coverage. Their USD amount columns are trade, debt, or collateral volumes. They
+are not profit, builder revenue, proposer payment, or BLOC opportunity cost.
+Preserve all zero-label blocks in the later finalized-block cohort so absence of
+a returned label is not confused with a missing block. Do not publish raw Dune
+exports until their redistribution terms are established.
 
 ## Operational Runbooks
 

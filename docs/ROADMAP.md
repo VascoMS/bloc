@@ -169,20 +169,33 @@ current roadmap, validation path, or thesis metric collection plan.
 ## M7. Cost Analysis And Thesis Evidence Synthesis
 
 - RQs advanced: `RQ1`–`RQ4`.
-- Objective: translate accepted technical evidence into thesis-ready answers,
-  cost models, figures, tables, and limitations.
+- Objective: translate accepted technical evidence and separately qualified
+  historical market data into thesis-ready answers, economic opportunity-cost
+  scenarios, figures, tables, and limitations.
 - Deliverables:
   - user byte-expansion and clearly qualified carrier-gas estimates derived
     from the accepted M5 corpus and client benchmarks;
-  - operator CPU/memory/network demand and dated dedicated-infrastructure cost
-    estimates per slot and transaction;
+  - a concise economic chapter with four sections: economic question and model;
+    historical detected-MEV concentration and bid timing alongside measured
+    BLOC timing; conditional competitiveness/compensation scenarios; and
+    limitations/conclusions;
+  - a historical finalized-block and MEV-label baseline before calibrating
+    scenarios. Issue #31 starts with a bounded descriptive concentration pilot;
+    complete sampling and bid-timing acquisition are subsequent work;
   - an RQ-to-evidence matrix, fault outcome table, figures, confidence
     intervals, limitations, and a final evidence archive with checksums.
 - Done criteria:
   - every RQ has a scoped answer or an explicit negative/inconclusive result;
-  - raw measurements and financial assumptions are traceable;
-  - no claims are made about paid on-chain placeholder gas, proposer rewards,
-    lost MEV, Builder/PBS economics, or complete block-publication latency;
+  - raw measurements, dataset coverage, revenue definitions, and scenario
+    assumptions are traceable; historical positional concentration is never
+    presented as the causal revenue loss from imposing BLOC;
+  - measured BLOC construction latency, historical strategy profit, historical
+    proposer receipts, and assumed retained revenue remain distinct;
+  - no measured claims are made about paid on-chain placeholder gas, BLOC
+    proposer profitability, prefix-preserving PBS bids, or complete
+    block-publication latency without the corresponding integration evidence;
+  - infrastructure monetary OPEX is outside this economic chapter. Technical
+    resource measurements remain part of M5/RQ2;
   - the final evidence bundle is reproducible and integrity-verifiable.
 
 ## Future Integration Target: Builder API Boundary

@@ -4,13 +4,14 @@ This repository contains the BLOC thesis prototype and its supporting modules fo
 
 ## Project Overview
 
-The repository is organized into five main components:
+The repository is organized into six main components:
 
 - `bloc-node/`: integrated prototype node, local evaluator, transport layers, and reporting tools
 - `mempool-il/`: standalone mempool inclusion-list service
 - `bte/btd-impl-main/`: BEAT-MEV batched threshold encryption library and benchmarks
 - `sbc/hbbft/`: HoneyBadger ACS implementation adapted for slot-scoped BLOC use
 - `latency-charts/`: static SVG/PNG chart generation for evaluator latency results
+- `economics/`: offline historical MEV data import and concentration analysis
 
 Supporting material lives in:
 
@@ -45,6 +46,7 @@ If you are using Codex or another agent, agent-specific instructions live in [AG
 - [bte/btd-impl-main/README.md](bte/btd-impl-main/README.md)
 - [sbc/hbbft/README.md](sbc/hbbft/README.md)
 - [latency-charts/README.md](latency-charts/README.md)
+- [economics/README.md](economics/README.md)
 - [deploy/docker-compose/README.md](deploy/docker-compose/README.md)
 - [deploy/ec2/README.md](deploy/ec2/README.md)
 
@@ -58,6 +60,7 @@ cd mempool-il && go test ./...
 cd bte/btd-impl-main && go test ./...
 cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
+cd economics && python -m pytest
 ```
 
 For the standard local prototype smoke flow and experiment paths, see [docs/WORKFLOWS.md](docs/WORKFLOWS.md) and [docs/VALIDATION.md](docs/VALIDATION.md).

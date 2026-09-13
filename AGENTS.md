@@ -25,6 +25,7 @@ documentation, correct the documentation in the same task.
 - `bte/btd-impl-main/`: BEAT-MEV-derived BTE library and benchmarks
 - `sbc/hbbft/`: HoneyBadger ACS implementation and BLOC slot adapter
 - `latency-charts/`: chart generation and campaign analysis
+- `economics/`: offline historical MEV data import and concentration analysis
 - `deploy/`: local Compose and VM/EC2 deployment runbooks and artifacts
 - `papers/`: research PDFs and reference material
 
@@ -42,6 +43,7 @@ Tests are colocated as `*_test.go`.
 | ACS or `hbbft` change | [hbbft README](sbc/hbbft/README.md), [hbbft deep dive](docs/modules/hbbft.md), and the ACS safety validation section |
 | Deployment or campaign operation | The relevant README under `deploy/`, plus acceptance criteria in [docs/VALIDATION.md](docs/VALIDATION.md) |
 | Documentation-only change | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), the owning canonical document, and link/ownership validation |
+| Economics analysis change | [economics/README.md](economics/README.md), historical MEV evidence semantics in [docs/VALIDATION.md](docs/VALIDATION.md), and the historical MEV workflow in [docs/WORKFLOWS.md](docs/WORKFLOWS.md) |
 | Debugging | Matching workflow/validation section and a historical note only when it documents the same failure mode |
 
 ## Context-Minimization Rules
@@ -152,6 +154,7 @@ cd mempool-il && go test ./...
 cd bte/btd-impl-main && go test ./...
 cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
+cd economics && python -m pytest
 ```
 
 Useful local prototype checks:

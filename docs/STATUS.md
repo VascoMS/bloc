@@ -129,9 +129,12 @@ release-candidate configuration contract are defined in
   three-region n10 ceiling is `USD 15` for an extension pilot and `USD 20` for
   a full-or-boundary phase. Earlier n4/n7 and same-AZ evidence remains
   historical and cannot be merged into the replacement matrix. The narrowed
-  campaign supports no new same-AZ versus three-region comparison. No primary
-  or extension measurement phase has been authorized or executed after the
-  accepted readiness pilot.
+  campaign supports no new same-AZ versus three-region comparison. The user has
+  authorized the complete AWS campaign after finalization and subsequently
+  selected pilot-first ordering: run all six 30-observation extension cells
+  before any 1,000-observation primary or extension continuation. No primary or
+  extension measurement phase has been executed after the accepted readiness
+  pilot.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -626,21 +629,23 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain phase-specific live authorization for the n4 three-region primary
-   latency phase: batches `8/32/128`, 10 warmups and 1,000 measured attempts per
-   batch over 10 blocks, with a conservative `USD 20` ceiling and mandatory
-   authenticated cleanup.
-2. If the n4 primary phase is accepted and cleanup passes, propose n7 primary
-   latency next; then run extension pilots one separately authorized cell at a
-   time under issue #30's continuation rule. Retain only complete,
-   provenance-valid evidence from source `95a3d039` and the frozen images.
-3. Leave issue #15 open and paused for resource collection. Do not admit its
+1. Execute the six user-authorized three-region extension pilots before any
+   1,000-observation phase: `n=10` at batches `8/32/128`, then batch `512` at
+   `n=4/7/10`. Run one cell at a time with 5 warmups, 30 measured attempts, 3
+   blocks, a conservative `USD 15` per-phase ceiling, artifact validation, and
+   mandatory authenticated cleanup.
+2. Apply issue #30's continuation rule independently to every pilot, preserve
+   only complete provenance-valid evidence from source `95a3d039` and the
+   frozen images, and do not publish p99 from a 30- or 100-observation cell.
+3. After all preliminary pilots are classified, run the replacement n4 and n7
+   primary latency phases, followed by any qualifying extension continuations.
+4. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.
-4. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
+5. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
    changes outside this campaign so the architectural comparison remains
    attributable.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

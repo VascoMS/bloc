@@ -1128,8 +1128,9 @@ builder integration, signing, and publication remain future work.
 
 #### Historical Detected-MEV Concentration Pilot
 
-Issue #31 implements an offline source adapter (`bloc_latency_charts.mev_inspect`)
-and analyzer (`bloc_latency_charts.economics`). The normalized schema is
+Issue #31's dedicated [economics module](../economics/README.md) implements an
+offline source adapter (`bloc_economics.mev_inspect`) and analyzer
+(`bloc_economics.concentration`). The normalized schema is
 `bloc-mev-concentration/v1`: provenance, full ordered block transaction hashes,
 optional full per-transaction gas maps, and strategy records containing block
 number, category, transaction hashes, profit-token identity, and signed integer

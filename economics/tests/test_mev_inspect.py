@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from bloc_latency_charts.mev_inspect import import_directory, normalize, validate_blocks, WETH
+from bloc_economics.mev_inspect import import_directory, normalize, validate_blocks, WETH
 from test_economics import tx
 
 

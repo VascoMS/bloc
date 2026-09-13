@@ -75,6 +75,7 @@ cd mempool-il && go test ./...
 cd bte/btd-impl-main && go test ./...
 cd sbc/hbbft && go test ./...
 cd latency-charts && python -m pytest
+cd economics && python -m pytest
 ```
 
 For a fast integrated check:
@@ -145,7 +146,7 @@ the isolated economics worktree. Paths and hashes are recorded on the issue.
 This is an offline descriptive method pilot; evidence semantics and the source
 audit belong to [VALIDATION.md](VALIDATION.md#historical-detected-mev-concentration-pilot).
 
-Acquisition contract for `bloc_latency_charts.mev_inspect`:
+Acquisition contract for `bloc_economics.mev_inspect`:
 
 1. Save bounded HTTP range responses for `arbitrages.csv`, `sandwiches.csv`, and
    `sandwiched_swaps.csv` from a chosen MEV-inspect archive period. Inspect
@@ -177,11 +178,11 @@ Acquisition contract for `bloc_latency_charts.mev_inspect`:
    block hash/number, transaction hash/index, cumulative gas, and block total.
    Record provider/method failures and withhold the gas axis if unavailable.
 
-From an installed `latency-charts` environment, use new output paths:
+From an installed [economics](../economics/README.md) environment, use new output paths:
 
 ```sh
-python -m bloc_latency_charts.mev_inspect <raw-directory> --output <new-normalized.json>
-python -m bloc_latency_charts.economics <new-normalized.json> --output <new-report-directory>
+python -m bloc_economics.mev_inspect <raw-directory> --output <new-normalized.json>
+python -m bloc_economics.concentration <new-normalized.json> --output <new-report-directory>
 python -m pytest
 ```
 

@@ -25,7 +25,7 @@ def sample():
 
 
 def analyze(data):
-    from bloc_latency_charts.economics import analyze
+    from bloc_economics.concentration import analyze
     return analyze(data, first_k=[1, 3, 4], gas_fractions=['0.5', '1'])
 
 
@@ -102,7 +102,7 @@ def test_cli_reproducibility_and_raw_hash_validation(tmp_path):
     data = sample()
     source.write_text(json.dumps(data))
     for name in ('one', 'two'):
-        run = subprocess.run([sys.executable, '-m', 'bloc_latency_charts.economics', str(source),
+        run = subprocess.run([sys.executable, '-m', 'bloc_economics.concentration', str(source),
             '--output', str(tmp_path / name)], capture_output=True, text=True)
         assert run.returncode == 0, run.stderr
     assert (tmp_path / 'one/concentration.csv').read_bytes() == (tmp_path / 'two/concentration.csv').read_bytes()
@@ -111,7 +111,7 @@ def test_cli_reproducibility_and_raw_hash_validation(tmp_path):
     assert (tmp_path / 'one/concentration.png').stat().st_size > 1000
     data['provenance']['source_files'] = [{'path': 'input.json', 'sha256': '0' * 64}]
     source.write_text(json.dumps(data))
-    run = subprocess.run([sys.executable, '-m', 'bloc_latency_charts.economics', str(source),
+    run = subprocess.run([sys.executable, '-m', 'bloc_economics.concentration', str(source),
         '--output', str(tmp_path / 'bad')], capture_output=True, text=True)
     assert run.returncode != 0
     assert not (tmp_path / 'bad').exists()

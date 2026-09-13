@@ -10,7 +10,7 @@ import csv
 import json
 from pathlib import Path
 
-from .economics import SCHEMA, _sha, analyze
+from .concentration import SCHEMA, _sha, analyze
 
 WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
 

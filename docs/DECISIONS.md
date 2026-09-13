@@ -640,5 +640,5 @@ Use this file for major architecture, protocol, and workflow decisions.
   deferred. Thesis inference requires an independently defined sampling frame
   and complete extraction from the chosen source before scenario calibration.
 - Related files: `docs/ROADMAP.md`, `docs/VALIDATION.md`, `docs/WORKFLOWS.md`,
-  `docs/STATUS.md`, `latency-charts/src/bloc_latency_charts/economics.py`,
-  `latency-charts/src/bloc_latency_charts/mev_inspect.py`; issues #20, #21, #31.
+  `docs/STATUS.md`, `economics/src/bloc_economics/concentration.py`,
+  `economics/src/bloc_economics/mev_inspect.py`; issues #20, #21, #31.

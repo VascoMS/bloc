@@ -100,6 +100,18 @@ audit passed, and state is empty. The provider-cache-free retained root is
 `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`; its 446-entry checksum manifest has
 SHA-256 `e8259ecc13a8bccb3afe47857b64de43b111c0154547b0eb9ea2bfdb97ea274f`.
 
+Issue #30 extension pilot `bloc-ec2-i30-tr-n10-b128-p1` is accepted under the
+same frozen source, image, and n10 BMax-128 bundle contract. All `30/30`
+measured observations were successful, cross-node consistent, and within the
+deadline across three blocks. Aggregate total-slot p50 was `2283.689 ms` and
+ACS p50 was `640.273 ms`, so the cell qualifies for a later full continuation
+but remains p99-ineligible. All 11 lifecycle events and three controller jobs
+passed, Terraform destroyed all 45 resources, both independent validators and
+the fresh authenticated absence audit passed, and state is empty. The
+provider-cache-free retained root is
+`results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`; its 446-entry checksum manifest has
+SHA-256 `97d5c30fd8e3b1b1fdf0a6f820a399fd35f49d320d4bb4962857b164751fda5b`.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

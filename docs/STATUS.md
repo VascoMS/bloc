@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-13`
+- Last reviewed: `2026-09-14`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
@@ -139,6 +139,17 @@ release-candidate configuration contract are defined in
   empty state, and all 446 retained checksum entries pass. The preserved root
   is `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`.
 
+  The third pilot-first cell, `bloc-ec2-i30-tr-n10-b128-p1`, is accepted
+  under the same frozen BMax-128 contract with `30/30` successful,
+  cross-node-consistent, deadline-met observations across three blocks.
+  Total-slot p50 was `2283.689 ms` and ACS p50 was `640.273 ms`; it qualifies
+  for a later full continuation and is not p99-eligible. All 11 lifecycle
+  events and three controller jobs passed, Terraform destroyed all 45
+  resources, both independent validators and a fresh authenticated absence
+  audit passed, and state is empty. Its provider-cache-free retained root is
+  `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`, with all 446 checksum entries
+  verified.
+
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
   has a 16-vCPU Standard On-Demand quota, and the largest three-region n10 cell
@@ -151,7 +162,8 @@ release-candidate configuration contract are defined in
   authorized the complete AWS campaign after finalization and subsequently
   selected pilot-first ordering: run all six 30-observation extension cells
   before any 1,000-observation primary or extension continuation. The n10/batch
-  8 and 32 pilots are accepted; n10/batch 128 is the next preliminary cell.
+  8, 32, and 128 pilots are accepted; n4/batch 512 is the next preliminary
+  cell.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -647,11 +659,11 @@ release-candidate configuration contract are defined in
 ## Immediate Next Actions
 
 1. Continue the user-authorized three-region extension pilots before any
-   1,000-observation phase: run `n=10,b=128`, then batch `512` at `n=4/7/10`.
+   1,000-observation phase: run batch `512` at `n=4/7/10`.
    Run one cell at a time with 5 warmups, 30 measured
    attempts, 3 blocks, a conservative `USD 15` per-phase ceiling, artifact
-   validation, and mandatory authenticated cleanup. The accepted `n=10,b=8/32`
-   pilots remain queued for later qualifying continuations.
+   validation, and mandatory authenticated cleanup. The accepted
+   `n=10,b=8/32/128` pilots remain queued for later qualifying continuations.
 2. Apply issue #30's continuation rule independently to every pilot, preserve
    only complete provenance-valid evidence from source `95a3d039` and the
    frozen images, and do not publish p99 from a 30- or 100-observation cell.
@@ -670,7 +682,7 @@ release-candidate configuration contract are defined in
 
 ## Last Known Good Baseline
 
-- Date: `2026-09-13`
+- Date: `2026-09-14`
 - Source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
 - BLOC image:
   `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:c8583b8f9e10c78e74b1c1556fb63f576b84993d600073811a090d1fb91858b1`
@@ -684,6 +696,8 @@ release-candidate configuration contract are defined in
   `results/ec2/bloc-ec2-i30-tr-n10-b8-p1/`
 - Accepted issue #30 n10/batch-32 pilot evidence:
   `results/ec2/bloc-ec2-i30-tr-n10-b32-p1/`
+- Accepted issue #30 n10/batch-128 pilot evidence:
+  `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`
 - Historical M4 local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
 - Historical M4 accepted distributed-campaign preflight:

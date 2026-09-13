@@ -76,26 +76,38 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #30 is locally ready for the three-region-only image-publication
-  freeze:** clean source `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
+- **Issue #30's three-region-only image and bundle freeze is complete; live
+  execution remains separately gated:** clean source
+  `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
   implements the user-approved deterministic 12-cell trace-off
   `persistent-lanes`/broadcast-ECHO matrix for `n=4/7/10` and batches
   `8/32/128/512`. The planner's red/green contract, complete lifecycle and
   remote-job suites, race-gate contract, 62 artifact tests, and both Terraform
   topology contracts pass without cloud access. New non-root `linux/amd64`
-  BLOC and mempool images were built and inspected locally from that source;
-  their checksummed local-only manifest is under
+  BLOC and mempool images were built from that source and published to the
+  existing immutable, scan-on-push, AES256 private-ECR repositories. Their
+  exact references are
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:c8583b8f9e10c78e74b1c1556fb63f576b84993d600073811a090d1fb91858b1`
+  and
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:3424f27384c8ffa594ac9a56cd1ee8c89b84605af5eeaea5bcbe5885cf757c66`.
+  Both were pulled back by digest and inspected with their expected platform,
+  non-root runtime identity, entrypoint, command, and exact repository digest.
+  Checksummed public freeze evidence is under
   `results/release-candidate/95a3d039ca3c3a6079baa33ce78a5de4fc31e72d/issue-30-predeployment/`.
   The earlier 24-cell source `df7468cd8ae53b85637c614f345f98c3cccbd5b9`
   and its images are superseded for publication, while its unchanged runtime,
   bundle, module, chart, zero-AWS, local-smoke, and Linux/ARM64 race evidence
-  remains relevant. Six topology-independent private pre-manifest bundles cover
+  remains relevant. Six topology-independent private bundles cover
   `(n,t)=(4,3),(7,5),(10,7)` at exact BMax 128 and 512. Their identity, CRS,
   corpus, prefix, self-decryption, secret-permission, and public-checksum gates
   pass under
   `results/release-candidate/df7468cd8ae53b85637c614f345f98c3cccbd5b9/issue-30-predeployment/`.
-  No image has been published and the write-once bundle manifests remain
-  intentionally absent until immutable private-ECR digests exist.
+  All six write-once manifests are now bound to source `95a3d039` and the two
+  immutable image digests, and all six passed an independent cryptographic
+  re-verification. Exact frozen-source `--validate-only` invocations also pass
+  for all 12 cells: the two primary n4/n7 latency profiles cover batches
+  8/32/128, and six extension-pilot profiles cover n10 at 8/32/128 plus batch
+  512 at n4/n7/n10.
 
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
@@ -105,9 +117,9 @@ release-candidate configuration contract are defined in
   three-region n10 ceiling is `USD 15` for an extension pilot and `USD 20` for
   a full-or-boundary phase. Earlier n4/n7 and same-AZ evidence remains
   historical and cannot be merged into the replacement matrix. The narrowed
-  campaign supports no new same-AZ versus three-region comparison. No ECR
-  publication, Terraform plan/apply, EC2 resource, or live campaign phase was
-  authorized or executed by this preflight.
+  campaign supports no new same-AZ versus three-region comparison. The
+  authorized ECR publication and local bundle binding created no EC2 resources;
+  no Terraform plan/apply or live campaign phase was authorized or executed.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -602,14 +614,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate authorization to publish the two locally inspected images
-   from source `95a3d03` to the existing immutable private-ECR repositories.
-   Pull back and inspect both exact digests, then bind and reverify all six
-   write-once bundle manifests.
-2. After the image/bundle freeze, post the exact provenance, first phase, quota
-   result, cost ceiling, artifact boundary, and cleanup scope to issue #30 and
-   obtain separate live authorization. Start with the n4 three-region readiness
-   pilot; validate and destroy it before proposing any measured matrix phase.
+1. Obtain separate live authorization for the source- and digest-frozen issue
+   #30 campaign. Start with the n4 three-region readiness pilot, using the
+   documented `USD 15` pilot ceiling and mandatory authenticated cleanup;
+   validate and destroy it before proposing any measured matrix phase.
+2. After an accepted readiness pilot, run the primary and extension schedules
+   one separately authorized phase at a time, retaining only complete,
+   provenance-valid evidence from source `95a3d039` and the frozen images.
 3. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

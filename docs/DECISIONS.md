@@ -613,3 +613,32 @@ Use this file for major architecture, protocol, and workflow decisions.
   `bloc-node/internal/app/transport_libp2p_lanes.go`,
   `bloc-node/internal/app/transport_libp2p_lanes_test.go`,
   `docs/VALIDATION.md`
+
+## 0029. Start economic analysis with a historical positional baseline
+
+- Date: 2026-09-13
+- Status: Accepted
+- Context: Prefix construction latency and a top-of-block placement rule do not
+  identify the value affected or the builder's counterfactual bid. The user
+  selected a smaller chapter and identified finalized blocks and detected-MEV
+  concentration as its first empirical dependency.
+- Decision: Use four sections: question/model; historical concentration and bid
+  timing alongside measured BLOC latency; conditional competitiveness and
+  compensation scenarios; limitations/conclusions. Exclude infrastructure
+  monetary OPEX. Start issue #31 with a bounded offline historical-label pilot,
+  without selecting M7 as the active milestone or changing BLOC's protocol.
+- Rationale: This uses the current implementation's timing evidence and public
+  historical observations while making the missing execution and builder
+  counterfactual explicit. The first byte-prefix sample validates data access
+  and calculations, not mainnet-wide concentration.
+- Consequences: Preserve strategy legs and report any-leg/all-legs positional
+  involvement per profit asset. Keep losses, unknowns, exclusions, and incomplete
+  source coverage visible. Gross searcher token deltas are not proposer receipts.
+  Gas concentration requires complete receipts. Disjoint label/bid periods
+  cannot be joined as matched observations. Technical resource evidence remains
+  M5/RQ2 work; broader replay, builder integration, signing, and publication are
+  deferred. Thesis inference requires an independently defined sampling frame
+  and complete extraction from the chosen source before scenario calibration.
+- Related files: `docs/ROADMAP.md`, `docs/VALIDATION.md`, `docs/WORKFLOWS.md`,
+  `docs/STATUS.md`, `latency-charts/src/bloc_latency_charts/economics.py`,
+  `latency-charts/src/bloc_latency_charts/mev_inspect.py`; issues #20, #21, #31.

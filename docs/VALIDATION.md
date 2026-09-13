@@ -913,8 +913,8 @@ roles/profiles, or Terraform resources.
 
 Together, the accepted n4 and n7 campaigns complete issue #16's explicitly
 amended latency-only scope. Resource collection remains paused under issue #15;
-the scale extension and economic analysis are deferred and are not implied by
-this acceptance.
+the scale extension remains deferred. Preparatory economics is separately
+authorized under issue #31 and is not evidence produced by this campaign.
 
 #### Local Distributed-Campaign Preflight
 
@@ -1106,14 +1106,90 @@ does not set client measurement counts. Treat this as a dated one-day
 full-protocol workload approximation, not a universal Ethereum transaction
 distribution.
 
-Translate accepted RQ2 measurements into CPU seconds, peak memory, inbound and
-outbound bytes, dedicated-cluster hourly cost, and amortized cost per slot and
-transaction. Record the provider, region, instance type, pricing date, transfer
-assumptions, and formula. Separate dedicated provisioning cost from truly
-incremental resource use.
+Technical CPU, memory, and network measurements remain RQ2 evidence.
+Infrastructure monetary OPEX is outside the reduced economic chapter. The
+existing user-overhead corpus remains valid within its original claim boundary.
 
-Do not claim proposer profitability, lost MEV, PBS competitiveness, historical
-congestion effects, or actual on-chain user fees.
+#### Economic Chapter Scope
+
+| Section | Covers | Required additions |
+|---|---|---|
+| Question and model | Opportunity cost of reserving a prefix and waiting for its construction | Define the revenue recipient, benchmark, timing origin, and retained-revenue assumptions |
+| Historical baseline | Detected MEV by block position; historical bid timing; accepted BLOC latency | Join finalized blocks to existing labels; add receipts for gas positions; separately acquire timestamped bid histories |
+| Conditional scenarios | Competitiveness and compensation under stated timing and retained-revenue assumptions | Small offline sensitivity calculation once the baseline and bid definitions are fixed |
+| Limitations and conclusions | What historical descriptions and conditional estimates establish | Separate observed results, assumptions, source coverage, and missing integration evidence |
+
+Historical searcher token profit, builder revenue, proposer payment, and total
+extractable value are different quantities. A final block's ordering and detected
+profit do not reveal what a builder would bid after BLOC changes the prefix or
+the available build time. Do not convert positional involvement into a measured
+loss or compensation rate. Prefix-preserving replay, execution validation,
+builder integration, signing, and publication remain future work.
+
+#### Historical Detected-MEV Concentration Pilot
+
+Issue #31 implements an offline source adapter (`bloc_latency_charts.mev_inspect`)
+and analyzer (`bloc_latency_charts.economics`). The normalized schema is
+`bloc-mev-concentration/v1`: provenance, full ordered block transaction hashes,
+optional full per-transaction gas maps, and strategy records containing block
+number, category, transaction hashes, profit-token identity, and signed integer
+profit in token base units (or null). Positions are one-based.
+
+For each profit asset, the denominator is the sum of **strictly positive known
+gross token deltas among retained strategies**. Negative, zero, and unknown
+amounts remain visible in coverage. Assets are not pooled or converted to ETH or
+USD. At each first-k cutoff, report both the value from strategies wholly inside
+the prefix and the value from strategies with any observed leg inside it. Include
+front-run, observed victim, and back-run transactions for sandwiches. These are
+positional involvement views, not bounds on causal BLOC revenue loss. Do not
+allocate a strategy's profit across its legs.
+
+Gas cutoffs use a fraction of actual gas consumed by the full historical block,
+not its gas limit. Only whole transactions ending within the cutoff qualify.
+Publish this axis only with complete validated receipts for every retained
+strategy block. Missing gas is unavailable, never zero. Reject duplicate IDs,
+unresolved legs, malformed amounts, and partial gas maps. The adapter excludes
+every ambiguous same-asset strategy sharing a transaction, preserving IDs,
+amounts, and reasons rather than arbitrarily choosing a winner.
+
+Source audit on 2026-09-13:
+
+| Input | Verified access and purpose | Coverage limit |
+|---|---|---|
+| [Flashbots MEV-inspect S3](https://flashbots-data.s3.us-east-2.amazonaws.com/?list-type=2&prefix=mev-inspect/&delimiter=/) | Public Q1-2023 CSV byte ranges for arbitrages, sandwiches, victim swaps; full liquidation file inspected | Listed post-Merge periods Q4-2022 through Q2-2023. File prefixes do not establish complete labels per block. No explicit dataset license verified |
+| [Flashbots RPC](https://rpc.flashbots.net) and S3 block summaries | Saved canonical block-by-number responses, a finalized-height reference, and independent block hash/time matching | RPC trust, not a locally verified consensus proof. Receipt queries returned 504; one alternate provider returned 403 |
+| [Relayscan bid archive](https://bidarchive.relayscan.io/index.html) | Public CC0 index; candidate timestamped bid source for subsequent work | Index begins June 2024; no overlap with the verified label periods. Daily archives not downloaded in this pilot |
+
+Interpret label fields against the detector's
+[arbitrage](https://github.com/flashbots/mev-inspect-py/blob/main/mev_inspect/arbitrages.py)
+and [sandwich](https://github.com/flashbots/mev-inspect-py/blob/main/mev_inspect/sandwiches.py)
+definitions. Token deltas precede fees and bribes and omit inventory valuation
+and off-chain hedges. `created_at` is a database timestamp; `trace_address` is an
+internal call path, neither provides block transaction position. Liquidations
+lack a directly usable profit field and are excluded from profit concentration.
+The detector code's license does not establish a license for the S3 dataset.
+
+The first local pilot retains eight WETH strategies (one arbitrage, seven
+sandwiches) across eight blocks on 2023-01-01, with 1,420 verified transaction
+positions. Of 1,702 sampled arbitrage/sandwich source records, 1,692 fall outside
+the selected blocks and two use other profit tokens. All eight retained values
+are positive; no unknown, zero, or negative retained value was imputed. Gas
+concentration is unavailable. Raw sources and reports remain in ignored results
+directories, with paths and hashes recorded on issue #31. This is a method and
+access pilot, not accepted evidence of mainnet-wide concentration, per-block MEV
+totals, proposer receipts, or BLOC profitability. No population confidence
+interval is justified for this convenience sample.
+
+Before thesis inference, predefine the block/time sampling frame independently
+of finding MEV, establish complete extraction of the chosen label source for
+those blocks, verify joins and exclusions, and distinguish blocks with zero
+detected MEV from missing detection coverage. Complete source extraction still
+does not imply detection of all MEV. Obtain receipts for gas concentration.
+For later bid analysis, define collector/relay timestamp semantics, relay
+coverage, duplicate handling, and cancellation limitations; keep disjoint
+historical periods separate. Any cross-period combination is a scenario
+assumption. All report inputs, source bytes, analysis source, and outputs must
+be checksummed. Tests use clearly marked synthetic fixtures.
 
 ## Milestone Evidence Map
 
@@ -1126,7 +1202,7 @@ congestion effects, or actual on-chain user fees.
 | `M4. Evaluation Readiness And Prototype Hardening` | correctness blockers, terminal failures, mempool timeout, release-candidate validation and freeze |
 | `M5. Performance, Scaling, And Resource Evidence` | validation-only local distributed-campaign preflight; final same-region/three-region VM p99 and resource evidence, BTE/client benchmarks, `n=10`/batch-512 extension |
 | `M6. Fault And Adversarial Robustness Evidence` | deterministic adversarial regressions and 30-observation operational fault campaigns |
-| `M7. Cost Analysis And Thesis Evidence Synthesis` | user/operator cost model, RQ answer matrix, figures, limitations, checksummed final archive |
+| `M7. Cost Analysis And Thesis Evidence Synthesis` | user overhead, historical economic baseline, conditional opportunity-cost scenarios, RQ answer matrix, figures, limitations, checksummed final archive |
 
 M4 is complete and M5 is active; see [STATUS.md](STATUS.md). Granular task
 state is tracked in the [BLOC Thesis

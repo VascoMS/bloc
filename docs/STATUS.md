@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-06`
+- Last reviewed: `2026-09-13`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `0caecb9298cb14923bfb07b63483ae90f864bba6`
@@ -536,11 +536,21 @@ release-candidate configuration contract are defined in
   categories, and Terraform state are empty both in the retained cleanup
   artifact and in independent authenticated API queries. Issue #16's amended
   latency-only scope is complete and the issue is closed as completed. Resource
-  collection remains paused under issue #15, and extension and economic
-  analysis remain deferred.
+  collection remains paused under issue #15, and the scale extension remains
+  deferred. Preparatory economic analysis is separately authorized under issue
+  #31; it does not change the active milestone or the accepted timing baseline.
+- **Historical economic baseline is a method pilot:** issue #31 joins eight
+  January 2023 finalized blocks (1,420 transaction positions) to eight retained
+  WETH-denominated MEV-inspect strategies. Labels come from bounded file-prefix
+  samples; complete per-block MEV coverage and population inference are not
+  established. Per-transaction receipts were unavailable, so gas concentration
+  is withheld. The audited public label periods end in Q2 2023, whereas the
+  audited Relayscan bid archive begins in June 2024; they cannot form a matched
+  cohort. Expand and validate the sampling frame before interpreting economic
+  magnitudes. See [VALIDATION.md](VALIDATION.md#historical-detected-mev-concentration-pilot).
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
-  VM resource measurements, RQ3 fault campaigns, and operator cost synthesis.
+  VM resource measurements, RQ3 fault campaigns, and scoped thesis synthesis.
   The accepted M3 campaign remains valid historical p50/p95 evidence but is not
   the final release-candidate campaign. Local issue #8 output is
   validation-only preflight evidence, not local performance or resource
@@ -580,6 +590,12 @@ release-candidate configuration contract are defined in
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
+6. Continue the reduced economic chapter from issue #31's offline concentration
+   pilot: establish a bounded cohort with complete source-label extraction and
+   transaction receipts before drawing concentration conclusions. Audit a
+   separate bid-timing cohort and retain cross-period assumptions explicitly.
+   Infrastructure monetary OPEX is excluded from this chapter; issue #15's
+   technical resource work remains paused.
 
 ## Last Known Good Baseline
 
@@ -611,6 +627,8 @@ release-candidate configuration contract are defined in
 - Active: `M5. Performance, Scaling, And Resource Evidence`
 - Planned after M5: `M6. Fault And Adversarial Robustness Evidence`
 - Planned after M6: `M7. Cost Analysis And Thesis Evidence Synthesis`
+- Authorized preparation for M7: historical detected-MEV concentration pilot
+  (issue #31), followed by scoped opportunity-cost scenarios; M5 stays active.
 - Deferred: Builder API boundary, SSV/DVT signing integration, secure CRS/DKG,
   public share proofs, cryptographic common coin, and PBS prefix enforcement.
 

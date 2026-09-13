@@ -378,7 +378,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_phase(self, phase="readiness-pilot", attempts=3, blocks_override=None, warmups_override=None,
-                   stream_mode="fresh", topology="same-az"):
+                   stream_mode="fresh", topology="same-az", nodes=4, batches=(8, 32, 128)):
         root = self.root / phase
         root.mkdir(parents=True)
         blocks = blocks_override if blocks_override is not None else (1 if phase == "readiness-pilot" else 10)
@@ -387,16 +387,31 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         source = "c" * 40
         bloc = "123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:" + "a" * 64
         mempool = "123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:" + "b" * 64
+        threshold = {4: 3, 7: 5, 10: 7}[nodes]
+        bmax = 512 if tuple(batches) == (512,) else 128
         artifacts.write_json(root / "manifest.json", {
             "schema_version": "bloc-final-campaign-phase-v1", "status": "complete",
-            "topology": topology, "phase": phase, "node_count": 4,
+            "topology": topology, "phase": phase, "node_count": nodes,
             "source_sha": source, "bloc_image": bloc, "mempool_image": mempool,
             "bundle_version": "bloc-campaign-bundle-v1", "public_config_id": "public",
-            "encrypted_corpus_id": "corpus", "batches": [8, 32, 128], "seed": 20260621,
+            "encrypted_corpus_id": "corpus", "batches": list(batches), "seed": 20260621,
             "deadline": "12s", "warmups": warmups_override if warmups_override is not None else (1 if phase == "readiness-pilot" else (0 if phase == "resource" else 10)),
             "repetitions": attempts, "blocks": blocks,
             "sampler": "on" if phase == "resource" else "off",
             "stream_mode": stream_mode,
+            "execution_mode": "persistent", "echo_mode": "broadcast",
+            "selective_echo_enabled": False,
+        })
+        artifacts.write_json(root / "frozen-inputs.json", {
+            "version": "bloc-campaign-bundle-v1", "source_sha": source,
+            "bloc_image": bloc, "mempool_image": mempool,
+            "n": nodes, "threshold": threshold, "bmax": bmax,
+            "public_config_id": "public", "encrypted_corpus_id": "corpus",
+            "file_sha256": {
+                "cluster-identity.json": "d" * 64,
+                "cluster.crs": "e" * 64,
+                "encrypted-corpus.json": "f" * 64,
+            },
         })
         generated = root / "generated-public"
         generated.mkdir()
@@ -409,7 +424,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             {"id": i, "region": regions[i % 3] if topology == "three-region" else "us-east-1",
              "zone": (regions[i % 3] + "a") if topology == "three-region" else "us-east-1a",
              "instance_type": "t3.small"}
-            for i in range(4)
+            for i in range(nodes)
         ]})
         scenario = root / "scenarios/controller/results"
         scenario.mkdir(parents=True)
@@ -419,16 +434,25 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         artifacts.write_json(scenario / "manifest.json", {"stream_mode": stream_mode})
         with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
-            for batch in (8, 32, 128):
+            for batch in batches:
                 for block in range(1, blocks + 1):
                     for index in range(1, attempts // blocks + 1):
                         writer.writerow({"run_id": f"measured-r{index:03d}-b{batch}", "phase": "measured",
                                          "measurement_block": str(block), "block_iteration": str(index),
                                          "schedule_seed": "20260621", "planned_scenario_runs": str(attempts),
                                          "slot": str((block - 1) * (attempts // blocks) + index),
-                                         "nodes": "4", "batch_size": str(batch), "stream_mode": stream_mode, "success": "true",
+                                         "nodes": str(nodes), "batch_size": str(batch), "stream_mode": stream_mode, "success": "true",
                                          "consistent": "true", "outcome": "completed", "timed_out": "false",
                                          "selected_ciphertexts": str(batch)})
+        node_rows = []
+        for run in artifacts.read_csv(scenario / "run_measurements.csv"):
+            for node_id in range(nodes):
+                node_rows.append({
+                    "run_id": run["run_id"], "phase": run["phase"],
+                    "measurement_block": run["measurement_block"], "node_id": str(node_id),
+                    "acs_trace_schema": "", "stream_mode": stream_mode,
+                })
+        artifacts.write_csv(scenario / "node_measurements.csv", node_rows, list(node_rows[0]))
         return root
 
     def add_acs_trace_artifacts(self, root, trace_schema="bloc-acs-trace/v1"):
@@ -588,6 +612,81 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         self.add_acs_trace_artifacts(root, "bloc-acs-trace/v3")
 
         artifacts.assert_final_phase(root, "three-region", "latency")
+
+    def test_final_persistent_lanes_headline_accepts_trace_off_provenance(self):
+        root = self.make_phase("latency", attempts=1000, stream_mode="persistent-lanes")
+
+        artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_lanes_headline_rejects_node_mode_drift(self):
+        root = self.make_phase("latency", attempts=1000, stream_mode="persistent-lanes")
+        path = next(root.glob("scenarios/**/node_measurements.csv"))
+        rows = artifacts.read_csv(path)
+        rows[0]["stream_mode"] = "fresh"
+        artifacts.write_csv(path, rows, list(rows[0]))
+
+        with self.assertRaisesRegex(ValueError, "stream mode mismatch"):
+            artifacts.assert_final_phase(root, "same-az", "latency")
+
+    def test_final_persistent_lanes_headline_rejects_architecture_provenance_drift(self):
+        cases = (
+            ("execution_mode", "isolated", "execution mode"),
+            ("echo_mode", "selective", "ECHO mode"),
+            ("selective_echo_enabled", True, "selective ECHO"),
+        )
+        for field, value, error in cases:
+            with self.subTest(field=field):
+                root = self.make_phase("latency", attempts=1000, stream_mode="persistent-lanes")
+                manifest_path = root / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest[field] = value
+                artifacts.write_json(manifest_path, manifest)
+                try:
+                    with self.assertRaisesRegex(ValueError, error):
+                        artifacts.assert_final_phase(root, "same-az", "latency")
+                finally:
+                    shutil.rmtree(root)
+
+    def test_final_n10_extension_pilot_accepts_single_small_batch(self):
+        root = self.make_phase("extension-pilot", attempts=30, blocks_override=3,
+                               warmups_override=5, stream_mode="persistent-lanes",
+                               nodes=10, batches=(128,))
+
+        artifacts.assert_final_phase(root, "same-az", "extension-pilot")
+
+    def test_final_batch512_extension_full_accepts_single_batch(self):
+        root = self.make_phase("extension-full", attempts=1000, blocks_override=10,
+                               warmups_override=10, stream_mode="persistent-lanes",
+                               nodes=4, batches=(512,))
+
+        artifacts.assert_final_phase(root, "same-az", "extension-full")
+
+    def test_final_batch512_extension_boundary_accepts_100_samples_without_p99_shape(self):
+        root = self.make_phase("extension-boundary", attempts=100, blocks_override=10,
+                               warmups_override=10, stream_mode="persistent-lanes",
+                               topology="three-region", nodes=7, batches=(512,))
+
+        artifacts.assert_final_phase(root, "three-region", "extension-boundary")
+
+    def test_final_extension_rejects_frozen_bmax_drift(self):
+        root = self.make_phase("extension-full", attempts=1000, blocks_override=10,
+                               warmups_override=10, stream_mode="persistent-lanes",
+                               nodes=10, batches=(512,))
+        frozen_path = root / "frozen-inputs.json"
+        frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+        frozen["bmax"] = 128
+        artifacts.write_json(frozen_path, frozen)
+
+        with self.assertRaisesRegex(ValueError, "frozen BMax"):
+            artifacts.assert_final_phase(root, "same-az", "extension-full")
+
+    def test_final_extension_rejects_non_candidate_stream_mode(self):
+        root = self.make_phase("extension-pilot", attempts=30, blocks_override=3,
+                               warmups_override=5, stream_mode="fresh",
+                               nodes=10, batches=(128,))
+
+        with self.assertRaisesRegex(ValueError, "extension phase requires trace-off persistent-lanes"):
+            artifacts.assert_final_phase(root, "same-az", "extension-pilot")
 
     def test_final_v3_diagnostic_rejects_out_of_scope_shapes(self):
         cases = (

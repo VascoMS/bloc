@@ -68,8 +68,8 @@ variable "node_count" {
   default = 4
 
   validation {
-    condition     = contains([4, 7], var.node_count)
-    error_message = "node_count must be 4 or 7."
+    condition     = contains([4, 7, 10], var.node_count)
+    error_message = "node_count must be 4, 7, or 10."
   }
 }
 

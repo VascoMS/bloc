@@ -216,7 +216,7 @@ func readCampaignBundlePublicInputs(root string) (campaignBundle, string, error)
 	if err != nil {
 		return campaignBundle{}, "", err
 	}
-	if err := validatePrimaryCampaignBundle(identity, corpus, indexAssignment); err != nil {
+	if err := validateFinalCampaignBundle(identity, corpus, indexAssignment); err != nil {
 		return campaignBundle{}, "", err
 	}
 	return campaignBundle{
@@ -248,15 +248,17 @@ func readCampaignBundleCorpus(path string) (corpusProvenance, string, error) {
 	}, document.IndexAssignment, nil
 }
 
-func validatePrimaryCampaignBundle(identity campaignIdentity, corpus corpusProvenance, indexAssignment string) error {
-	if !((identity.N == 4 && identity.Threshold == 3) || (identity.N == 7 && identity.Threshold == 5)) {
-		return fmt.Errorf("primary campaign requires n=4,t=3 or n=7,t=5")
+func validateFinalCampaignBundle(identity campaignIdentity, corpus corpusProvenance, indexAssignment string) error {
+	if !((identity.N == 4 && identity.Threshold == 3) ||
+		(identity.N == 7 && identity.Threshold == 5) ||
+		(identity.N == 10 && identity.Threshold == 7)) {
+		return fmt.Errorf("final campaign requires n=4,t=3, n=7,t=5, or n=10,t=7")
 	}
-	if identity.BMax != 128 || corpus.BMax != 128 || corpus.AvailableCount != 128 {
-		return fmt.Errorf("primary campaign requires BMax and corpus availability 128")
+	if (identity.BMax != 128 && identity.BMax != 512) || corpus.BMax != identity.BMax || corpus.AvailableCount != identity.BMax {
+		return fmt.Errorf("final campaign requires matching BMax and corpus availability of 128 or 512")
 	}
-	if identity.Blockspace.MaxDecryptedTxs != 128 {
-		return fmt.Errorf("primary campaign blockspace must allow exactly 128 transactions")
+	if identity.Blockspace.MaxDecryptedTxs != identity.BMax {
+		return fmt.Errorf("final campaign blockspace must allow exactly BMax transactions")
 	}
 	if corpus.SchemaVersion != "bloc-encrypted-corpus-v1" || corpus.CiphertextWireVersion != be.LibraryVersion {
 		return fmt.Errorf("invalid campaign corpus schema or wire version")
@@ -264,10 +266,10 @@ func validatePrimaryCampaignBundle(identity campaignIdentity, corpus corpusProve
 	if indexAssignment != "coordinated-position-v1" {
 		return fmt.Errorf("campaign index assignment must be coordinated-position-v1")
 	}
-	if err := validateExactPrimaryPrefixes("plaintext", corpus.PlaintextPrefixSetIDs); err != nil {
+	if err := validateExactCampaignPrefixes("plaintext", corpus.PlaintextPrefixSetIDs, identity.BMax); err != nil {
 		return err
 	}
-	if err := validateExactPrimaryPrefixes("encrypted", corpus.EncryptedPrefixSetIDs); err != nil {
+	if err := validateExactCampaignPrefixes("encrypted", corpus.EncryptedPrefixSetIDs, identity.BMax); err != nil {
 		return err
 	}
 	if corpus.PlaintextMasterCorpusID == "" || corpus.EncryptedCorpusID == "" {
@@ -287,8 +289,11 @@ func validatePrimaryCampaignBundle(identity campaignIdentity, corpus corpusProve
 	return nil
 }
 
-func validateExactPrimaryPrefixes(kind string, values map[string]string) error {
+func validateExactCampaignPrefixes(kind string, values map[string]string, bmax int) error {
 	want := []string{"128", "32", "8"}
+	if bmax == 512 {
+		want = []string{"128", "32", "512", "8"}
+	}
 	got := make([]string, 0, len(values))
 	for key, value := range values {
 		if strings.TrimSpace(value) == "" {
@@ -298,7 +303,7 @@ func validateExactPrimaryPrefixes(kind string, values map[string]string) error {
 	}
 	sort.Strings(got)
 	if !reflect.DeepEqual(got, want) {
-		return fmt.Errorf("%s prefix identities must contain exactly 8, 32, and 128", kind)
+		return fmt.Errorf("%s prefix identities do not match BMax %d", kind, bmax)
 	}
 	return nil
 }

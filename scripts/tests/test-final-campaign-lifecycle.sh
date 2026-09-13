@@ -439,7 +439,7 @@ if task6_selected measurement-failure; then
   measurement_root="$fixture/measurement-failure"
   mkdir -p "$measurement_root"
   printf '%s\n' '{"controller":{"public_ip":"192.0.2.1"}}' >"$measurement_root/inventory.json"
-  FINAL_EXPERIMENT_ID=measurement-failure FINAL_BLOCKS=1 FINAL_REPETITIONS=3
+  FINAL_EXPERIMENT_ID=measurement-failure FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_BATCHES=8,32,128
   FINAL_WARMUPS=1 FINAL_SEED=20260621 FINAL_DEADLINE=12s
   FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
@@ -465,7 +465,7 @@ measurement_commands="$measurement_slots_root/commands.log"
 FINAL_EXPERIMENT_ID=measurement-slots FINAL_SEED=20260621 FINAL_DEADLINE=12s
 FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 FINAL_SOURCE_SHA=cccccccccccccccccccccccccccccccccccccccc
-FINAL_SAMPLER=off
+FINAL_SAMPLER=off FINAL_BATCHES=8,32,128
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
 final_ssh() { echo "measurement used foreground SSH" >&2; return 1; }
 final_run_remote_job() { printf '%s\n' "$*" >>"$measurement_commands"; }
@@ -489,9 +489,19 @@ expected_primary_slots=$'1\n111\n221\n331\n431\n531\n631\n731\n831\n931\n1031\n1
   exit 1
 }
 
+FINAL_BLOCKS=3 FINAL_REPETITIONS=30 FINAL_WARMUPS=5 FINAL_BATCHES=512
+: >"$measurement_commands"
+final_execute_measurement "$measurement_slots_root"
+extension_slots="$(sed -n "s/.*--first-slot \([0-9][0-9]*\).*/\1/p" "$measurement_commands")"
+extension_batches="$(sed -n "s/.*--batch-size \([0-9][0-9]*\).*/\1/p" "$measurement_commands")"
+[[ "$extension_slots" == $'1\n16\n26' && "$extension_batches" == $'512\n512\n512' ]] || {
+  echo "extension measurement did not isolate one batch or preserve slot ranges" >&2
+  exit 1
+}
+
 resource_measurement_log="$measurement_slots_root/resource-events.log"
 : >"$resource_measurement_log"
-FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_WARMUPS=0 FINAL_SAMPLER=on
+FINAL_BLOCKS=1 FINAL_REPETITIONS=3 FINAL_WARMUPS=0 FINAL_SAMPLER=on FINAL_BATCHES=8,32,128
 final_sampler_start() { printf 'start|%s|%s\n' "$2" "$3" >>"$resource_measurement_log"; }
 final_sampler_stop() { printf 'stop|%s|%s\n' "$2" "$3" >>"$resource_measurement_log"; }
 final_run_remote_job() {
@@ -617,7 +627,7 @@ make_fixture() {
   printf 'corpus\n' >"$root/bundle/encrypted-corpus.json"
   printf 'secret\n' >"$root/bundle/secrets/operator-0.json"
   chmod 600 "$root/bundle/secrets/operator-0.json"
-  printf '{}\n' >"$root/bundle/bundle-manifest.json"
+  printf '{"version":"bloc-campaign-bundle-v1","source_sha":"","bloc_image":"","mempool_image":"","n":4,"threshold":3,"bmax":128,"public_config_id":"public","encrypted_corpus_id":"corpus","file_sha256":{}}\n' >"$root/bundle/bundle-manifest.json"
 }
 
 install_fakes() {
@@ -633,7 +643,7 @@ install_fakes() {
   FINAL_MEMPOOL_IMAGE=mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   FINAL_PHASE=latency
   FINAL_SAMPLER=off FINAL_WARMUPS=10 FINAL_REPETITIONS=1000 FINAL_BLOCKS=10
-  FINAL_SEED=20260621 FINAL_DEADLINE=12s
+  FINAL_BATCHES=8,32,128 FINAL_SEED=20260621 FINAL_DEADLINE=12s
   FINAL_ACS_TRACE_SCHEMA=""
   FINAL_STREAM_MODE=fresh
   FINAL_FAIL_STAGE=""
@@ -678,10 +688,21 @@ install_fakes() {
 
 run_case() {
   local name="$1" phase="$2" sampler="$3" fail_stage="$4" expected="$5" trace_schema="${6:-}" stream_mode="${7:-fresh}"
+  local batches="${8:-8,32,128}" nodes="${9:-4}"
   local root="$fixture/$name"
   make_fixture "$root"
   install_fakes "$root"
   FINAL_PHASE="$phase" FINAL_SAMPLER="$sampler" FINAL_FAIL_STAGE="$fail_stage" FINAL_ACS_TRACE_SCHEMA="$trace_schema" FINAL_STREAM_MODE="$stream_mode"
+  FINAL_BATCHES="$batches" FINAL_NODE_COUNT="$nodes"
+  local threshold=3 bmax=128
+  [[ "$nodes" -eq 7 ]] && threshold=5
+  [[ "$nodes" -eq 10 ]] && threshold=7
+  [[ "$batches" == 512 ]] && bmax=512
+  jq --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
+    --argjson n "$nodes" --argjson threshold "$threshold" --argjson bmax "$bmax" \
+    '.source_sha=$source | .bloc_image=$bloc | .mempool_image=$mempool | .n=$n | .threshold=$threshold | .bmax=$bmax' \
+    "$FINAL_BUNDLE_ROOT/bundle-manifest.json" >"$FINAL_BUNDLE_ROOT/bundle-manifest.json.tmp"
+  mv "$FINAL_BUNDLE_ROOT/bundle-manifest.json.tmp" "$FINAL_BUNDLE_ROOT/bundle-manifest.json"
   status=0
   final_run_campaign_lifecycle "$root/artifacts" || status=$?
   [[ "$status" -eq "$expected" ]] || { echo "$name status=$status, want $expected" >&2; exit 1; }
@@ -705,6 +726,20 @@ if task6_selected mandatory-validation; then
   diagnostic_v2_root="$(run_case diagnostic-v2 latency off '' 0 bloc-acs-trace/v2 persistent)"
   jq -e '.acs_trace_schema == "bloc-acs-trace/v2" and .stream_mode == "persistent"' "$diagnostic_v2_root/artifacts/manifest.json" >/dev/null || {
     echo "persistent diagnostic lifecycle manifest omitted mode/schema provenance" >&2
+    exit 1
+  }
+
+  extension_root="$(run_case extension-pilot extension-pilot off '' 0 '' persistent-lanes 128 10)"
+  jq -e '.phase == "extension-pilot" and .node_count == 10 and .batches == [128] and
+    .stream_mode == "persistent-lanes" and .execution_mode == "persistent" and
+    .echo_mode == "broadcast" and .selective_echo_enabled == false' \
+    "$extension_root/artifacts/manifest.json" >/dev/null || {
+    echo "extension lifecycle manifest omitted its single-cell schedule or mode provenance" >&2
+    exit 1
+  }
+  jq -e '.n == 10 and .threshold == 7 and .bmax == 128 and .source_sha == "cccccccccccccccccccccccccccccccccccccccc"' \
+    "$extension_root/artifacts/frozen-inputs.json" >/dev/null || {
+    echo "extension lifecycle did not freeze its exact bundle shape and source provenance" >&2
     exit 1
   }
 
@@ -749,13 +784,14 @@ if [[ "${1:-}" == same-az ]]; then
   source "$repo_root/deploy/ec2/final-topology-same-az.sh"
   adapter_root="$fixture/same-az-adapter"
   mkdir -p "$adapter_root/bundle"
-  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=4 FINAL_EXPERIMENT_ID=adapter-test
+  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=10 FINAL_EXPERIMENT_ID=adapter-test
   FINAL_BUNDLE_ROOT="$adapter_root/bundle"
   FINAL_ADMIN_CIDR=127.0.0.1/32 FINAL_AWS_PROFILE=default
   FINAL_BLOC_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:$(printf 'a%.0s' {1..64})"
   FINAL_MEMPOOL_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:$(printf 'b%.0s' {1..64})"
-  final_same_az_prepare_files "$adapter_root" 4 || exit 1
+  final_same_az_prepare_files "$adapter_root" 10 || exit 1
   tfvars="$adapter_root/generated-public/terraform/campaign.auto.tfvars"
+  grep -Fq 'node_count = 10' "$tfvars"
   grep -Fq 'availability_zone = "us-east-1a"' "$tfvars"
   grep -Fq 'operator_instance_type = "t3.small"' "$tfvars"
   grep -Fq 'controller_instance_type = "t3.small"' "$tfvars"
@@ -782,13 +818,14 @@ if [[ "${1:-}" == three-region ]]; then
   source "$adapter"
   adapter_root="$fixture/three-region-adapter"
   mkdir -p "$adapter_root/bundle"
-  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=7 FINAL_EXPERIMENT_ID=adapter-test
+  FINAL_REPO_ROOT="$repo_root" FINAL_NODE_COUNT=10 FINAL_EXPERIMENT_ID=adapter-test
   FINAL_BUNDLE_ROOT="$adapter_root/bundle"
   FINAL_ADMIN_CIDR=127.0.0.1/32 FINAL_AWS_PROFILE=default
   FINAL_BLOC_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:$(printf 'a%.0s' {1..64})"
   FINAL_MEMPOOL_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:$(printf 'b%.0s' {1..64})"
-  final_three_region_prepare_files "$adapter_root" 7 || exit 1
+  final_three_region_prepare_files "$adapter_root" 10 || exit 1
   tfvars="$adapter_root/generated-public/terraform/campaign.auto.tfvars"
+  grep -Fq 'node_count = 10' "$tfvars"
   grep -Fq 'primary_region = "us-east-1"' "$tfvars"
   grep -Fq 'secondary_region = "eu-west-1"' "$tfvars"
   grep -Fq 'tertiary_region = "eu-central-1"' "$tfvars"
@@ -806,10 +843,10 @@ if [[ "${1:-}" == three-region ]]; then
   [[ "$(grep -c '^resource "aws_route"' "$repo_root/deploy/ec2/terraform-three-region/main.tf")" -eq 6 ]]
 
   inventory="$adapter_root/inventory.json"
-  jq -n '{controller:{instance_type:"t3.small",region:"us-east-1",zone:"us-east-1a"},nodes:[range(0;7)|{id:.,instance_type:"t3.small",region:(["us-east-1","eu-west-1","eu-central-1"][.%3]),zone:"test-zone"}]}' >"$inventory"
-  final_three_region_validate_inventory "$inventory" 7
+  jq -n '{controller:{instance_type:"t3.small",region:"us-east-1",zone:"us-east-1a"},nodes:[range(0;10)|{id:.,instance_type:"t3.small",region:(["us-east-1","eu-west-1","eu-central-1"][.%3]),zone:"test-zone"}]}' >"$inventory"
+  final_three_region_validate_inventory "$inventory" 10
   jq '.nodes[1].region="us-east-1"' "$inventory" >"$inventory.invalid"
-  if final_three_region_validate_inventory "$inventory.invalid" 7; then
+  if final_three_region_validate_inventory "$inventory.invalid" 10; then
     echo "three-region inventory validator accepted invalid id-to-region placement" >&2
     exit 1
   fi

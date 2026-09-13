@@ -140,13 +140,15 @@ common arguments shown above:
 `--stream-mode` defaults to `fresh` for historical contracts. Persistent mode
 is accepted with `bloc-acs-trace/v2` for the historical fresh/persistent
 experiment and with `bloc-acs-trace/v3` when it is the matched control for
-`persistent-lanes`; lane mode requires v3. Materialization and final acceptance
-require exact mode agreement across the public cluster config, remote evaluator
-config, phase manifest, evaluator manifests, and retained run/node rows. Phase
-v2/v3 validation also reconciles encode, queue-wait, stream-open, write,
-finalization, and stream open/reuse aggregates. The comparison surface is
-p50/p95/max ACS and milestone/transport phases; 30 observations do not support
-p99.
+`persistent-lanes`. Lane mode requires v3 only when ACS tracing is enabled;
+issue #30's headline M5 candidate explicitly uses trace-off
+`persistent-lanes`. Materialization and final acceptance require exact mode
+agreement across the public cluster config, remote evaluator config, phase
+manifest, evaluator manifests, and retained run/node rows even when tracing is
+off. Phase v2/v3 validation additionally reconciles encode, queue-wait,
+stream-open, write, finalization, and stream open/reuse aggregates. The
+diagnostic comparison surface is p50/p95/max ACS and milestone/transport
+phases; 30 observations do not support p99.
 
 Issue #26's matched lane diagnostic uses two separate n4 three-region latency
 deployments from one committed source, image pair, bundle, schedule, and seed.
@@ -192,14 +194,60 @@ the phase before services start. Each operator receives the same encrypted
 corpus and only its own mode-0600 secret.
 
 The fixed phases are `readiness-pilot` (n4 only: 1 warmup, 3 attempts, sampler
-off), `latency` (10 warmups, 1,000 attempts, 10 blocks, sampler off), and
-`resource` (0 warmups, 1,000 attempts, 10 blocks, sampler on). All use batches
-8/32/128, seed 20260621, and the 12-second boundary. The extension phase remains
-rejected until a later n10/batch-512 30-observation decision. An explicit
+off), `latency` (n4/n7: 10 warmups, 1,000 attempts, 10 blocks, sampler off), and
+`resource` (n4/n7: 0 warmups, 1,000 attempts, 10 blocks, sampler on). All use
+batches 8/32/128, seed 20260621, and the 12-second boundary. Issue #30 adds
+single-batch extension phases for n10 at batches 8/32/128 and batch 512 at
+n4/n7/n10:
+
+- `extension-pilot`: 5 warmups, 30 attempts, 3 blocks;
+- `extension-full`: 10 warmups, 1,000 attempts, 10 blocks; and
+- `extension-boundary`: 10 warmups, 100 attempts, 10 blocks.
+
+Pass the unique batch with `--batch-size`. Batches through 128 require an exact
+BMax-128 bundle; batch 512 requires an exact BMax-512 bundle. Extension phases
+require trace-off `persistent-lanes` and always keep the resource sampler off.
+An explicit
 `bloc-acs-trace/v1`, `bloc-acs-trace/v2`, or approved n4 three-region
 `bloc-acs-trace/v3` latency diagnostic is the narrow
 exception: it uses the 5-warmup/30-attempt/3-block contract above and does not
 run a resource phase.
+
+Generate the deterministic 24-cell deployment plan before resolving bundle
+paths or proposing any live phase:
+
+```sh
+bash deploy/ec2/plan-final-scaling-matrix.sh > /tmp/bloc-m5-matrix.json
+jq '.cells | length' /tmp/bloc-m5-matrix.json
+```
+
+The planner has no cloud side effects. It records the selected trace-off
+`persistent-lanes`/broadcast-ECHO configuration and assigns every topology,
+committee, and batch tuple its exact threshold, BMax, primary or extension
+classification, and permitted pilot/full/boundary schedules.
+It also records the expected n10 instance and per-region vCPU footprint used by
+the live quota preflight.
+
+For example, validate one extension cell without loading lifecycle tools or
+calling AWS:
+
+```sh
+bash deploy/ec2/run-three-region-campaign.sh \
+  --phase extension-pilot --batch-size 512 \
+  --bundle-root <absolute-n10-bmax512-bundle> --node-count 10 \
+  --source-sha <40-char-source> \
+  --bloc-image <private-ecr-bloc-image@sha256:digest> \
+  --mempool-image <private-ecr-mempool-image@sha256:digest> \
+  --experiment-id bloc-ec2-i30-tr-n10-b512-p1 \
+  --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
+  --stream-mode persistent-lanes --validate-only
+```
+
+The n10 capacity preflight is 11 `t3.small` instances including the controller:
+22 vCPUs in `us-east-1` for same-AZ, or 10/6/6 vCPUs in
+`us-east-1`/`eu-west-1`/`eu-central-1` for the modulo-three topology. Confirm
+current quotas, instance offerings, a phase cost ceiling, and cleanup scope in
+issue #30 before requesting separate live authorization.
 
 ## Manual Deployment Recipe
 
@@ -357,8 +405,9 @@ preserve-on-failure mode. Final p99 collection must explicitly use 10 warmups,
 1,000 measurements, balanced repetition blocks, and the predeclared seed.
 Both same-region and three-region runners retain failed and timed-out attempts
 as complete collection records while excluding them from successful latency
-quantiles. The scale extension accepts `n=10` and batch `512` only after the
-runbook's pilot/continuation decision and with generated `BMax` large enough.
+quantiles. The scale extension proceeds only under issue #30's
+pilot/continuation decision. P99 remains withheld unless a cell retains 1,000
+successful qualifying observations.
 
 ## Resource Evidence
 

@@ -709,6 +709,12 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
     run_rows = read_csv(run_path)
     if any(row.get("stream_mode") != stream_mode for row in run_rows):
         raise ValueError(f"{run_path}: stream mode mismatch")
+    node_path = scenario_root / "node_measurements.csv"
+    node_rows = read_csv(node_path)
+    if any(row.get("stream_mode") != stream_mode for row in node_rows):
+        raise ValueError(f"{node_path}: stream mode mismatch")
+    if any(str(row.get("acs_trace_schema", "")) != trace_schema for row in node_rows):
+        raise ValueError(f"{node_path}: ACS trace schema mismatch")
     if not trace_schema:
         return
     slots: dict[tuple[int, str], int] = {}
@@ -718,8 +724,6 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
             raise ValueError(f"{run_path}: duplicate block-scoped run identity {run_key}")
         slots[run_key] = int(row["slot"])
 
-    node_path = scenario_root / "node_measurements.csv"
-    node_rows = read_csv(node_path)
     expected: dict[tuple[int, str, int, int], dict[str, str]] = {}
     for row in node_rows:
         run_key = (int(row.get("measurement_block", 0)), row["run_id"])
@@ -728,10 +732,6 @@ def assert_acs_trace_artifacts(scenario_root: Path, nodes: int, trace_schema: st
         key = (*run_key, int(row["node_id"]), slots[run_key])
         if key in expected:
             raise ValueError(f"{node_path}: duplicate expected ACS trace key {key}")
-        if row.get("acs_trace_schema") != trace_schema:
-            raise ValueError(f"{node_path}: ACS trace schema mismatch")
-        if row.get("stream_mode") != stream_mode:
-            raise ValueError(f"{node_path}: stream mode mismatch")
         expected[key] = row
 
     trace_path = scenario_root / "acs_trace.jsonl"
@@ -891,7 +891,7 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
         raise ValueError(f"{manifest_path}: image identity is invalid")
     if manifest.get("bundle_version") != "bloc-campaign-bundle-v1" or not manifest.get("public_config_id") or not manifest.get("encrypted_corpus_id"):
         raise ValueError(f"{manifest_path}: bundle identities are incomplete")
-    if manifest.get("batches") != [8, 32, 128] or manifest.get("seed") != 20260621 or manifest.get("deadline") != "12s":
+    if manifest.get("seed") != 20260621 or manifest.get("deadline") != "12s":
         raise ValueError(f"{manifest_path}: fixed schedule identity is invalid")
     trace_schema = str(manifest.get("acs_trace_schema", ""))
     if trace_schema and trace_schema not in ACS_TRACE_SCHEMAS:
@@ -904,10 +904,18 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
             f"{manifest_path}: persistent stream mode requires ACS trace schema "
             "bloc-acs-trace/v2 or bloc-acs-trace/v3"
         )
-    if stream_mode == "persistent-lanes" and trace_schema != "bloc-acs-trace/v3":
+    if stream_mode == "persistent-lanes" and trace_schema not in {"", "bloc-acs-trace/v3"}:
         raise ValueError(
-            f"{manifest_path}: persistent-lanes stream mode requires ACS trace schema bloc-acs-trace/v3"
+            f"{manifest_path}: persistent-lanes stream mode requires ACS trace schema "
+            "bloc-acs-trace/v3 when tracing is enabled; trace-off operation is also supported"
         )
+    if stream_mode == "persistent-lanes" and not trace_schema:
+        if manifest.get("execution_mode") != "persistent":
+            raise ValueError(f"{manifest_path}: persistent-lanes headline execution mode must be persistent")
+        if manifest.get("echo_mode") != "broadcast":
+            raise ValueError(f"{manifest_path}: persistent-lanes headline ECHO mode must be broadcast")
+        if manifest.get("selective_echo_enabled") is not False:
+            raise ValueError(f"{manifest_path}: persistent-lanes headline selective ECHO must be disabled")
     cluster_path = phase_root / "generated-public" / "cluster.json"
     remote_path = phase_root / "generated-public" / "remote-eval.json"
     cluster = json.loads(cluster_path.read_text(encoding="utf-8-sig"))
@@ -917,22 +925,34 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if remote.get("stream_mode") != stream_mode:
         raise ValueError(f"{remote_path}: stream mode mismatch")
     schedules = {
-        "readiness-pilot": (4, 1, 3, 1, "off"),
-        "latency": (None, 10, 1000, 10, "off"),
-        "resource": (None, 0, 1000, 10, "on"),
+        "readiness-pilot": ({4}, [8, 32, 128], 1, 3, 1, "off"),
+        "latency": ({4, 7}, [8, 32, 128], 10, 1000, 10, "off"),
+        "resource": ({4, 7}, [8, 32, 128], 0, 1000, 10, "on"),
+        "extension-pilot": ({4, 7, 10}, None, 5, 30, 3, "off"),
+        "extension-full": ({4, 7, 10}, None, 10, 1000, 10, "off"),
+        "extension-boundary": ({4, 7, 10}, None, 10, 100, 10, "off"),
     }
     if trace_schema and expected_phase == "latency":
-        schedules["latency"] = (None, 5, 30, 3, "off")
+        schedules["latency"] = ({4, 7}, [8, 32, 128], 5, 30, 3, "off")
     if expected_phase not in schedules:
         raise ValueError(f"unsupported final phase {expected_phase}")
-    required_n, warmups, repetitions, blocks, sampler = schedules[expected_phase]
+    if expected_phase.startswith("extension-") and (stream_mode != "persistent-lanes" or trace_schema):
+        raise ValueError(f"{manifest_path}: extension phase requires trace-off persistent-lanes")
+    allowed_nodes, required_batches, warmups, repetitions, blocks, sampler = schedules[expected_phase]
     nodes = int(manifest.get("node_count", 0))
-    if nodes not in {4, 7} or (required_n is not None and nodes != required_n):
+    if nodes not in allowed_nodes:
         raise ValueError(f"{manifest_path}: node count is invalid")
-    if int(manifest.get("warmups", -1)) != warmups or int(manifest.get("repetitions", -1)) != repetitions:
-        raise ValueError(f"{manifest_path}: repetitions or warmups are invalid")
-    if int(manifest.get("blocks", -1)) != blocks or manifest.get("sampler") != sampler:
-        raise ValueError(f"{manifest_path}: blocks or sampler phase is invalid")
+    batches = manifest.get("batches")
+    if required_batches is not None:
+        if batches != required_batches:
+            raise ValueError(f"{manifest_path}: fixed batch schedule is invalid")
+    elif (
+        not isinstance(batches, list)
+        or len(batches) != 1
+        or batches[0] not in {8, 32, 128, 512}
+        or (nodes != 10 and batches[0] != 512)
+    ):
+        raise ValueError(f"{manifest_path}: extension batch schedule is invalid")
     if trace_schema == "bloc-acs-trace/v3" and (
         expected_topology != "three-region"
         or expected_phase != "latency"
@@ -943,7 +963,31 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
             f"{manifest_path}: v3 diagnostic is restricted to n=4 three-region "
             "persistent/persistent-lanes latency"
         )
-
+    frozen_path = phase_root / "frozen-inputs.json"
+    frozen = json.loads(frozen_path.read_text(encoding="utf-8-sig"))
+    if frozen.get("version") != manifest.get("bundle_version"):
+        raise ValueError(f"{frozen_path}: frozen bundle version mismatch")
+    for field in ("source_sha", "bloc_image", "mempool_image", "public_config_id", "encrypted_corpus_id"):
+        if frozen.get(field) != manifest.get(field):
+            raise ValueError(f"{frozen_path}: frozen {field} mismatch")
+    if int(frozen.get("n", 0)) != nodes:
+        raise ValueError(f"{frozen_path}: frozen node count mismatch")
+    expected_threshold = {4: 3, 7: 5, 10: 7}[nodes]
+    if int(frozen.get("threshold", 0)) != expected_threshold:
+        raise ValueError(f"{frozen_path}: frozen threshold mismatch")
+    expected_bmax = 512 if batches == [512] else 128
+    if int(frozen.get("bmax", 0)) != expected_bmax:
+        raise ValueError(f"{frozen_path}: frozen BMax mismatch")
+    file_hashes = frozen.get("file_sha256")
+    required_hashes = {"cluster-identity.json", "cluster.crs", "encrypted-corpus.json"}
+    if not isinstance(file_hashes, dict) or set(file_hashes) != required_hashes or any(
+        not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in file_hashes.values()
+    ):
+        raise ValueError(f"{frozen_path}: frozen public file hashes are invalid")
+    if int(manifest.get("warmups", -1)) != warmups or int(manifest.get("repetitions", -1)) != repetitions:
+        raise ValueError(f"{manifest_path}: repetitions or warmups are invalid")
+    if int(manifest.get("blocks", -1)) != blocks or manifest.get("sampler") != sampler:
+        raise ValueError(f"{manifest_path}: blocks or sampler phase is invalid")
     inventory = json.loads((phase_root / "inventory.json").read_text(encoding="utf-8-sig"))
     placement = inventory.get("nodes", [])
     if len(placement) != nodes or {int(node["id"]) for node in placement} != set(range(nodes)):
@@ -965,7 +1009,7 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if not run_paths:
         raise ValueError(f"{phase_root}: run measurements are missing")
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
-    for batch in (8, 32, 128):
+    for batch in batches:
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
         attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}
         if len(selected) != repetitions or len(attempt_ids) != repetitions:

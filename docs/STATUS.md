@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-06`
+- Last reviewed: `2026-09-13`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `0caecb9298cb14923bfb07b63483ae90f864bba6`
@@ -25,8 +25,11 @@ long-campaign scheduling, explicit terminal-attempt accounting, a deterministic
 per target, a separate nested 512-target representative protocol corpus,
 Prometheus metrics, local evaluators, VM/EC2 remote evaluation, opt-in finalized
 `bloc-acs-trace/v3` diagnostics with fail-closed evaluator artifacts, and a
-locally validated experimental `persistent-lanes` mode that isolates control
-and data application streams while retaining fresh and single-stream modes.
+locally validated `persistent-lanes` mode that isolates control and data
+application streams while retaining fresh and single-stream modes. Issue #30
+now selects trace-off `persistent-lanes` with broadcast ECHO as the active M5
+development candidate for the complete n4/n7/n10 and batch-8/32/128/512 matrix;
+this is an evaluation selection, not an accepted thesis performance claim.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -72,8 +75,21 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Persistent control/data lanes have accepted mechanism-only three-region
-  evidence and remain experimental:** issue #25's finalized
+- **Issue #30 implementation and clean freeze are in progress:** the approved
+  campaign replaces the earlier primary rows with one provenance-consistent
+  trace-off `persistent-lanes`/broadcast-ECHO candidate across same-AZ and
+  three-region topologies. The primary n4/n7 batches `8/32/128` require 1,000
+  measurements per cell. The unique n10 and batch-512 cells first require
+  30-observation pilots and may continue to 1,000 observations or a documented
+  100-observation boundary; p99 is prohibited below 1,000 successful samples.
+  The campaign contract, BMax-512/n10 bundle path, artifact validation, topology
+  capacity, immutable image, quotas, and cost ceiling must pass before any live
+  phase is proposed. Earlier n4/n7 evidence remains historical and cannot be
+  merged into the replacement matrix. No AWS phase is authorized by the
+  architecture selection or issue creation.
+
+- **Persistent control/data lanes have accepted historical mechanism-only
+  three-region evidence:** issue #25's finalized
   `bloc-acs-trace/v3` implementation now
   synchronously admits sends, seals at local ACS output, publishes only after
   terminal accounting completes, and records immutable pending-at-decision and
@@ -113,10 +129,12 @@ release-candidate configuration contract are defined in
   and run-level ACS p50 moved from `518.620 ms` to `525.464 ms` (`+1.3%`,
   median-difference interval `[+0.758, +19.291] ms`). Batch-8 ACS was flat and
   batch-32's `-4.6%` p50 change was inconclusive. The mechanism therefore works,
-  but it did not improve observed multi-region ACS latency and fails the
-  specified `>=5%` batch-128 ACS gate. Keep single-stream `persistent` as the
-  control/default and do not adopt the lane mode. Same-AZ evidence was not
-  collected, and no p99 or WAN tail claim is made from 30 observations.
+  but it did not improve observed multi-region ACS latency and failed the
+  specified `>=5%` batch-128 ACS gate. That result withheld thesis-facing
+  adoption at the time; Decision 0028 now supersedes only the development-
+  candidate selection by requiring a complete matched lane matrix. Same-AZ
+  evidence was not collected, and no p99 or WAN tail claim is made from the
+  earlier 30 observations.
 
   Full-slot latency also worsened in the later treatment deployment, reaching
   `+33.8%` at batch 128. Most of that shift occurred outside ACS in CPU-heavy
@@ -563,20 +581,21 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Treat the measured n4 three-region persistent ACS p50 values of approximately
-   `232/258/519 ms` for batches `8/32/128` as the scoped baseline for the current
-   architecture. Keep `persistent` as the default and stop focused direct-stream
-   tuning. Any future latency-reduction task must be separately selected as a
-   protocol-level payload-dissemination/quorum redesign rather than an incremental
-   transport adjustment.
-2. Defer the Merkle construction, GossipSub, alternate-RBC, and serialization
-   proposals. Do not include them in the focused READY/stream-lane program.
-3. Leave issue #15 open and paused for resource collection. Do not admit any
-   resource-phase latency rows or rejected campaign attempts into the p99
-   dataset.
-4. Do not combine measurements from different source, image, corpus,
-   configuration, or schema revisions into one final campaign.
-5. Track granular work in the [BLOC Thesis Prototype GitHub
+1. Complete issue #30's test-first campaign implementation for trace-off
+   `persistent-lanes`, n10/t7, BMax/batch 512, single-cell extension phases,
+   artifact provenance, and both topology contracts.
+2. Pass module, chart, runner, race, Terraform, zero-AWS validate-only, and local
+   n10/batch-512 preflight gates; then freeze one clean source commit and
+   immutable image set for the replacement matrix.
+3. Before each live phase, post the exact provenance, cells, quota result, cost
+   ceiling, and cleanup plan to issue #30 and obtain separate authorization.
+4. Leave issue #15 open and paused for resource collection. Do not admit its
+   resource-phase rows, rejected attempts, or any older source/image results
+   into issue #30's p99 distributions.
+5. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
+   changes outside this campaign so the architectural comparison remains
+   attributable.
+6. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.

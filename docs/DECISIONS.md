@@ -613,3 +613,46 @@ Use this file for major architecture, protocol, and workflow decisions.
   `bloc-node/internal/app/transport_libp2p_lanes.go`,
   `bloc-node/internal/app/transport_libp2p_lanes_test.go`,
   `docs/VALIDATION.md`
+
+## 0028. Evaluate persistent control/data lanes as the M5 development candidate
+
+- Date: 2026-09-13
+- Status: Accepted
+- Context: Decision 0027 correctly withheld thesis-facing adoption because the
+  narrow n4 three-region diagnostic improved READY queue wait and first RBC
+  output without improving RBC quorum or ACS completion, and no matched same-AZ
+  lane arm existed. The active objective is now development evaluation of the
+  strongest logically sound BLOC architecture across the complete M5 scaling
+  matrix, rather than selecting a conservative frozen thesis baseline from that
+  diagnostic alone.
+- Options considered: retain the single persistent FIFO; evaluate
+  `persistent-lanes`; combine lanes with selective/hash-only ECHO; or defer the
+  scaling campaign pending a different dissemination protocol.
+- Decision: Use evaluator execution mode `persistent` with network stream mode
+  `persistent-lanes` for the new matched M5 candidate. Keep RBC ECHO in
+  broadcast mode, disable ACS tracing for headline measurements, disable the
+  selective/hash-only ECHO optimization, and run the complete same-AZ and
+  three-region matrix for `n=4/7/10` and batches `8/32/128/512`. Use BMax 128
+  for batches through 128 and BMax 512 for batch 512. Produce all primary rows
+  from one new clean source/image freeze; earlier results remain historical and
+  must not be merged into the new distributions.
+- Rationale: Separate control and data writers remove a known application-level
+  head-of-line dependency and are a clearer architectural boundary than one
+  shared FIFO. Persistent streams already improved same-AZ latency, while the
+  lane diagnostic proved its routing and lifecycle mechanism. A complete
+  matched matrix is the appropriate way to determine whether that stronger
+  structure improves, preserves, or worsens end-to-end behavior at larger
+  committees and transaction batches.
+- Consequences: `persistent-lanes` is selected for development evaluation, not
+  declared thesis-ready or universally faster. Trace-off operation must retain
+  exact stream-mode provenance in cluster, evaluator, phase, run, and node
+  artifacts. Extension cells use a 30-observation pilot and may advance to
+  1,000 observations or a documented 100-observation boundary; p99 remains
+  restricted to qualifying 1,000-sample cells. Live AWS work still requires
+  separate phase-specific authorization with frozen provenance, quota, cost,
+  and cleanup details. Issue #30 owns granular execution and evidence history.
+- Related files: `deploy/ec2/plan-final-scaling-matrix.sh`,
+  `scripts/lib/final-campaign-contract.sh`,
+  `scripts/lib/final-campaign-lifecycle.sh`,
+  `scripts/lib/campaign_artifacts.py`, `deploy/ec2/README.md`,
+  `docs/VALIDATION.md`, `docs/STATUS.md`

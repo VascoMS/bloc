@@ -40,6 +40,54 @@ func TestBuildAndLoadCampaignBundle(t *testing.T) {
 	}
 }
 
+func TestFinalCampaignBundleValidationAcceptsScaleExtensionInputs(t *testing.T) {
+	tests := []struct {
+		name      string
+		n         int
+		threshold int
+		bmax      int
+	}{
+		{name: "n10-small-batches", n: 10, threshold: 7, bmax: 128},
+		{name: "n4-batch512", n: 4, threshold: 3, bmax: 512},
+		{name: "n7-batch512", n: 7, threshold: 5, bmax: 512},
+		{name: "n10-batch512", n: 10, threshold: 7, bmax: 512},
+	}
+	publicKey := newSuite().G1().Point().Base()
+	publicKeyHex, err := marshalPointHex(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			crsSHA256 := strings.Repeat("d", 64)
+			publicID, err := be.PublicConfigID(test.bmax, crsSHA256, publicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefixes := map[string]string{"8": "prefix-8", "32": "prefix-32", "128": "prefix-128"}
+			encryptedPrefixes := map[string]string{"8": "encrypted-8", "32": "encrypted-32", "128": "encrypted-128"}
+			if test.bmax == 512 {
+				prefixes["512"] = "prefix-512"
+				encryptedPrefixes["512"] = "encrypted-512"
+			}
+			identity := campaignIdentity{
+				N: test.n, Threshold: test.threshold, BMax: test.bmax,
+				CRSSHA256: crsSHA256, PublicKeyHex: publicKeyHex,
+				Blockspace: BlockspaceConfig{MaxDecryptedTxs: test.bmax},
+			}
+			corpus := corpusProvenance{
+				SchemaVersion: "bloc-encrypted-corpus-v1", CiphertextWireVersion: be.LibraryVersion,
+				PublicConfigID: publicID, PlaintextMasterCorpusID: "plaintext-master",
+				PlaintextPrefixSetIDs: prefixes, EncryptedCorpusID: "encrypted-master",
+				EncryptedPrefixSetIDs: encryptedPrefixes, BMax: test.bmax, AvailableCount: test.bmax,
+			}
+			if err := validateFinalCampaignBundle(identity, corpus, "coordinated-position-v1"); err != nil {
+				t.Fatalf("validate scale-extension bundle: %v", err)
+			}
+		})
+	}
+}
+
 func TestVerifyCampaignBundleWritesOnceAndChecksExpectedIdentities(t *testing.T) {
 	root := writeCampaignBundleFixture(t, 4, 3)
 	writeArgs := []string{
@@ -169,8 +217,12 @@ func TestBuildCampaignBundleRejectsBadSecretAndEscapingSymlink(t *testing.T) {
 	})
 }
 
-func writeCampaignBundleFixture(t *testing.T, n, threshold int) string {
+func writeCampaignBundleFixture(t *testing.T, n, threshold int, bmaxOverride ...int) string {
 	t.Helper()
+	bmax := 128
+	if len(bmaxOverride) > 0 {
+		bmax = bmaxOverride[0]
+	}
 	root := t.TempDir()
 	identityPath := filepath.Join(root, campaignBundleIdentityFile)
 	crsPath := filepath.Join(root, campaignBundleCRSFile)
@@ -182,7 +234,7 @@ func writeCampaignBundleFixture(t *testing.T, n, threshold int) string {
 		SecretsDir:  secretDir,
 		N:           n,
 		Threshold:   threshold,
-		BMax:        128,
+		BMax:        bmax,
 		Limits:      defaultResourceLimits(),
 	})
 	if err != nil {
@@ -212,12 +264,17 @@ func writeCampaignBundleFixture(t *testing.T, n, threshold int) string {
 		t.Fatal(err)
 	}
 	prefixes := map[string]string{"8": "prefix-8", "32": "prefix-32", "128": "prefix-128"}
+	encryptedPrefixes := map[string]string{"8": "encrypted-8", "32": "encrypted-32", "128": "encrypted-128"}
+	if bmax == 512 {
+		prefixes["512"] = "prefix-512"
+		encryptedPrefixes["512"] = "encrypted-512"
+	}
 	corpus := map[string]any{
 		"schema_version": "bloc-encrypted-corpus-v1", "ciphertext_wire_version": be.LibraryVersion,
 		"public_config_id": publicID, "plaintext_master_corpus_id": "plaintext-master",
 		"plaintext_prefix_set_ids": prefixes, "encrypted_corpus_id": "encrypted-master",
-		"encrypted_prefix_set_ids": map[string]string{"8": "encrypted-8", "32": "encrypted-32", "128": "encrypted-128"},
-		"bmax":                     128, "available_count": 128, "index_assignment": "coordinated-position-v1",
+		"encrypted_prefix_set_ids": encryptedPrefixes,
+		"bmax":                     bmax, "available_count": bmax, "index_assignment": "coordinated-position-v1",
 		"ordered_index_schedule": []int{}, "class_counts": map[string]any{}, "candidates": []any{},
 	}
 	if err := writeJSONFileAtomic(filepath.Join(root, campaignBundleCorpusFile), corpus, 0644); err != nil {

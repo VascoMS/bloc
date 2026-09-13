@@ -50,13 +50,18 @@ evidence:
 - ACS safety root: `results/local/acs-common-subset-safety/rc-2bc8efc/`;
 - evaluator artifact schema: `bloc-eval-suite/v3`.
 
-The final VM primary honest-path configuration is `n=4,t=3` and `n=7,t=5`,
-batches `8/32/128`, persistent execution, 10 warmups, 1,000 measured attempts
-per scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
+Issue #30's replacement VM primary honest-path configuration is `n=4,t=3` and
+`n=7,t=5`, batches `8/32/128`, persistent evaluator execution, trace-off
+`persistent-lanes`, broadcast ECHO, 10 warmups, 1,000 measured attempts per
+scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
 completed-within-deadline boundary. Failed, inconsistent, and timed-out
 attempts remain in the artifact but never enter latency quantiles. The guarded
-VM `n=10,t=7` and batch-512 extension uses its separate 30-observation
-pilot/continuation rule and requires `BMax` to cover the selected batch.
+VM extension covers `n=10,t=7` at batches `8/32/128` and batch 512 at
+`n=4/7/10`. Each unique extension cell starts with 5 warmups, 30 observations,
+and 3 blocks, then may continue to 10 warmups and 1,000 observations/10 blocks
+or a documented 100-observation/10-block boundary. P99 is withheld below 1,000
+successful observations. Batches through 128 require exact BMax-128 bundles;
+batch 512 requires exact BMax-512 bundles.
 
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
@@ -292,9 +297,9 @@ Only after the local gate has no new failures, consistency errors, or stable
 queue regression should a separately authorized same-AZ/three-region canary be
 prepared. Cloud allocation is never implied by this gate.
 
-## Persistent Control/Data Stream Lane Experiment Gate
+## Persistent Control/Data Stream Lane Validation And Development Candidate
 
-`persistent-lanes` is an experimental application-stream isolation mode. It
+`persistent-lanes` is an application-stream isolation mode. It
 uses `/bloc/envelope/3.0.0/control` for READY/BVAL/AUX and
 `/bloc/envelope/3.0.0/data` for PROOF/ECHO/share, with one independent
 capacity-one writer queue per lane and remote peer. It does not change payload
@@ -369,8 +374,17 @@ with 30 successful consistent observations per batch/mode/topology, zero
 deadline misses and send failures, exact provenance/schedule equality, complete
 final traces, and balanced subtype lifecycles. The user authorized only the
 three-region arm needed to answer the WAN question. Because that arm did not
-meet the ACS improvement gate, the mode is not adopted; same-AZ evidence would
-still be required before any future reconsideration.
+meet the ACS improvement gate, the mode was not adopted at that decision point;
+same-AZ evidence was identified as a prerequisite for reconsideration.
+
+Decision 0028 supersedes that adoption outcome only for development-candidate
+selection. Issue #30 evaluates the strongest current architecture over the
+complete same-AZ/three-region n4/n7/n10 and batch-8/32/128/512 matrix with
+broadcast ECHO and headline tracing disabled. The earlier diagnostic remains
+valid mechanism-only evidence and cannot be combined with the replacement
+distributions. Trace-off acceptance still requires exact `persistent-lanes`
+provenance in the public cluster, remote evaluator, phase manifest, evaluator
+manifest, run rows, and node rows.
 
 The authorized 2026-09-06 short three-region campaign used frozen source
 `0caecb9298cb14923bfb07b63483ae90f864bba6`, one immutable BLOC image, one
@@ -409,10 +423,11 @@ by later CPU-heavy work that lanes do not change: merge-plan p50 rose `51.5%`
 and combine p50 rose `48.6%`. Because control and treatment intentionally used
 sequential, separately provisioned fleets, this is a deployment-performance
 confound rather than evidence that lanes caused the downstream regression. It
-does mean the campaign observed no end-to-end improvement. Keep
-`persistent-lanes` experimental and `persistent` as the default. Same-AZ was
-not run, so the full adoption matrix remains unassessed. Retained roots are
-`results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
+does mean the historical diagnostic observed no end-to-end improvement. That
+campaign retained `persistent` as its default and did not establish thesis-
+facing lane adoption. Same-AZ was not run, so the full matrix remained
+unassessed until issue #30 selected it as new development work. Retained roots
+are `results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
 `results/ec2/bloc-ec2-i26-tr-ln-v3-p1/`; the reproducible ignored comparison is
 under `results/local/acs-lane-campaign/issue-26-0caecb9/aws-analysis/`.
 

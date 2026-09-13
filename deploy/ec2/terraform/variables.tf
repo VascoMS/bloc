@@ -38,6 +38,11 @@ variable "ecr_repository_arns" {
 variable "node_count" {
   type    = number
   default = 4
+
+  validation {
+    condition     = contains([4, 7, 10], var.node_count)
+    error_message = "node_count must be 4, 7, or 10."
+  }
 }
 
 variable "operator_instance_type" {

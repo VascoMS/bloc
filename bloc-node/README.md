@@ -99,9 +99,11 @@ Omission retains the `fresh` compatibility path. Both persistent modes prewarm
 their outbound stream or streams, confirm libp2p's lazy protocol handshake
 before readiness, and carry repeated length-delimited protobuf frames. The
 underlying libp2p peer connections are persistent in all modes.
-`persistent-lanes` is an experimental application-stream isolation mode, not a
-bandwidth optimization: payload volume, recipient counts, protocol rounds,
-libp2p connection congestion, and TCP loss head-of-line blocking are unchanged.
+`persistent-lanes` is an application-stream isolation mode selected for issue
+#30's complete M5 development evaluation. That selection is not a thesis
+performance claim or a bandwidth optimization: payload volume, recipient
+counts, protocol rounds, libp2p connection congestion, and TCP loss
+head-of-line blocking are unchanged.
 
 The v2 defaults are 8 MiB per encoded proposal, 16 MiB per inbound/outbound
 envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
@@ -269,15 +271,16 @@ The analyzer rejects mode, schedule, trace, failure, consistency, and retained
 provenance mismatches. Its p50/p95 confidence-interval classifications are
 diagnostic rather than a causal proof; 30 observations do not support p99.
 
-For the follow-up application-stream isolation experiment, keep `persistent`
-as the control and compare it with `persistent-lanes` using the finalized v3
-trace contract. The local `n=4` batches `8/32/128` gate is a correctness and
+The historical application-stream isolation experiment kept `persistent` as
+the control and compared it with `persistent-lanes` using the finalized v3
+trace contract. Its local `n=4` batches `8/32/128` gate was a correctness and
 queue-regression diagnostic only. The authorized matched three-region campaign
 later retained 90/90 accepted measurements per arm. At batch 128, lanes removed
 the READY queue wait and advanced first RBC output, but did not improve RBC
-output quorum or end-to-end ACS latency. Keep `persistent` as the default and
-`persistent-lanes` experimental; same-AZ lane evidence would still be required
-before any future adoption reconsideration. See the
+output quorum or end-to-end ACS latency. Decision 0028 now selects trace-off
+`persistent-lanes` for a new clean same-AZ/three-region development matrix at
+n4/n7/n10 and batches 8/32/128/512. The earlier result remains mechanism-only
+historical evidence and is not merged into the new distributions. See the
 [September ACS communication findings](../docs/archive/ACS_COMMUNICATION_LATENCY_FINDINGS_2026-09.md)
 for the complete result and evidence limits.
 
@@ -318,6 +321,10 @@ identity, CRS, every operator secret, immutable corpus and prefix identities,
 file hashes, source, and image references; the second invocation proves the
 written manifest without modifying it. Never copy bundle secrets into public
 campaign artifacts.
+
+Issue #30 uses `(n,t)=(4,3),(7,5),(10,7)`. Generate BMax 128 bundles with exact
+8/32/128 corpus prefixes for the smaller batches, and separate BMax 512 bundles
+with exact 8/32/128/512 prefixes for batch 512.
 
 ## Container and Remote Evaluation
 

@@ -548,6 +548,13 @@ release-candidate configuration contract are defined in
   audited Relayscan bid archive begins in June 2024; they cannot form a matched
   cohort. Expand and validate the sampling frame before interpreting economic
   magnitudes. See [VALIDATION.md](VALIDATION.md#historical-detected-mev-concentration-pilot).
+- **Complete-month label acquisition is prepared, not yet executed:** issue #31
+  now has fail-closed Dune queries and a hashed collector for the predefined
+  July 2026 Ethereum sandwich, atomic-arbitrage, and liquidation label cohort.
+  No Dune API key is configured on the current machine, so no July rows or row
+  counts are accepted evidence yet. Execute with a local Read-scope key, retain
+  raw results under ignored `results/`, and record hashes and counts on issue
+  #31 before analysis.
 - **Evidence completeness:** the final evidence contract requires p99-capable
   same-region and three-region VM performance campaigns, complete per-operator
   VM resource measurements, RQ3 fault campaigns, and scoped thesis synthesis.
@@ -591,9 +598,10 @@ release-candidate configuration contract are defined in
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
 6. Continue the reduced economic chapter from issue #31's offline concentration
-   pilot: establish a bounded cohort with complete source-label extraction and
-   transaction receipts before drawing concentration conclusions. Audit a
-   separate bid-timing cohort and retain cross-period assumptions explicitly.
+   pilot: execute the prepared July 2026 Dune label collector with a locally
+   configured Read-scope key, then establish the complete finalized-block and
+   receipt cohort before drawing concentration conclusions. Audit a separate
+   bid-timing cohort and retain cross-period assumptions explicitly.
    Infrastructure monetary OPEX is excluded from this chapter; issue #15's
    technical resource work remains paused.
 

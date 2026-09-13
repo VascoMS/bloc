@@ -1192,6 +1192,18 @@ historical periods separate. Any cross-period combination is a scenario
 assumption. All report inputs, source bytes, analysis source, and outputs must
 be checksummed. Tests use clearly marked synthetic fixtures.
 
+The next predefined label cohort is the complete UTC month of July 2026. The
+[monthly Dune collector](../economics/README.md#complete-month-dune-labels)
+queries sandwich outer and victim legs, atomic-arbitrage trade legs, and both
+sides of lending liquidations. It retains canonical block hashes and transaction
+positions plus transaction fee fields, rejects out-of-period or malformed rows,
+and hashes every request, response, query, and CSV artifact. This establishes a
+reproducible label acquisition frame; it does not establish classifier recall.
+Sandwich and arbitrage `amount_usd` values are trade volume. Liquidation USD
+values are repaid debt or seized collateral. None is admitted as profit or
+builder revenue without separate accounting. The actual Dune executions and
+row-count evidence remain pending API access and must be recorded on issue #31.
+
 ## Milestone Evidence Map
 
 | Milestone | Primary evidence |

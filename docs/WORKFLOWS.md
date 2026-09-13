@@ -200,6 +200,54 @@ Do not publish raw dataset files without establishing redistribution terms.
 Do not silently expand this pilot into large archive downloads, paid access,
 execution-node deployment, or a new detector.
 
+### Complete-Month Dune MEV Labels
+
+The predefined first cohort is Ethereum from `2026-07-01 00:00:00 UTC`
+inclusive through `2026-08-01 00:00:00 UTC` exclusive. This period was selected
+before inspecting individual transactions and is a completed historical month.
+It does not change the active milestone.
+
+From the [economics module](../economics/README.md), set a Dune API key with Read
+scope only in the local environment and run:
+
+```sh
+python -m bloc_economics.dune_collect results/dune-mev-2026-07 --month 2026-07
+```
+
+The collector executes three versioned SQL templates:
+
+1. `sandwiches.csv` contains all returned attacker outer-trade rows from
+   `dex.sandwiches` and victim-trade rows from `dex.sandwiched`, with an explicit
+   leg role.
+2. `atomic_arbitrages.csv` contains all returned trade legs from
+   `dex.atomic_arbitrages`. Group legs by transaction hash before deriving a
+   transaction-level strategy.
+3. `liquidations.csv` contains all returned liquidation debt-repayment events
+   from `lending.borrow` and collateral-seizure events from `lending.supply`,
+   with an explicit side. Pair them by protocol, transaction hash, and event
+   evidence; do not treat either side alone as liquidator profit.
+
+Each query filters both the partition month and exact block timestamp, and joins
+the canonical Ethereum transaction row to retain block hash, transaction index,
+success, gas used, priority fee per gas, and top-level ETH value. The query
+result is accepted only when every row is Ethereum, lies within the requested
+month, has a valid block/event identity and transaction hash, and the required
+columns are present. An empty result is an acquisition failure.
+
+Keep all generated files in the new ignored results directory. `manifest.json`
+records the half-open sampling frame, source limitation, redacted request and
+response evidence, raw CSV hashes and byte counts, row counts, and observed time
+bounds. The API key must appear only in the request header and never in saved
+files. The collector refuses to replace existing evidence files; choose a new
+directory for a rerun. Dune API execution uses account credits.
+
+These tables are curated detector outputs and do not establish exhaustive MEV
+coverage. Their USD amount columns are trade, debt, or collateral volumes. They
+are not profit, builder revenue, proposer payment, or BLOC opportunity cost.
+Preserve all zero-label blocks in the later finalized-block cohort so absence of
+a returned label is not confused with a missing block. Do not publish raw Dune
+exports until their redistribution terms are established.
+
 ## Operational Runbooks
 
 - Local Compose rehearsal and mock-placeholder smoke:

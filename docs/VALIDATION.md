@@ -64,6 +64,18 @@ or a documented 100-observation/10-block boundary. P99 is withheld below 1,000
 successful observations. Batches through 128 require exact BMax-128 bundles;
 batch 512 requires exact BMax-512 bundles.
 
+Issue #30 readiness phase `bloc-ec2-i30-tr-n4-ready-p1` is accepted from source
+`95a3d039ca3c3a6079baa33ce78a5de4fc31e72d` and the frozen BLOC/mempool image
+pair. For batches `8/32/128`, all `3/3` measured observations were successful,
+consistent, and within the 12-second deadline. Total-slot p50 was
+`295.801/676.718/1972.466 ms`, while ACS p50 was
+`232.458/353.482/519.595 ms`. These nine readiness observations demonstrate
+deployment viability only and are not p99-eligible. The phase and independent
+cleanup validators pass; Terraform destroyed all 39 resources, fresh
+authenticated regional/IAM queries are empty, and the state file contains zero
+resources. The provider-cache-free retained artifact has 115 checksummed files
+under `results/ec2/bloc-ec2-i30-tr-n4-ready-p1/`.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

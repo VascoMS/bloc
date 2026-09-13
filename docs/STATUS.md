@@ -3,7 +3,7 @@
 - Last reviewed: `2026-09-13`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Last known good source: `0caecb9298cb14923bfb07b63483ae90f864bba6`
+- Last known good source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
 
 ## Current Prototype State
 
@@ -76,8 +76,8 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #30's three-region-only image and bundle freeze is complete; live
-  execution remains separately gated:** clean source
+- **Issue #30's three-region-only image/bundle freeze and n4 readiness pilot
+  are accepted; measured phases remain separately gated:** clean source
   `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
   implements the user-approved deterministic 12-cell trace-off
   `persistent-lanes`/broadcast-ECHO matrix for `n=4/7/10` and batches
@@ -109,6 +109,18 @@ release-candidate configuration contract are defined in
   8/32/128, and six extension-pilot profiles cover n10 at 8/32/128 plus batch
   512 at n4/n7/n10.
 
+  Authorized three-region readiness phase `bloc-ec2-i30-tr-n4-ready-p1`
+  completed from those exact inputs with all lifecycle stages `ok`. Each batch
+  retained 3/3 successful, consistent, deadline-met measurements. Total-slot
+  p50 was `295.801/676.718/1972.466 ms` and ACS p50 was
+  `232.458/353.482/519.595 ms` for batches `8/32/128`; these nine readiness
+  observations are not p99-eligible. Both independent phase/cleanup validators
+  pass. Terraform destroyed all 39 resources, a fresh authenticated audit found
+  every scoped regional EC2/network/key and IAM category empty, and the state
+  file has zero resources. The 115-file, provider-cache-free retained artifact
+  and checksum manifest are under
+  `results/ec2/bloc-ec2-i30-tr-n4-ready-p1/`.
+
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
   has a 16-vCPU Standard On-Demand quota, and the largest three-region n10 cell
@@ -117,9 +129,9 @@ release-candidate configuration contract are defined in
   three-region n10 ceiling is `USD 15` for an extension pilot and `USD 20` for
   a full-or-boundary phase. Earlier n4/n7 and same-AZ evidence remains
   historical and cannot be merged into the replacement matrix. The narrowed
-  campaign supports no new same-AZ versus three-region comparison. The
-  authorized ECR publication and local bundle binding created no EC2 resources;
-  no Terraform plan/apply or live campaign phase was authorized or executed.
+  campaign supports no new same-AZ versus three-region comparison. No primary
+  or extension measurement phase has been authorized or executed after the
+  accepted readiness pilot.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -614,12 +626,13 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Obtain separate live authorization for the source- and digest-frozen issue
-   #30 campaign. Start with the n4 three-region readiness pilot, using the
-   documented `USD 15` pilot ceiling and mandatory authenticated cleanup;
-   validate and destroy it before proposing any measured matrix phase.
-2. After an accepted readiness pilot, run the primary and extension schedules
-   one separately authorized phase at a time, retaining only complete,
+1. Obtain phase-specific live authorization for the n4 three-region primary
+   latency phase: batches `8/32/128`, 10 warmups and 1,000 measured attempts per
+   batch over 10 blocks, with a conservative `USD 20` ceiling and mandatory
+   authenticated cleanup.
+2. If the n4 primary phase is accepted and cleanup passes, propose n7 primary
+   latency next; then run extension pilots one separately authorized cell at a
+   time under issue #30's continuation rule. Retain only complete,
    provenance-valid evidence from source `95a3d039` and the frozen images.
 3. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
@@ -634,14 +647,16 @@ release-candidate configuration contract are defined in
 
 ## Last Known Good Baseline
 
-- Date: `2026-08-02`
-- Source: `cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f`
+- Date: `2026-09-13`
+- Source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
 - BLOC image:
-  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:a58d8ef4ef5a674ce89341538798b47a422ffdc66d72637d8b3f4351282a2eec`
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:c8583b8f9e10c78e74b1c1556fb63f576b84993d600073811a090d1fb91858b1`
 - Mempool image:
-  `632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:3c0c147a92d66c89293f9bda89967bded2ae22795bd37de09fa466ca4dbe38aa`
-- Replacement-candidate validation:
-  `results/local/final-campaign-readiness-cf36eb06bea12eb3b0fcfdfaf94a349c2dbe784f/validation/`
+  `632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:3424f27384c8ffa594ac9a56cd1ee8c89b84605af5eeaea5bcbe5885cf757c66`
+- Replacement-candidate validation and freeze:
+  `results/release-candidate/95a3d039ca3c3a6079baa33ce78a5de4fc31e72d/issue-30-predeployment/`
+- Accepted issue #30 readiness evidence:
+  `results/ec2/bloc-ec2-i30-tr-n4-ready-p1/`
 - Historical M4 local safety evidence:
   `results/local/acs-common-subset-safety/rc-2bc8efc/`
 - Historical M4 accepted distributed-campaign preflight:

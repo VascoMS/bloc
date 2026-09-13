@@ -243,11 +243,12 @@ bounded reasons `oversize`, `decode`, `authentication`, `payload`, and `lane`.
 Lane classification occurs only after payload validation and authenticated
 sender binding. Unclassifiable payloads are rejected as `payload` rather than
 defaulting to a lane. `persistent-lanes` is selected for issue #30's complete
-M5 development evaluation, but is not yet an accepted thesis performance claim
-or a bandwidth optimization: payload volume, recipient counts, protocol rounds,
-libp2p connection congestion, and TCP loss head-of-line blocking remain
-unchanged. Headline trace-off runs still bind the exact stream mode across the
-cluster, remote evaluator, phase, run, and node artifacts.
+three-region M5 development evaluation, but is not yet an accepted thesis
+performance claim or a bandwidth optimization: payload volume, recipient
+counts, protocol rounds, libp2p connection congestion, and TCP loss
+head-of-line blocking remain unchanged. Headline trace-off runs still bind the
+exact stream mode across the cluster, remote evaluator, phase, run, and node
+artifacts.
 
 Encoded inclusion-list proposals are independently bounded by
 `limits.max_proposal_bytes` and `BMax`. The defaults are 8 MiB and 128 items;

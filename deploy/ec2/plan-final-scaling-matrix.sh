@@ -20,11 +20,10 @@ jq -n '
       instance_type:"t3.small"
     },
     n10_capacity:{
-      "same-az":{instances:11,vcpus_by_region:{"us-east-1":22}},
       "three-region":{instances:11,vcpus_by_region:{"us-east-1":10,"eu-west-1":6,"eu-central-1":6}}
     },
     cells:[
-      (["same-az", "three-region"][]) as $topology |
+      "three-region" as $topology |
       ([4, 7, 10][]) as $n |
       ([8, 32, 128, 512][]) as $batch |
       ($n < 10 and $batch < 512) as $primary |

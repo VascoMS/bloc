@@ -50,8 +50,9 @@ evidence:
 - ACS safety root: `results/local/acs-common-subset-safety/rc-2bc8efc/`;
 - evaluator artifact schema: `bloc-eval-suite/v3`.
 
-Issue #30's replacement VM primary honest-path configuration is `n=4,t=3` and
-`n=7,t=5`, batches `8/32/128`, persistent evaluator execution, trace-off
+Issue #30's three-region-only replacement VM primary honest-path configuration
+is `n=4,t=3` and `n=7,t=5`, batches `8/32/128`, persistent evaluator
+execution, trace-off
 `persistent-lanes`, broadcast ECHO, 10 warmups, 1,000 measured attempts per
 scenario, 10 balanced repetition blocks, seed `20260621`, and a 12-second
 completed-within-deadline boundary. Failed, inconsistent, and timed-out
@@ -378,13 +379,14 @@ meet the ACS improvement gate, the mode was not adopted at that decision point;
 same-AZ evidence was identified as a prerequisite for reconsideration.
 
 Decision 0028 supersedes that adoption outcome only for development-candidate
-selection. Issue #30 evaluates the strongest current architecture over the
-complete same-AZ/three-region n4/n7/n10 and batch-8/32/128/512 matrix with
-broadcast ECHO and headline tracing disabled. The earlier diagnostic remains
-valid mechanism-only evidence and cannot be combined with the replacement
-distributions. Trace-off acceptance still requires exact `persistent-lanes`
-provenance in the public cluster, remote evaluator, phase manifest, evaluator
-manifest, run rows, and node rows.
+selection. Decision 0029 narrows issue #30 to the complete three-region
+n4/n7/n10 and batch-8/32/128/512 matrix with broadcast ECHO and headline
+tracing disabled. The earlier diagnostic and same-AZ results remain historical
+evidence and cannot be combined with the replacement distributions. This
+campaign therefore supports no new same-AZ versus three-region comparison.
+Trace-off acceptance still requires exact `persistent-lanes` provenance in the
+public cluster, remote evaluator, phase manifest, evaluator manifest, run rows,
+and node rows.
 
 The authorized 2026-09-06 short three-region campaign used frozen source
 `0caecb9298cb14923bfb07b63483ae90f864bba6`, one immutable BLOC image, one
@@ -425,9 +427,10 @@ sequential, separately provisioned fleets, this is a deployment-performance
 confound rather than evidence that lanes caused the downstream regression. It
 does mean the historical diagnostic observed no end-to-end improvement. That
 campaign retained `persistent` as its default and did not establish thesis-
-facing lane adoption. Same-AZ was not run, so the full matrix remained
-unassessed until issue #30 selected it as new development work. Retained roots
-are `results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
+facing lane adoption. Same-AZ was not run; issue #30 later selected the lane
+mode for development evaluation, and Decision 0029 then deliberately limited
+that new evidence to three-region deployment. Retained roots are
+`results/ec2/bloc-ec2-i26-tr-ps-v3-p1/` and
 `results/ec2/bloc-ec2-i26-tr-ln-v3-p1/`; the reproducible ignored comparison is
 under `results/local/acs-lane-campaign/issue-26-0caecb9/aws-analysis/`.
 

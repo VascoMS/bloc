@@ -656,3 +656,35 @@ Use this file for major architecture, protocol, and workflow decisions.
   `scripts/lib/final-campaign-lifecycle.sh`,
   `scripts/lib/campaign_artifacts.py`, `deploy/ec2/README.md`,
   `docs/VALIDATION.md`, `docs/STATUS.md`
+
+## 0029. Narrow the M5 scaling campaign to three-region deployment
+
+- Date: 2026-09-13
+- Status: Accepted
+- Context: Decision 0028 selected a matched same-AZ and three-region matrix.
+  The current account supports the complete three-region n10 footprint within
+  its existing regional quotas, while same-AZ n10 exceeds the `us-east-1`
+  quota. The user prioritized completing the strongest-architecture evaluation
+  promptly over collecting a new matched topology comparison.
+- Options considered: retain both topologies and wait for a quota increase;
+  execute only the smaller same-AZ committees; reduce committee or batch
+  coverage; or preserve all committee and batch dimensions while limiting the
+  new campaign to three-region deployment.
+- Decision: Issue #30 executes exactly 12 three-region cells for `n=4/7/10`
+  and batches `8/32/128/512`. Keep the primary and extension sampling rules,
+  trace-off `persistent-lanes`, broadcast ECHO, seed, deadline, instance type,
+  BMax selection, provenance, and cleanup contracts unchanged. Retain generic
+  same-AZ runner support, but do not execute it for this campaign.
+- Rationale: The selected topology exercises the WAN deployment of interest
+  and fits the verified 16-vCPU quotas at the complete n10 footprint of
+  `10/6/6` vCPUs. Removing one topology shortens execution without weakening
+  committee-size or transaction-batch coverage.
+- Consequences: The campaign can characterize three-region scaling and latency
+  but cannot produce a new same-AZ versus three-region comparison. Existing
+  same-AZ results remain historical context and cannot be merged with issue
+  #30. The earlier 24-cell planner and source freeze are superseded; image
+  publication must use a newly validated clean source commit. AWS publication
+  and live execution still require their own explicit authorizations.
+- Related files: `deploy/ec2/plan-final-scaling-matrix.sh`,
+  `scripts/tests/test-final-campaign-contract.sh`, `deploy/ec2/README.md`,
+  `docs/ROADMAP.md`, `docs/VALIDATION.md`, `docs/STATUS.md`

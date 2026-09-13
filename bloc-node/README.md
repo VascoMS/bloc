@@ -277,8 +277,8 @@ trace contract. Its local `n=4` batches `8/32/128` gate was a correctness and
 queue-regression diagnostic only. The authorized matched three-region campaign
 later retained 90/90 accepted measurements per arm. At batch 128, lanes removed
 the READY queue wait and advanced first RBC output, but did not improve RBC
-output quorum or end-to-end ACS latency. Decision 0028 now selects trace-off
-`persistent-lanes` for a new clean same-AZ/three-region development matrix at
+output quorum or end-to-end ACS latency. Decisions 0028 and 0029 now select
+trace-off `persistent-lanes` for a new clean three-region development matrix at
 n4/n7/n10 and batches 8/32/128/512. The earlier result remains mechanism-only
 historical evidence and is not merged into the new distributions. See the
 [September ACS communication findings](../docs/archive/ACS_COMMUNICATION_LATENCY_FINDINGS_2026-09.md)

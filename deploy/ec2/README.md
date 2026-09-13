@@ -213,8 +213,8 @@ An explicit
 exception: it uses the 5-warmup/30-attempt/3-block contract above and does not
 run a resource phase.
 
-Generate the deterministic 24-cell deployment plan before resolving bundle
-paths or proposing any live phase:
+Generate the deterministic 12-cell three-region deployment plan before
+resolving bundle paths or proposing any live phase:
 
 ```sh
 bash deploy/ec2/plan-final-scaling-matrix.sh > /tmp/bloc-m5-matrix.json
@@ -222,8 +222,8 @@ jq '.cells | length' /tmp/bloc-m5-matrix.json
 ```
 
 The planner has no cloud side effects. It records the selected trace-off
-`persistent-lanes`/broadcast-ECHO configuration and assigns every topology,
-committee, and batch tuple its exact threshold, BMax, primary or extension
+`persistent-lanes`/broadcast-ECHO configuration and assigns every three-region
+committee and batch tuple its exact threshold, BMax, primary or extension
 classification, and permitted pilot/full/boundary schedules.
 It also records the expected n10 instance and per-region vCPU footprint used by
 the live quota preflight.
@@ -243,11 +243,12 @@ bash deploy/ec2/run-three-region-campaign.sh \
   --stream-mode persistent-lanes --validate-only
 ```
 
-The n10 capacity preflight is 11 `t3.small` instances including the controller:
-22 vCPUs in `us-east-1` for same-AZ, or 10/6/6 vCPUs in
-`us-east-1`/`eu-west-1`/`eu-central-1` for the modulo-three topology. Confirm
-current quotas, instance offerings, a phase cost ceiling, and cleanup scope in
-issue #30 before requesting separate live authorization.
+The n10 capacity preflight is 11 `t3.small` instances including the controller,
+using 10/6/6 vCPUs in `us-east-1`/`eu-west-1`/`eu-central-1` for the
+modulo-three topology. The generic same-AZ runner remains available for
+historical and separately scoped work, but issue #30 does not execute it.
+Confirm current quotas, instance offerings, a phase cost ceiling, and cleanup
+scope in issue #30 before requesting separate live authorization.
 
 ## Manual Deployment Recipe
 

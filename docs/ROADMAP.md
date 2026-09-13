@@ -115,11 +115,12 @@ current roadmap, validation path, or thesis metric collection plan.
 - Primary matrix:
   - `n=4,t=3` and `n=7,t=5`;
   - batches `8/32/128`;
-  - matched same-region VM and three-region VM environments;
+  - three-region VM environment; same-region results remain historical context;
   - 10 warmups and 1,000 measured observations per scenario for p99.
 - Scale extension:
   - `n=10,t=7` at batches `8/32/128`;
   - batch `512` at `n=4/7/10`;
+  - all extension scenarios run in the three-region VM environment;
   - a separate 30-observation pilot, followed by 1,000 measurements when the
     scenario remains viable or 100 boundary observations when it clearly
     exceeds the slot envelope.
@@ -134,8 +135,8 @@ current roadmap, validation path, or thesis metric collection plan.
   - accepted results from the deterministic transaction corpus and client
     encryption/expansion benchmark;
   - share generation, reconstruction, and BTE optimization benchmarks;
-  - exact same-region/three-region VM artifact bundles and the separate
-    validation-only local preflight artifact.
+  - exact three-region VM artifact bundles and the separate validation-only
+    local preflight artifact.
 - Done criteria:
   - planned observations are retained without unexplained filtering;
   - failures and timeouts remain visible outside successful-run quantiles;

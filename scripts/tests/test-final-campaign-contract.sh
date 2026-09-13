@@ -26,17 +26,16 @@ jq -e '
     instance_type:"t3.small"
   } and
   .n10_capacity == {
-    "same-az":{instances:11,vcpus_by_region:{"us-east-1":22}},
     "three-region":{instances:11,vcpus_by_region:{"us-east-1":10,"eu-west-1":6,"eu-central-1":6}}
   } and
-  (.cells | length) == 24 and
-  ([.cells[].id] | unique | length) == 24 and
-  ([.cells[] | [.topology, .n, .batch]] | unique | length) == 24 and
-  ([.cells[].topology] | unique) == ["same-az", "three-region"] and
+  (.cells | length) == 12 and
+  ([.cells[].id] | unique | length) == 12 and
+  ([.cells[] | [.topology, .n, .batch]] | unique | length) == 12 and
+  ([.cells[].topology] | unique) == ["three-region"] and
   ([.cells[].n] | unique) == [4, 7, 10] and
   ([.cells[].batch] | unique) == [8, 32, 128, 512] and
-  ([.cells[] | select(.classification == "replacement-primary")] | length) == 12 and
-  ([.cells[] | select(.classification == "extension")] | length) == 12 and
+  ([.cells[] | select(.classification == "replacement-primary")] | length) == 6 and
+  ([.cells[] | select(.classification == "extension")] | length) == 6 and
   all(.cells[];
     (.threshold == (if .n == 4 then 3 elif .n == 7 then 5 else 7 end)) and
     (.bmax == (if .batch == 512 then 512 else 128 end)) and

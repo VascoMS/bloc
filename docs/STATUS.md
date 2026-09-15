@@ -3,7 +3,7 @@
 - Last reviewed: `2026-09-15`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Last known good source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
+- Last known good source: `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
 
 ## Current Prototype State
 
@@ -76,8 +76,8 @@ release-candidate configuration contract are defined in
 
 ## Open Blockers And Risks
 
-- **Issue #30's three-region-only image/bundle freeze and n4 readiness pilot
-  are accepted; measured phases remain separately gated:** clean source
+- **Issue #30's n10 BMax-128 pilots are accepted; the corrected n4/batch-512
+  pilot records a performance boundary and stops ordered continuation:** clean source
   `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
   implements the user-approved deterministic 12-cell trace-off
   `persistent-lanes`/broadcast-ECHO matrix for `n=4/7/10` and batches
@@ -150,7 +150,7 @@ release-candidate configuration contract are defined in
   `results/ec2/bloc-ec2-i30-tr-n10-b128-p1/`, with all 446 checksum entries
   verified.
 
-  The first batch-512 pilot, `bloc-ec2-i30-tr-n4-b512-p1`, completed as
+  The original batch-512 pilot, `bloc-ec2-i30-tr-n4-b512-p1`, completed as
   complete but rejected negative evidence. All 5 warmups and all 30 measured
   attempts terminated consistently at node 0 with `reason=proposal`; no
   attempt completed, met the deadline, or contributes a latency quantile. The
@@ -173,9 +173,23 @@ release-candidate configuration contract are defined in
   requires an exact-BMax readiness response before measurement. Its regressions,
   complete lifecycle/three-region adapter contracts, 62 artifact tests, runner
   portability, mempool module suite, and both Terraform topology contracts pass.
-  The remaining preflight is to commit that deployment source, bind fresh
-  BMax-512 manifests to it, refresh AWS quota/absence checks, and validate all
-  three exact phase invocations before relaunching n4/batch-512.
+  Corrected deployment source `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
+  and fresh n4/n7/n10 BMax-512 manifests passed those gates and exact-source
+  validation while retaining the immutable runtime images and corpus contents.
+
+  The corrected n4 pilot `bloc-ec2-i30-tr-n4-b512-p2` then passed exact-512
+  readiness and retained all 30 measured attempts, but only `23/30` completed
+  successfully, cross-node consistently, and within the 12-second deadline;
+  seven timed out waiting for the Ireland operator result. Across the 23
+  successful observations, Type-7 total-slot p50/p95 were
+  `10132.754/11417.152 ms`, maximum was `11436.964 ms`, and ACS p50/p95 were
+  `748.217/858.263 ms`. P99 is ineligible. The three blocks completed
+  `4/10`, `10/10`, and `9/10`. All 11 lifecycle events and three controller
+  jobs passed, both independent validators passed, Terraform destroyed all 39
+  resources, a fresh authenticated absence audit and empty state passed, and
+  all 230 provider-cache-free checksum entries verify under
+  `results/ec2/bloc-ec2-i30-tr-n4-b512-p2/`. This is complete negative
+  performance evidence, not a recurrence of the deployment-cap defect.
 
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
@@ -189,10 +203,14 @@ release-candidate configuration contract are defined in
   authorized the complete AWS campaign after finalization and subsequently
   selected pilot-first ordering: run all six 30-observation extension cells
   before any 1,000-observation primary or extension continuation. The n10/batch
-  8, 32, and 128 pilots are accepted. The n4/batch-512 attempt is rejected and
-  the batch-512 cells are gated on the corrected-source freeze and exact
-  validation described above; successful and rejected preliminary cells will
-  not be rerun.
+  8, 32, and 128 pilots are accepted. The corrected n4/batch-512 pilot crosses
+  issue #30's at-least-three-timeout boundary, so the cell stops and does not
+  qualify for a continuation. Because the recorded execution order required
+  accepted n4 evidence before n7/batch-512 and accepted n7 evidence before
+  n10/batch-512, neither larger batch-512 pilot was launched. Successful
+  earlier preliminary cells were not rerun. Changing that ordered gate now
+  requires an explicit campaign decision rather than an inferred extension of
+  the existing authorization.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -687,23 +705,20 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Hold the n7/batch-512 and n10/batch-512 pilots. Parameterize the EC2
-   mempool `-max-items` value from the frozen bundle BMax, add a regression
-   proving a 512 request can return exactly 512 corpus items, and rerun all
-   side-effect-free deployment/campaign gates before another live attempt.
-2. Make the resulting frozen-source/provenance decision explicit: either
-   refreeze the corrected source and determine which earlier preliminary cells
-   must be rerun, or document a narrowly justified deployment-only provenance
-   transition. Do not silently mix the two source contracts.
-3. After that decision, rerun n4/batch-512 first. Only a successful,
-   consistent, deadline-met pilot with mandatory cleanup may unblock the
-   n7/batch-512 and n10/batch-512 cells. The accepted `n=10,b=8/32/128`
-   pilots remain queued for later qualifying continuations.
-4. Apply issue #30's continuation rule independently to every pilot, preserve
-   only complete provenance-valid evidence from source `95a3d039` and the
-   frozen images, and do not publish p99 from a 30- or 100-observation cell.
-5. After all preliminary pilots are classified, run the replacement n4 and n7
-   primary latency phases, followed by any qualifying extension continuations.
+1. Preserve `bloc-ec2-i30-tr-n4-b512-p2` as the complete n4/batch-512 negative
+   performance boundary and keep the n7/batch-512 and n10/batch-512 pilots
+   unrun under the ordered acceptance gate.
+2. Obtain an explicit campaign decision before changing that gate, changing
+   the 12-second envelope, or launching either larger batch-512 cell. Do not
+   reinterpret the existing authorization after observing the boundary.
+3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
+   rows labeled separately; never pool them into one latency distribution and
+   do not publish p99 from any 30- or 100-observation cell.
+4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
+   continuations, but do not start a continuation until the stopped
+   preliminary sweep and replacement n4/n7 primary-phase order are resolved.
+5. After that explicit decision, run the replacement n4 and n7 primary latency
+   phases followed only by qualifying extension continuations.
 6. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

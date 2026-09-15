@@ -142,6 +142,25 @@ operator Compose has no fixed mempool default: the lifecycle supplies the
 validated bundle BMax, and readiness requests and requires that exact corpus
 count before measurement.
 
+Corrected extension pilot `bloc-ec2-i30-tr-n4-b512-p2` is accepted as complete
+negative performance evidence from deployment source
+`e632b04c07df89391c9b427ed32bf78bfdc6e2ac`, the unchanged immutable runtime
+image pair, and the fresh n4/t3 BMax-512 bundle. Exact-512 readiness passed and
+all 30 attempts were retained. `23/30` were successful, cross-node consistent,
+and deadline-met; seven timed out waiting for the Ireland operator result, with
+block completion of `4/10`, `10/10`, and `9/10`. Successful-run Type-7
+total-slot p50/p95 were `10132.754/11417.152 ms`, maximum was `11436.964 ms`,
+and ACS p50/p95 were `748.217/858.263 ms`; p99 is ineligible. This crosses the
+issue #30 stop rule of at least three deadline misses, so it does not qualify
+for a continuation. All 11 lifecycle events, three controller jobs, both
+independent validators, the 39-resource destroy, fresh authenticated absence
+audit, and empty Terraform state pass. The provider-cache-free retained root is
+`results/ec2/bloc-ec2-i30-tr-n4-b512-p2/`; all 230 checksum entries verify and
+the checksum-manifest SHA-256 is
+`21693b1134afd583a2e5b6f4494c57abfbbad937751639af3c7e7a92e30f2b8f`.
+The ordered campaign contract required accepted n4 evidence before n7/b512 and
+accepted n7 evidence before n10/b512; neither larger batch-512 pilot was run.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

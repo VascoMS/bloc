@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-14`
+- Last reviewed: `2026-09-15`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`
@@ -164,8 +164,18 @@ release-candidate configuration contract are defined in
   fresh authenticated absence audit passed, state is empty, and all 125
   provider-cache-free checksum entries verify under
   `results/ec2/bloc-ec2-i30-tr-n4-b512-p1/`. Correcting the deployment cap
-  requires an explicit frozen-source/provenance decision before more live
-  batch-512 work.
+  required an explicit frozen-source/provenance decision before more live
+  batch-512 work. Decision 0030 now retains the accepted n10 batch-8/32/128
+  pilots as preliminary source-`95a3d039` evidence and selects one corrected
+  deployment source only for new n4/n7/n10 batch-512 pilots. The source groups
+  remain labeled and cannot be pooled as final thesis evidence. The corrected
+  lifecycle derives mempool `-max-items` from the validated bundle BMax and
+  requires an exact-BMax readiness response before measurement. Its regressions,
+  complete lifecycle/three-region adapter contracts, 62 artifact tests, runner
+  portability, mempool module suite, and both Terraform topology contracts pass.
+  The remaining preflight is to commit that deployment source, bind fresh
+  BMax-512 manifests to it, refresh AWS quota/absence checks, and validate all
+  three exact phase invocations before relaunching n4/batch-512.
 
   Fixed-zone `t3.small` offerings pass and no running or pending instances were
   found in `us-east-1`, `eu-west-1`, or `eu-central-1`. Each region currently
@@ -180,7 +190,9 @@ release-candidate configuration contract are defined in
   selected pilot-first ordering: run all six 30-observation extension cells
   before any 1,000-observation primary or extension continuation. The n10/batch
   8, 32, and 128 pilots are accepted. The n4/batch-512 attempt is rejected and
-  the remaining batch-512 cells are blocked on the frozen deployment cap.
+  the batch-512 cells are gated on the corrected-source freeze and exact
+  validation described above; successful and rejected preliminary cells will
+  not be rerun.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized

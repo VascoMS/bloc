@@ -207,6 +207,11 @@ n4/n7/n10:
 Pass the unique batch with `--batch-size`. Batches through 128 require an exact
 BMax-128 bundle; batch 512 requires an exact BMax-512 bundle. Extension phases
 require trace-off `persistent-lanes` and always keep the resource sampler off.
+The lifecycle passes the bundle's validated BMax to operator Compose as
+`MEMPOOL_MAX_ITEMS`; Compose has no independent default. Before measurement,
+the health gate requests exactly that many corpus entries and requires the
+provider to return the full count. This prevents a BMax-512 evaluator from
+silently running against a 128-item mempool cap.
 An explicit
 `bloc-acs-trace/v1`, `bloc-acs-trace/v2`, or approved n4 three-region
 `bloc-acs-trace/v3` latency diagnostic is the narrow

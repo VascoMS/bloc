@@ -133,6 +133,7 @@ if task6_selected host-loop-fail-closed; then
   printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10","region":"us-east-1"},{"id":1,"public_ip":"192.0.2.11","region":"us-east-1"},{"id":2,"public_ip":"192.0.2.12","region":"us-east-1"}]}' >"$host_loop_root/inventory.json"
   FINAL_BLOC_IMAGE='bloc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   FINAL_MEMPOOL_IMAGE='mempool@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  FINAL_BMAX=512
   FINAL_EXPERIMENT_ID=test-campaign
   FINAL_NODE_COUNT=3
   final_topology_key_for_host() { printf 'test-key.pem\n'; }
@@ -148,6 +149,10 @@ if task6_selected host-loop-fail-closed; then
   fi
   [[ "${#host_loop_calls[@]}" -eq 1 ]] || {
     echo "service startup continued after the first operator failure" >&2
+    exit 1
+  }
+  [[ "${host_loop_calls[0]}" == *"MEMPOOL_MAX_ITEMS='512'"* ]] || {
+    echo "service startup omitted the validated bundle BMax" >&2
     exit 1
   }
 
@@ -406,9 +411,12 @@ printf '%s\n' '{"nodes":[{"id":0,"public_ip":"192.0.2.10"}]}' >"$health_root/inv
 health_attempts=0
 health_sleeps=0
 health_always_fail=0
+health_commands=()
+FINAL_BMAX=512
 final_topology_key_for_host() { printf 'test-key.pem\n'; }
 final_ssh() {
   health_attempts=$((health_attempts + 1))
+  health_commands+=("$3")
   if [[ "$health_always_fail" -eq 1 ]]; then
     return 1
   fi
@@ -419,6 +427,14 @@ sleep() { health_sleeps=$((health_sleeps + 1)); }
 final_health_gate "$health_root" || { echo "health gate did not retry until readiness" >&2; exit 1; }
 [[ "$health_attempts" -eq 3 && "$health_sleeps" -eq 2 ]] || {
   echo "health gate used an unexpected retry schedule" >&2
+  exit 1
+}
+grep -Fq 'limit=512' <<<"${health_commands[*]}" || {
+  echo "health gate did not request the complete BMax-512 corpus" >&2
+  exit 1
+}
+grep -Fq '= 512' <<<"${health_commands[*]}" || {
+  echo "health gate did not require exactly 512 returned items" >&2
   exit 1
 }
 
@@ -539,6 +555,7 @@ run_recovery() {
 run_recovery "$recovery_root"
 grep -Fq "BLOC_IMAGE='$FINAL_BLOC_IMAGE'" "$recovery_log" || { echo "recovery omitted BLOC_IMAGE" >&2; exit 1; }
 grep -Fq "MEMPOOL_IMAGE='$FINAL_MEMPOOL_IMAGE'" "$recovery_log" || { echo "recovery omitted MEMPOOL_IMAGE" >&2; exit 1; }
+grep -Fq "MEMPOOL_MAX_ITEMS='$FINAL_BMAX'" "$recovery_log" || { echo "recovery omitted validated bundle BMax" >&2; exit 1; }
 grep -Fq 'docker compose -f operator-compose.yaml logs --no-color' "$recovery_log" || { echo "recovery omitted Compose logs" >&2; exit 1; }
 grep -Fq '/opt/bloc/ec2/jobs/' "$recovery_rsync_log" || { echo "recovery omitted controller job state" >&2; exit 1; }
 grep -Fq -- '--timeout=60' "$recovery_rsync_log" || { echo "recovery rsync lacks a bounded I/O timeout" >&2; exit 1; }
@@ -600,6 +617,7 @@ compose_json="$(
   NODE_ID=0 \
   BLOC_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
   MEMPOOL_IMAGE='123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  MEMPOOL_MAX_ITEMS=512 \
   docker compose -f "$repo_root/deploy/ec2/operator-compose.yaml" config --format json
 )"
 jq -e '.services["bloc-node"].volumes | any(.target == "/config/cluster.crs" and .read_only == true)' <<<"$compose_json" >/dev/null || {
@@ -616,6 +634,14 @@ jq -e '(.services["mempool-il"].ports // []) | any(.target == 8080 and .publishe
 }
 jq -e 'all((.services["mempool-il"].ports // [])[]; .target != 8080 or .host_ip == "127.0.0.1")' <<<"$compose_json" >/dev/null || {
   echo "Compose exposes mempool port 8080 beyond host loopback" >&2
+  exit 1
+}
+jq -e '
+  .services["mempool-il"].command as $command |
+  ($command | index("-max-items")) as $index |
+  $index != null and $command[$index + 1] == "512"
+' <<<"$compose_json" >/dev/null || {
+  echo "Compose did not parameterize mempool max-items from the validated BMax" >&2
   exit 1
 }
 

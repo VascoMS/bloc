@@ -138,6 +138,10 @@ grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=8 seed=20260621 
 expect_success "$runner" --topology three-region --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4-b512" --node-count 4 "${common_args[@]}" \
   --stream-mode persistent-lanes --validate-only
 grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=512 seed=20260621 deadline=12s' "$fixture/stdout"
+grep -Fq 'bmax=512' "$fixture/stdout" || {
+  echo "extension contract did not expose the validated BMax to the live lifecycle" >&2
+  exit 1
+}
 expect_success "$runner" --topology same-az --phase extension-full --batch-size 128 --bundle-root "$fixture/n10" --node-count 10 "${common_args[@]}" \
   --stream-mode persistent-lanes --validate-only
 grep -Fq 'warmups=10 repetitions=1000 blocks=10 sampler=off batches=128 seed=20260621 deadline=12s' "$fixture/stdout"

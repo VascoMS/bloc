@@ -129,6 +129,19 @@ and state is empty. The provider-cache-free retained root is
 `results/ec2/bloc-ec2-i30-tr-n4-b512-p1/`; its 125-entry checksum manifest has
 SHA-256 `f0f9f760293bdca51e14d046be62f87325f1cd1d63475a695252cda5f9acbdc0`.
 
+The selected preliminary-campaign recovery is a narrow deployment-only source
+transition. The accepted n10 batch-8/32/128 pilots remain preliminary evidence
+from source `95a3d039ca3c3a6079baa33ce78a5de4fc31e72d`; they are not rerun. The rejected
+n4/batch-512 artifact remains negative deployment evidence and contributes no
+latency statistic. New n4/n7/n10 batch-512 pilots use one corrected deployment
+source with the same immutable runtime images and cryptographic corpora. Rows
+from the two sources must remain labeled and must not be pooled as one final
+distribution. Any later thesis-qualifying full campaign must run every included
+configuration from one frozen source. In the corrected deployment contract,
+operator Compose has no fixed mempool default: the lifecycle supplies the
+validated bundle BMax, and readiness requests and requires that exact corpus
+count before measurement.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

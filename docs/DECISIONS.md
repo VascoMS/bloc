@@ -688,3 +688,37 @@ Use this file for major architecture, protocol, and workflow decisions.
 - Related files: `deploy/ec2/plan-final-scaling-matrix.sh`,
   `scripts/tests/test-final-campaign-contract.sh`, `deploy/ec2/README.md`,
   `docs/ROADMAP.md`, `docs/VALIDATION.md`, `docs/STATUS.md`
+
+## 0030. Use a deployment-only source transition for the remaining preliminary pilots
+
+- Date: 2026-09-15
+- Status: Accepted
+- Context: The first n4/batch-512 preliminary phase proved that the frozen EC2
+  Compose file capped mempool-il at 128 items even when the validated bundle and
+  evaluator required 512. The already accepted n10 batch-8/32/128 pilots do not
+  exercise that cap, and the user prioritized completing the 30-observation
+  preliminary sweep without repeating successful cells.
+- Options considered: refreeze one corrected source and rerun every preliminary
+  cell; retain the accepted BMax-128 pilots and use one corrected deployment
+  source only for the three BMax-512 pilots; or stop the preliminary campaign.
+- Decision: Keep the accepted n10 batch-8/32/128 pilots as explicitly
+  preliminary evidence from their original source. Retain the failed
+  n4/batch-512 phase only as rejected deployment evidence. Parameterize
+  mempool-il capacity from the bundle's validated BMax, require an exact-BMax
+  readiness response, and run new n4/n7/n10 batch-512 pilots from one corrected
+  deployment source while keeping the immutable runtime image pair and corpus
+  contents unchanged.
+- Rationale: The defect is confined to deployment configuration and cannot
+  affect the successful BMax-128 cells. Preserving those pilots saves time and
+  cost while explicit source labels prevent a false single-freeze claim.
+- Consequences: Preliminary rows from the original and corrected sources may be
+  reviewed together as a campaign progress table but must not be pooled into one
+  latency distribution or presented as final thesis evidence. P99 remains
+  prohibited. Any later full campaign must run every included configuration
+  from one corrected frozen source. The lifecycle and Compose contracts now
+  fail closed when BMax is absent and verify the full corpus count before any
+  measured attempt.
+- Related files: `deploy/ec2/operator-compose.yaml`,
+  `scripts/lib/final-campaign-contract.sh`,
+  `scripts/lib/final-campaign-lifecycle.sh`, `deploy/ec2/README.md`,
+  `docs/VALIDATION.md`, `docs/STATUS.md`

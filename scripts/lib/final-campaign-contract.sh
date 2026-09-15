@@ -28,6 +28,7 @@ final_parse_campaign_args() {
   FINAL_SOURCE_SHA="" FINAL_BLOC_IMAGE="" FINAL_MEMPOOL_IMAGE=""
   FINAL_EXPERIMENT_ID="" FINAL_ADMIN_CIDR="" FINAL_AWS_PROFILE=""
   FINAL_ACS_TRACE_SCHEMA="" FINAL_STREAM_MODE=fresh FINAL_BATCH_SIZE=""
+  FINAL_BMAX=""
   FINAL_VALIDATE_ONLY=0 FINAL_EXECUTE_LIVE=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -126,6 +127,7 @@ final_validate_campaign_contract() {
     .bloc_image == $bloc and .mempool_image == $mempool and .n == $n and
     .threshold == $threshold and .bmax == $bmax
   ' "$manifest" >/dev/null || final_die "bundle identities do not match invocation" || return
+  FINAL_BMAX="$expected_bmax"
   if [[ -n "$FINAL_ACS_TRACE_SCHEMA" ]]; then
     if [[ "$FINAL_PHASE" == latency ]]; then
       FINAL_WARMUPS=5 FINAL_REPETITIONS=30 FINAL_BLOCKS=3 FINAL_SAMPLER=off
@@ -141,4 +143,5 @@ final_print_campaign_contract() {
     "$FINAL_WARMUPS" "$FINAL_REPETITIONS" "$FINAL_BLOCKS" "$FINAL_SAMPLER" "$FINAL_BATCHES" "$FINAL_SEED" "$FINAL_DEADLINE"
   printf 'acs_trace_schema=%s\n' "${FINAL_ACS_TRACE_SCHEMA:-disabled}"
   printf 'stream_mode=%s\n' "$FINAL_STREAM_MODE"
+  printf 'bmax=%s\n' "$FINAL_BMAX"
 }

@@ -341,7 +341,9 @@ func (f *PRF) PEval(kp kyber.Point, pi, i int) (kyber.Point, error) {
 		i: i,
 		j: pi,
 	}]
-	return f.suite.Pair(kp, crselem), nil
+	// Pairing backends may normalize operands in place. Keep the shared CRS
+	// and caller-owned key immutable across concurrent reconstructions.
+	return f.suite.Pair(kp.Clone(), crselem.Clone()), nil
 }
 
 func (f *PRF) ExpEval(K kyber.Point, i int) (kyber.Point, error) {
@@ -349,5 +351,7 @@ func (f *PRF) ExpEval(K kyber.Point, i int) (kyber.Point, error) {
 	if i < 0 || i >= f.B {
 		return nil, fmt.Errorf("exponential evaluation index out of domain. Domain: [0, %d-1], index: %d", f.B, i)
 	}
-	return f.suite.Pair(K, f.g2zi[i]), nil
+	// Pairing backends may normalize operands in place; each invocation owns
+	// both operands so concurrent sub-batches cannot mutate shared points.
+	return f.suite.Pair(K.Clone(), f.g2zi[i].Clone()), nil
 }

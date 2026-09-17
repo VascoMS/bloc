@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -405,6 +406,166 @@ func TestCombineSharesBoundedStopsAtDeterministicAttemptLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int{4}, stats.AttemptsBySubBatch)
 	require.Equal(t, rawTx, results[0].Plaintext)
+}
+
+// This fixture fixes memberships and plaintext positions independently of the
+// combiner, and supplies candidates in reverse order to exercise sorting.
+func newParallelCombineFixture(t *testing.T, label string, candidates int, repeatedIndices bool) (*ClusterBTE, BatchPlan, []DecryptionShare, [][]byte) {
+	t.Helper()
+	cluster := newTestCluster(t, 8, 4, 3)
+	raw := make([][]byte, 8)
+	ciphertexts := make([]Ciphertext, len(raw))
+	for i := range raw {
+		raw[i] = []byte(fmt.Sprintf("%s transaction %d", label, i))
+		index := i
+		if repeatedIndices {
+			index = i / 2
+		}
+		var err error
+		ciphertexts[i], err = cluster.EncryptTx(raw[i], index)
+		require.NoError(t, err)
+	}
+	plan, err := cluster.PlanBatch(ciphertexts)
+	require.NoError(t, err)
+	wantPositions := [][]int{{0, 6}, {1, 7}, {2}, {3}, {4}, {5}}
+	require.Len(t, plan.SubBatches, len(wantPositions))
+	var shares []DecryptionShare
+	for id, items := range plan.SubBatches {
+		positions := make([]int, len(items))
+		for i, item := range items {
+			positions[i] = item.OriginalPosition
+		}
+		require.Equal(t, wantPositions[id], positions, "sub-batch %d", id)
+		for operator := candidates - 1; operator >= 0; operator-- {
+			candidate, err := cluster.MakeShare(cluster.Shares[operator], plan, id)
+			require.NoError(t, err)
+			shares = append(shares, candidate)
+		}
+	}
+	return cluster, plan, shares, raw
+}
+
+func requireParallelPlaintexts(t *testing.T, results []PlaintextResult, raw [][]byte) {
+	t.Helper()
+	require.Len(t, results, len(raw))
+	for position, result := range results {
+		require.NoError(t, result.Err, "position %d", position)
+		require.Equal(t, raw[position], result.Plaintext, "position %d", position)
+	}
+}
+
+func corruptParallelCandidate(cluster *ClusterBTE, shares []DecryptionShare, subBatchID int) {
+	for _, candidate := range shares {
+		if candidate.SubBatchID == subBatchID && candidate.OperatorID == 0 {
+			candidate.Share.V = cluster.btd.suite.G1().Point().Add(candidate.Share.V, cluster.btd.suite.G1().Point().Base())
+		}
+	}
+}
+
+func TestCombineSharesBoundedEquivalentWorkers(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	for _, invalidExtra := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invalid-extra-%t", invalidExtra), func(t *testing.T) {
+			cluster, plan, shares, raw := newParallelCombineFixture(t, "equivalence", 4, false)
+			wantAttempts := []int{1, 1, 1, 1, 1, 1}
+			if invalidExtra {
+				corruptParallelCandidate(cluster, shares, 0)
+				wantAttempts[0] = 4
+			}
+			serial, serialStats, serialErr := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 4, MaxWorkers: 1})
+			parallel, parallelStats, parallelErr := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 4, MaxWorkers: 2})
+			require.NoError(t, serialErr)
+			require.Equal(t, fmt.Sprint(serialErr), fmt.Sprint(parallelErr))
+			requireParallelPlaintexts(t, serial, raw)
+			requireParallelPlaintexts(t, parallel, raw)
+			require.Equal(t, serial, parallel)
+			require.Equal(t, wantAttempts, serialStats.AttemptsBySubBatch)
+			require.Equal(t, serialStats.AttemptsBySubBatch, parallelStats.AttemptsBySubBatch)
+			require.Equal(t, 1, serialStats.ConfiguredWorkers)
+			require.Equal(t, 1, serialStats.EffectiveWorkers)
+			require.Equal(t, 2, parallelStats.ConfiguredWorkers)
+			require.Equal(t, 2, parallelStats.EffectiveWorkers)
+			legacy, err := cluster.CombineShares(plan, shares)
+			require.NoError(t, err)
+			require.Equal(t, serial, legacy)
+		})
+	}
+}
+
+func TestCombineSharesBoundedLowestFailure(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	for _, firstFailure := range []int{0, 1} {
+		t.Run(fmt.Sprintf("first-failure-%d", firstFailure), func(t *testing.T) {
+			cluster, plan, shares, _ := newParallelCombineFixture(t, "failure", 3, false)
+			corruptParallelCandidate(cluster, shares, firstFailure)
+			corruptParallelCandidate(cluster, shares, firstFailure+1)
+			wantAttempts := []int{1, 0, 0, 0, 0, 0}
+			if firstFailure == 1 {
+				wantAttempts[1] = 1
+			}
+			var serialError string
+			for _, workers := range []int{1, 2} {
+				results, stats, err := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 1, MaxWorkers: workers})
+				require.Nil(t, results)
+				require.EqualError(t, err, fmt.Sprintf("sub-batch %d: combine attempt limit 1 exhausted", firstFailure))
+				if workers == 1 {
+					serialError = err.Error()
+				}
+				require.Equal(t, serialError, err.Error())
+				require.Equal(t, wantAttempts, stats.AttemptsBySubBatch)
+				require.Equal(t, workers, stats.ConfiguredWorkers)
+				require.Equal(t, workers, stats.EffectiveWorkers)
+			}
+		})
+	}
+}
+
+func TestCombineSharesBoundedPreflight(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	cluster, plan, shares, _ := newParallelCombineFixture(t, "preflight", 3, false)
+	for _, test := range []struct {
+		name   string
+		shares []DecryptionShare
+		limits []int
+		want   string
+	}{
+		{"missing-late-threshold", shares[:len(shares)-1], nil, "sub-batch 5 has 2 shares, need 3"},
+		{"exhausted-late-budget", shares, []int{1, 1, 1, 1, 1, 0}, "sub-batch 5: combine attempt budget exhausted"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, workers := range []int{1, 2} {
+				results, stats, err := cluster.CombineSharesBounded(plan, test.shares, CombineOptions{MaxAttemptsPerSubBatch: 1, AttemptLimitsBySubBatch: test.limits, MaxWorkers: workers})
+				require.Nil(t, results)
+				require.EqualError(t, err, test.want)
+				require.Equal(t, []int{0, 0, 0, 0, 0, 0}, stats.AttemptsBySubBatch)
+				require.Equal(t, workers, stats.ConfiguredWorkers)
+				require.Equal(t, workers, stats.EffectiveWorkers)
+			}
+		})
+	}
+}
+
+func TestCombineSharesBoundedParallelStress(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	for iteration := 0; iteration < 3; iteration++ {
+		cluster, plan, shares, raw := newParallelCombineFixture(t, fmt.Sprintf("stress-%d", iteration), 3, true)
+		// Run parallel reconstruction before any serial combine can warm shared
+		// CRS points; adjacent jobs use the same puncture indices.
+		parallel, stats, err := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 1, MaxWorkers: 2})
+		require.NoError(t, err)
+		serial, serialStats, err := cluster.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: 1, MaxWorkers: 1})
+		require.NoError(t, err)
+		requireParallelPlaintexts(t, parallel, raw)
+		require.Equal(t, serial, parallel)
+		require.Equal(t, []int{1, 1, 1, 1, 1, 1}, stats.AttemptsBySubBatch)
+		require.Equal(t, serialStats.AttemptsBySubBatch, stats.AttemptsBySubBatch)
+		require.Equal(t, 2, stats.ConfiguredWorkers)
+		require.Equal(t, 2, stats.EffectiveWorkers)
+	}
 }
 
 func TestCombineSharesBoundedRejectsOperatorIndexMismatch(t *testing.T) {

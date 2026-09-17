@@ -103,16 +103,21 @@ type positionedPlaintextResult struct {
 }
 
 // CombineOptions bounds invalid-share recovery work independently for every
-// planned sub-batch.
+// planned sub-batch and limits concurrent sub-batch reconstruction. MaxWorkers
+// defaults to one when omitted; negative values are invalid.
 type CombineOptions struct {
 	MaxAttemptsPerSubBatch  int
 	AttemptLimitsBySubBatch []int
+	MaxWorkers              int
 }
 
-// CombineStats reports cryptographic subset attempts by sub-batch, including
-// attempts made before a failed bounded combination.
+// CombineStats reports committed cryptographic subset attempts by sub-batch,
+// through the first failing sub-batch. Later speculative work is not committed.
+// Worker counts are normalized before preflight and do not imply jobs ran.
 type CombineStats struct {
 	AttemptsBySubBatch []int
+	ConfiguredWorkers  int
+	EffectiveWorkers   int
 }
 
 type ClusterBTE struct {
@@ -450,7 +455,10 @@ func (c *ClusterBTE) MakeShare(sk SecretShare, plan BatchPlan, subBatchID int) (
 }
 
 func (c *ClusterBTE) CombineShares(plan BatchPlan, shares []DecryptionShare) ([]PlaintextResult, error) {
-	results, _, err := c.CombineSharesBounded(plan, shares, CombineOptions{MaxAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch})
+	results, _, err := c.CombineSharesBounded(plan, shares, CombineOptions{
+		MaxAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch,
+		MaxWorkers:             defaultCombineWorkers,
+	})
 	return results, err
 }
 
@@ -458,13 +466,18 @@ func (c *ClusterBTE) CombineShares(plan BatchPlan, shares []DecryptionShare) ([]
 // threshold subsets up to the supplied per-sub-batch limit.
 func (c *ClusterBTE) CombineSharesBounded(plan BatchPlan, shares []DecryptionShare, options CombineOptions) ([]PlaintextResult, CombineStats, error) {
 	stats := CombineStats{AttemptsBySubBatch: make([]int, len(plan.SubBatches))}
+	configured, effective, err := effectiveCombineWorkers(options.MaxWorkers, len(plan.SubBatches))
+	stats.ConfiguredWorkers = configured
+	stats.EffectiveWorkers = effective
+	if err != nil {
+		return nil, stats, err
+	}
 	if options.MaxAttemptsPerSubBatch < 1 {
 		return nil, stats, fmt.Errorf("max attempts per sub-batch must be positive")
 	}
 	if options.AttemptLimitsBySubBatch != nil && len(options.AttemptLimitsBySubBatch) != len(plan.SubBatches) {
 		return nil, stats, fmt.Errorf("attempt limit count %d does not match %d sub-batches", len(options.AttemptLimitsBySubBatch), len(plan.SubBatches))
 	}
-	results := make([]PlaintextResult, c.planSize(plan))
 	bySubBatch := make(map[int][]*share.PubShare)
 	seenOperators := make(map[int]map[int]bool)
 	for _, d := range shares {
@@ -492,6 +505,8 @@ func (c *ClusterBTE) CombineSharesBounded(plan BatchPlan, shares []DecryptionSha
 		seenOperators[d.SubBatchID][d.OperatorID] = true
 		bySubBatch[d.SubBatchID] = append(bySubBatch[d.SubBatchID], d.Share)
 	}
+	// Complete serial preflight for the entire plan before submitting any job.
+	jobs := make([]preparedSubBatch, len(plan.SubBatches))
 	for subBatchID, items := range plan.SubBatches {
 		subShares := bySubBatch[subBatchID]
 		if len(subShares) < c.btd.T {
@@ -505,12 +520,33 @@ func (c *ClusterBTE) CombineSharesBounded(plan BatchPlan, shares []DecryptionSha
 		if attemptLimit < 1 {
 			return nil, stats, fmt.Errorf("sub-batch %d: combine attempt budget exhausted", subBatchID)
 		}
-		subResults, attempts, err := c.combineSubBatch(items, subShares, attemptLimit)
-		stats.AttemptsBySubBatch[subBatchID] = attempts
-		if err != nil {
-			return nil, stats, fmt.Errorf("sub-batch %d: %w", subBatchID, err)
+		// Own the slice containers. Their cryptographic contents are immutable
+		// during reconstruction; callers must not mutate the plan or shares.
+		jobs[subBatchID] = preparedSubBatch{
+			id:           subBatchID,
+			items:        append([]BatchItem(nil), items...),
+			shares:       append([]*share.PubShare(nil), subShares...),
+			attemptLimit: attemptLimit,
 		}
-		for _, positioned := range subResults {
+	}
+	outcomes, err := runSubBatchJobs(effective, jobs, func(job preparedSubBatch) subBatchOutcome {
+		results, attempts, err := c.combineSubBatch(job.items, job.shares, job.attemptLimit)
+		return subBatchOutcome{id: job.id, results: results, attempts: attempts, err: err}
+	})
+	if err != nil {
+		return nil, stats, err
+	}
+	// Outcomes are indexed by sub-batch, independently of completion order.
+	// Preserve serial failure selection and commit no attempts beyond it.
+	for subBatchID, outcome := range outcomes {
+		stats.AttemptsBySubBatch[subBatchID] = outcome.attempts
+		if outcome.err != nil {
+			return nil, stats, fmt.Errorf("sub-batch %d: %w", subBatchID, outcome.err)
+		}
+	}
+	results := make([]PlaintextResult, c.planSize(plan))
+	for _, outcome := range outcomes {
+		for _, positioned := range outcome.results {
 			results[positioned.position] = positioned.result
 		}
 	}

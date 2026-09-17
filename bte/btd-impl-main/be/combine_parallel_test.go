@@ -5,7 +5,40 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestCombineSharesBoundedNormalizesWorkersBeforePreflight(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	cluster := newTestCluster(t, 8, 4, 3)
+	for _, test := range []struct {
+		name       string
+		workers    int
+		subBatches int
+		configured int
+		effective  int
+		wantError  string
+	}{
+		{"omitted", 0, 6, 1, 1, "max attempts per sub-batch must be positive"},
+		{"two", 2, 6, 2, 2, "max attempts per sub-batch must be positive"},
+		{"cpu-bound", 8, 6, 8, 2, "max attempts per sub-batch must be positive"},
+		{"plan-bound", 8, 1, 8, 1, "max attempts per sub-batch must be positive"},
+		{"empty", 2, 0, 2, 0, "max attempts per sub-batch must be positive"},
+		{"negative", -1, 6, 0, 0, "max combine workers must be non-negative"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan := BatchPlan{SubBatches: make([][]BatchItem, test.subBatches)}
+			results, stats, err := cluster.CombineSharesBounded(plan, nil, CombineOptions{MaxWorkers: test.workers})
+			require.Nil(t, results)
+			require.EqualError(t, err, test.wantError)
+			require.Equal(t, make([]int, test.subBatches), stats.AttemptsBySubBatch)
+			require.Equal(t, test.configured, stats.ConfiguredWorkers)
+			require.Equal(t, test.effective, stats.EffectiveWorkers)
+		})
+	}
+}
 
 func TestEffectiveCombineWorkers(t *testing.T) {
 	previous := runtime.GOMAXPROCS(2)

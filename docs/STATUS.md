@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-15`
+- Last reviewed: `2026-09-17`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
@@ -705,20 +705,25 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Preserve `bloc-ec2-i30-tr-n4-b512-p2` as the complete n4/batch-512 negative
-   performance boundary and keep the n7/batch-512 and n10/batch-512 pilots
-   unrun under the ordered acceptance gate.
-2. Obtain an explicit campaign decision before changing that gate, changing
-   the 12-second envelope, or launching either larger batch-512 cell. Do not
-   reinterpret the existing authorization after observing the boundary.
+1. Preserve `bloc-ec2-i30-tr-n4-b512-p2` as the complete serial-combine
+   n4/batch-512 negative performance boundary. Issue #33 now owns the approved
+   bounded parallel-combine development campaign; do not reinterpret the old
+   artifact as evidence for that new architecture.
+2. Implement and locally validate deterministic bounded parallel Opt-2
+   sub-batch combine with two workers on the existing two-vCPU operator shape.
+   Keep `persistent-lanes`, broadcast ECHO, trace-off execution, and
+   selective/hash-only ECHO disabled.
 3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.
 4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
    continuations, but do not start a continuation until the stopped
    preliminary sweep and replacement n4/n7 primary-phase order are resolved.
-5. After that explicit decision, run the replacement n4 and n7 primary latency
-   phases followed only by qualifying extension continuations.
+5. After issue #33 passes implementation, race, benchmark, provenance, review,
+   freeze, quota, cost, and validate-only gates, run only the new n4/n7/n10
+   batch-512 30-observation three-region pilots. Treat the three cells
+   independently so one cell's boundary does not suppress the later committee
+   pilots; do not start a 1,000-observation continuation without a new decision.
 6. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

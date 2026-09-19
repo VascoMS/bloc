@@ -314,6 +314,35 @@ Run all cluster full-path benchmarks:
 GOCACHE=/private/tmp/bte-go-cache go test ./be -run '^$' -bench '^BenchmarkHybridFullPath' -benchtime=1x
 ```
 
+### Isolated B=512 bounded-combine benchmark
+
+`BenchmarkCombineSharesBoundedB512` compares one worker, two workers, and the
+current `GOMAXPROCS` value on one prepared B=512, n=4, t=3 fixture. Its
+sub-benchmarks are named `workers-1`, `workers-2`, and
+`workers-gomaxprocs-N` so the deployment-cap row remains distinguishable when
+`GOMAXPROCS=2`.
+
+CRS generation, key generation, encryption, Opt-2 planning, and threshold-share
+generation occur before the timer. Only `CombineSharesBounded` wall-clock time
+and allocations are measured. Plaintext ordering, per-result errors, committed
+attempts, and configured/effective worker statistics are checked after the
+timer is stopped for every iteration.
+
+Run the deployment-relevant comparison with two available processors and retain
+the standard Go benchmark output in the ignored results tree:
+
+```sh
+mkdir -p results/issue-33
+GOCACHE=/private/tmp/bte-go-cache GOMAXPROCS=2 go test ./be -run '^$' \
+  -bench '^BenchmarkCombineSharesBoundedB512$' -benchtime=1x -count=10 \
+  | tee results/issue-33/combine-b512.txt
+```
+
+The `GOMAXPROCS=2` cap is a CPU-concurrency analogue for the current two-vCPU
+deployment, not a hardware-equivalence claim. These local samples support
+implementation comparison and `benchstat` analysis only; they are not AWS
+latency evidence.
+
 ## What Is Not Tested Yet
 
 The current suite does not test:

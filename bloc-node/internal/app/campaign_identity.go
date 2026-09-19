@@ -64,6 +64,7 @@ func genCampaignIdentity(args []string) error {
 	fs.IntVar(&options.Limits.MaxProposalBytes, "max-proposal-bytes", defaultMaxProposalBytes, "maximum encoded proposal bytes")
 	fs.IntVar(&options.Limits.MaxEnvelopeBytes, "max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
 	fs.IntVar(&options.Limits.MaxCombineAttemptsPerSubBatch, "max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "maximum threshold subset attempts")
+	fs.IntVar(&options.Limits.MaxCombineWorkers, "max-combine-workers", defaultMaxCombineWorkers, "maximum concurrent BTE combine workers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -203,6 +204,9 @@ func readCampaignIdentity(path string) (campaignIdentity, []byte, error) {
 	var identity campaignIdentity
 	if err := decodeStrictJSON(data, &identity); err != nil {
 		return campaignIdentity{}, nil, fmt.Errorf("decode campaign identity: %w", err)
+	}
+	if identity.Limits.MaxCombineWorkers == 0 && !identity.Limits.explicitZeroCombineWorkers {
+		identity.Limits.MaxCombineWorkers = defaultMaxCombineWorkers
 	}
 	if err := validateCampaignIdentity(identity); err != nil {
 		return campaignIdentity{}, nil, err

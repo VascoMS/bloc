@@ -75,6 +75,53 @@ func TestBuildCampaignIdentityDefaultsOmittedProgrammaticCombineWorkers(t *testi
 	}
 }
 
+func TestCampaignIdentityCombineWorkersFlag(t *testing.T) {
+	root := t.TempDir()
+	args := []string{
+		"--cluster-id", "workers-n4",
+		"--nodes", "4",
+		"--threshold", "3",
+		"--bmax", "8",
+		"--max-combine-workers", "2",
+		"--identity-out", filepath.Join(root, "cluster-identity.json"),
+		"--crs-out", filepath.Join(root, "cluster.crs"),
+		"--secrets-dir", filepath.Join(root, "secrets"),
+	}
+	if err := genCampaignIdentity(args); err != nil {
+		t.Fatal(err)
+	}
+	identity, _, err := readCampaignIdentity(filepath.Join(root, "cluster-identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := identity.Limits.MaxCombineWorkers; got != 2 {
+		t.Fatalf("campaign identity max combine workers = %d, want 2", got)
+	}
+}
+
+func TestCampaignIdentityCombineWorkersOmissionDefaultsToOne(t *testing.T) {
+	_, identityPath, _, _ := generateCampaignIdentityFixture(t)
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	limits := document["limits"].(map[string]any)
+	delete(limits, "max_combine_workers")
+	writeCampaignIdentityJSON(t, identityPath, document, 0644)
+
+	identity, _, err := readCampaignIdentity(identityPath)
+	if err != nil {
+		t.Fatalf("read legacy campaign identity: %v", err)
+	}
+	if got := identity.Limits.MaxCombineWorkers; got != 1 {
+		t.Fatalf("legacy campaign identity max combine workers = %d, want 1", got)
+	}
+}
+
 func TestGenCampaignIdentityWritesPrivateSecretsAndRefusesOverwrite(t *testing.T) {
 	root, identityPath, crsPath, secretDir := generateCampaignIdentityFixture(t)
 	for path, wantMode := range map[string]os.FileMode{

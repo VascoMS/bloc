@@ -48,6 +48,7 @@ type suiteManifest struct {
 	PlannedRuns         int                          `json:"planned_runs"`
 	PlannedScenarioRuns map[string]int               `json:"planned_scenario_runs"`
 	BMax                int                          `json:"bmax"`
+	MaxCombineWorkers   int                          `json:"max_combine_workers"`
 	TxSize              int                          `json:"tx_size"`
 	TxGas               uint64                       `json:"tx_gas"`
 	TxSource            string                       `json:"tx_source"`
@@ -70,33 +71,34 @@ type suiteManifest struct {
 }
 
 type suiteOptions struct {
-	Profile          string
-	NodeCountsRaw    string
-	BatchSizesRaw    string
-	BMax             int
-	TxSize           int
-	TxGas            uint64
-	TxSource         string
-	MempoolURL       string
-	ConfigBase       string
-	CorpusManifests  string
-	CorpusByNodes    map[int]corpusProvenance
-	FinalCampaign    bool
-	FeeStart         uint64
-	FeeStep          uint64
-	Warmups          int
-	Repetitions      int
-	RepetitionBlocks int
-	Seed             int64
-	BasePort         int
-	Timeout          time.Duration
-	Deadline         time.Duration
-	OutDir           string
-	ExperimentID     string
-	ExecutionMode    string
-	StreamMode       string
-	MaxRestarts      int
-	ACSTrace         bool
+	Profile           string
+	NodeCountsRaw     string
+	BatchSizesRaw     string
+	BMax              int
+	MaxCombineWorkers int
+	TxSize            int
+	TxGas             uint64
+	TxSource          string
+	MempoolURL        string
+	ConfigBase        string
+	CorpusManifests   string
+	CorpusByNodes     map[int]corpusProvenance
+	FinalCampaign     bool
+	FeeStart          uint64
+	FeeStep           uint64
+	Warmups           int
+	Repetitions       int
+	RepetitionBlocks  int
+	Seed              int64
+	BasePort          int
+	Timeout           time.Duration
+	Deadline          time.Duration
+	OutDir            string
+	ExperimentID      string
+	ExecutionMode     string
+	StreamMode        string
+	MaxRestarts       int
+	ACSTrace          bool
 }
 
 type clusterMeasurement struct {
@@ -232,6 +234,7 @@ func evalSuite(args []string) error {
 		PlannedRuns:         plannedRuns,
 		PlannedScenarioRuns: plannedScenarioRuns,
 		BMax:                options.BMax,
+		MaxCombineWorkers:   options.MaxCombineWorkers,
 		TxSize:              options.TxSize,
 		TxGas:               options.TxGas,
 		TxSource:            options.TxSource,
@@ -301,7 +304,7 @@ func evalSuite(args []string) error {
 					orderIndex++
 					runID := fmt.Sprintf("%s-r%03d-%s", phase.name, iteration, scenario.ID)
 					runDir := filepath.Join(options.OutDir, "runs", runID)
-					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.BasePort, options.Timeout, "", options.ACSTrace, options.StreamMode)
+					run, runErr := runLocalExperiment(self, runDir, runID, scenario.Nodes, scenario.Threshold, options.BMax, scenario.BatchSize, options.TxSize, options.TxGas, options.FeeStart, options.FeeStep, 0, 0, options.MaxCombineWorkers, options.BasePort, options.Timeout, "", options.ACSTrace, options.StreamMode)
 					run.ScenarioID, run.Phase, run.Iteration, run.OrderIndex = scenario.ID, phase.name, iteration, orderIndex
 					run.ScheduleSeed = options.Seed
 					run.PlannedScenarioRuns = options.Repetitions
@@ -415,6 +418,7 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	fs.StringVar(&options.NodeCountsRaw, "node-counts", "4,7", "comma-separated operator counts")
 	fs.StringVar(&options.BatchSizesRaw, "batch-sizes", "8,32,128", "comma-separated transaction batch sizes")
 	fs.IntVar(&options.BMax, "bmax", 128, "BTE maximum batch size")
+	fs.IntVar(&options.MaxCombineWorkers, "max-combine-workers", defaultMaxCombineWorkers, "maximum concurrent BTE combine workers")
 	fs.IntVar(&options.TxSize, "tx-size", 256, "minimum signed Ethereum transaction byte size")
 	fs.Uint64Var(&options.TxGas, "tx-gas", 21000, "minimum gas limit used in generated transactions")
 	fs.StringVar(&options.TxSource, "tx-source", "synthetic", "transaction source: synthetic, mock-placeholder, or mock-encrypted-corpus")
@@ -494,6 +498,9 @@ func parseEvalSuiteOptions(args []string) (suiteOptions, error) {
 	}
 	if options.MaxRestarts < 1 {
 		return suiteOptions{}, fmt.Errorf("max-restarts must be >= 1")
+	}
+	if options.MaxCombineWorkers < 1 || options.MaxCombineWorkers > absoluteMaxCombineWorkers {
+		return suiteOptions{}, fmt.Errorf("max-combine-workers must be in [1,%d]", absoluteMaxCombineWorkers)
 	}
 	return options, nil
 }
@@ -749,13 +756,13 @@ func percentileType7(sorted []float64, p float64) float64 {
 }
 
 func writeNodeMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "stream_mode", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized",
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "stream_mode", "max_combine_workers", "effective_combine_workers", "success", "consistent", "outcome", "deadline_met", "timed_out", "node_id", "critical_node", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized",
 		"acs_trace_schema", "acs_trace_sealed", "acs_trace_finalized", "acs_scheduled_sends", "acs_terminal_sends", "acs_pending_at_decision", "acs_input_started_us", "acs_first_rbc_output_us", "acs_rbc_output_quorum_us", "acs_first_true_bba_us", "acs_true_bba_quorum_us", "acs_false_input_injected_us", "acs_all_bba_decided_us", "acs_truthy_rbc_ready_us", "acs_core_decision_us", "acs_common_subset_decoded_us", "acs_block_body_built_us", "acs_node_output_received_us", "acs_wait_true_bba_quorum_us", "acs_wait_all_bba_us", "acs_wait_truthy_rbc_us", "acs_inbound_messages", "acs_inbound_bytes", "acs_outbound_messages", "acs_outbound_bytes", "acs_send_count", "acs_send_total_us", "acs_send_max_us", "acs_send_failures", "acs_encode_total_us", "acs_encode_max_us", "acs_queue_wait_total_us", "acs_queue_wait_max_us", "acs_stream_open_total_us", "acs_stream_open_max_us", "acs_write_total_us", "acs_write_max_us", "acs_finalize_total_us", "acs_finalize_max_us", "acs_stream_open_count", "acs_stream_reuse_count", "acs_max_bba_epoch"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			for _, result := range run.Results {
 				m := result.Metrics
-				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), run.StreamMode, strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
+				record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), run.StreamMode, strconv.Itoa(run.MaxCombineWorkers), strconv.Itoa(m.CombineWorkersEffective), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), strconv.FormatUint(result.NodeID, 10), strconv.FormatBool(result.NodeID == run.CriticalNodeID), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatBool(m.MetricsFinalized)}
 				record = append(record, acsTraceSummaryValues(result.ACSTrace)...)
 				if err := w.Write(record); err != nil {
 					return err
@@ -867,12 +874,12 @@ func tracePointCSV(point hbbft.TracePoint) string {
 }
 
 func writeRunMeasurements(path string, runs []EvalRun) error {
-	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "stream_mode", "bmax", "tx_size", "tx_gas", "success", "consistent", "outcome", "deadline_met", "timed_out", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
+	header := []string{"run_id", "scenario_id", "phase", "iteration", "order_index", "measurement_block", "block_iteration", "schedule_seed", "planned_scenario_runs", "slot", "cluster_generation", "nodes", "threshold", "batch_size", "network", "stream_mode", "bmax", "tx_size", "tx_gas", "max_combine_workers", "effective_combine_workers", "success", "consistent", "outcome", "deadline_met", "timed_out", "error", "critical_node_id", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "selected_ciphertexts", "acs_output_decode_us", "agreed_set_us", "merge_us", "ciphertext_decode_us", "batch_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "prepare_us", "submission_us", "harness_wall_us", "start_skew_us"}
 	return writeCSV(path, header, func(w *csv.Writer) error {
 		for _, run := range runs {
 			result, _ := criticalResult(run)
 			m := result.Metrics
-			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, run.StreamMode, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
+			record := []string{run.RunID, run.ScenarioID, run.Phase, strconv.Itoa(run.Iteration), strconv.Itoa(run.OrderIndex), strconv.Itoa(run.MeasurementBlock), strconv.Itoa(run.BlockIteration), strconv.FormatInt(run.ScheduleSeed, 10), strconv.Itoa(run.PlannedScenarioRuns), strconv.FormatUint(run.Slot, 10), strconv.Itoa(run.ClusterGeneration), strconv.Itoa(run.Nodes), strconv.Itoa(run.Threshold), strconv.Itoa(run.BatchSize), run.Network, run.StreamMode, strconv.Itoa(run.BMax), strconv.Itoa(run.TxSize), strconv.FormatUint(run.TxGas, 10), strconv.Itoa(run.MaxCombineWorkers), strconv.Itoa(m.CombineWorkersEffective), strconv.FormatBool(run.Success), strconv.FormatBool(run.Consistent), run.Outcome, strconv.FormatBool(run.DeadlineMet), strconv.FormatBool(run.TimedOut), run.Error, strconv.FormatUint(run.CriticalNodeID, 10), strconv.FormatInt(m.TotalSlotUS, 10), strconv.FormatInt(m.ProposalPreparationUS, 10), strconv.FormatInt(m.ACSUS, 10), strconv.FormatInt(m.MergePlanUS, 10), strconv.Itoa(m.SelectedCiphertexts), strconv.FormatInt(m.ACSOutputDecodeUS, 10), strconv.FormatInt(m.AgreedSetUS, 10), strconv.FormatInt(m.MergeUS, 10), strconv.FormatInt(m.CiphertextDecodeUS, 10), strconv.FormatInt(m.BatchPlanUS, 10), strconv.FormatInt(m.ShareGenerationUS, 10), strconv.FormatInt(m.ThresholdWaitUS, 10), strconv.FormatInt(m.CombineUS, 10), strconv.Itoa(m.CombineAttempts), strconv.FormatInt(m.MaterializationUS, 10), strconv.FormatInt(m.CommitToPlaintextUS, 10), strconv.FormatInt(run.PrepareUS, 10), strconv.FormatInt(run.SubmissionUS, 10), strconv.FormatInt(run.HarnessWallUS, 10), strconv.FormatInt(run.StartSkewUS, 10)}
 			if err := w.Write(record); err != nil {
 				return err
 			}

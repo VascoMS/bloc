@@ -120,6 +120,7 @@ func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
 	fs.IntVar(&options.Limits.MaxProposalBytes, "max-proposal-bytes", defaultMaxProposalBytes, "maximum encoded inclusion-list proposal bytes")
 	fs.IntVar(&options.Limits.MaxEnvelopeBytes, "max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
 	fs.IntVar(&options.Limits.MaxCombineAttemptsPerSubBatch, "max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
+	fs.IntVar(&options.Limits.MaxCombineWorkers, "max-combine-workers", defaultMaxCombineWorkers, "maximum concurrent BTE combine workers")
 	fs.StringVar(&options.PrometheusURL, "prometheus-url", "http://127.0.0.1:9090", "Prometheus URL to record in remote evaluator metadata")
 	fs.StringVar(&options.GrafanaURL, "grafana-url", "http://127.0.0.1:3000", "Grafana URL to record in remote evaluator metadata")
 	fs.StringVar(&options.ControllerURL, "controller-url", "", "optional controller URL or host label to record in metadata")
@@ -253,12 +254,13 @@ func buildEC2Configs(inventory ec2Inventory, options ec2ConfigOptions) (ConfigFi
 	}
 	secrets := make([]NodeSecretConfig, 0, nodes)
 	remote := remoteEvalConfig{
-		NodeCount:   nodes,
-		Threshold:   threshold,
-		BMax:        options.BMax,
-		Network:     "libp2p",
-		StreamMode:  network.StreamMode,
-		InitialSlot: options.Slot,
+		NodeCount:         nodes,
+		Threshold:         threshold,
+		BMax:              options.BMax,
+		MaxCombineWorkers: options.Limits.MaxCombineWorkers,
+		Network:           "libp2p",
+		StreamMode:        network.StreamMode,
+		InitialSlot:       options.Slot,
 		Deployment: map[string]string{
 			"environment": "ec2",
 			"prometheus":  options.PrometheusURL,

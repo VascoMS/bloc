@@ -262,7 +262,7 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 			measurement.Error = err.Error()
 			return nil, measurement, err
 		}
-		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--stream-mode", options.StreamMode, "--out", configPath}
+		args := []string{"gen-config", "--nodes", strconv.Itoa(scenario.Nodes), "--threshold", strconv.Itoa(scenario.Threshold), "--bmax", strconv.Itoa(options.BMax), "--slot", strconv.FormatUint(initialSlot, 10), "--base-http-port", strconv.Itoa(options.BasePort + 1000), "--base-p2p-port", strconv.Itoa(options.BasePort + 2000), "--default-tx-gas", strconv.FormatUint(options.TxGas, 10), "--cluster-id", fmt.Sprintf("%s-n%d", options.ExperimentID, scenario.Nodes), "--stream-mode", options.StreamMode, "--max-combine-workers", strconv.Itoa(options.MaxCombineWorkers), "--out", configPath}
 		if options.ACSTrace {
 			args = append(args, "--acs-trace")
 		}
@@ -278,7 +278,7 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 		measurement.Error = err.Error()
 		return nil, measurement, err
 	}
-	if err := validateClusterConfigStreamMode(configPath, options.StreamMode); err != nil {
+	if err := validatePersistentClusterConfig(configPath, options.StreamMode, options.MaxCombineWorkers); err != nil {
 		measurement.Error = err.Error()
 		return nil, measurement, err
 	}
@@ -333,12 +333,17 @@ func startPersistentCluster(self, outDir, configBase string, options suiteOption
 }
 
 func validateClusterConfigStreamMode(path, expected string) error {
+	return validatePersistentClusterConfig(path, expected, 0)
+}
+
+func validatePersistentClusterConfig(path, expectedStreamMode string, expectedCombineWorkers int) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read cluster config stream mode: %w", err)
 	}
 	var config struct {
-		Network NetworkConfig `json:"network"`
+		Network NetworkConfig  `json:"network"`
+		Limits  ResourceLimits `json:"limits"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("decode cluster config stream mode: %w", err)
@@ -347,8 +352,14 @@ func validateClusterConfigStreamMode(path, expected string) error {
 	if err := validateNetworkConfig(config.Network); err != nil {
 		return err
 	}
-	if config.Network.StreamMode != expected {
-		return fmt.Errorf("cluster config stream mode %q does not match evaluator stream mode %q", config.Network.StreamMode, expected)
+	if config.Network.StreamMode != expectedStreamMode {
+		return fmt.Errorf("cluster config stream mode %q does not match evaluator stream mode %q", config.Network.StreamMode, expectedStreamMode)
+	}
+	if config.Limits.MaxCombineWorkers == 0 && !config.Limits.explicitZeroCombineWorkers {
+		config.Limits.MaxCombineWorkers = defaultMaxCombineWorkers
+	}
+	if expectedCombineWorkers > 0 && config.Limits.MaxCombineWorkers != expectedCombineWorkers {
+		return fmt.Errorf("cluster config combine workers %d does not match evaluator combine workers %d", config.Limits.MaxCombineWorkers, expectedCombineWorkers)
 	}
 	return nil
 }
@@ -377,7 +388,7 @@ func validatePersistentCorpusConfig(path string, scenario evalScenario, provenan
 }
 
 func (c *persistentCluster) runSlot(outDir, runID string, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options suiteOptions) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StreamMode: options.StreamMode, StartedAt: time.Now(), Results: []Result{}}
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, ClusterGeneration: c.generation, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: options.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, MaxCombineWorkers: options.MaxCombineWorkers, Network: scenario.Network, StreamMode: options.StreamMode, StartedAt: time.Now(), Results: []Result{}}
 	if options.TxSource == "mock-encrypted-corpus" {
 		identity := corpusIdentityForCount(options.CorpusByNodes[scenario.Nodes], scenario.BatchSize)
 		run.Corpus = &identity

@@ -98,6 +98,91 @@ func TestEvalSuiteOptionsEnableACSTrace(t *testing.T) {
 	}
 }
 
+func TestEvalSuiteCombineWorkersOptionsAndManifest(t *testing.T) {
+	defaults, err := parseEvalSuiteOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := defaults.MaxCombineWorkers; got != 1 {
+		t.Fatalf("default max combine workers = %d, want 1", got)
+	}
+	requested, err := parseEvalSuiteOptions([]string{"--max-combine-workers", "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := requested.MaxCombineWorkers; got != 2 {
+		t.Fatalf("requested max combine workers = %d, want 2", got)
+	}
+
+	data, err := json.Marshal(suiteManifest{MaxCombineWorkers: requested.MaxCombineWorkers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"max_combine_workers":2`) {
+		t.Fatalf("suite manifest missing max combine workers: %s", data)
+	}
+}
+
+func TestEvalLocalCombineWorkersReachRunAndGeneratedConfig(t *testing.T) {
+	root := t.TempDir()
+	capturePath := filepath.Join(root, "args.txt")
+	fakeExecutable := filepath.Join(root, "bloc-node")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nexit 23\n", capturePath)
+	if err := os.WriteFile(fakeExecutable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := runLocalExperiment(fakeExecutable, filepath.Join(root, "run"), "run", 4, 3, 8, 8, 128, 21000, 1000, 1, 0, 0, 2, 24000, time.Second, "", false, streamModeFresh)
+	if err == nil {
+		t.Fatal("fake gen-config unexpectedly succeeded")
+	}
+	if got := run.MaxCombineWorkers; got != 2 {
+		t.Fatalf("run max combine workers = %d, want 2", got)
+	}
+	data, readErr := os.ReadFile(capturePath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	args := strings.Fields(string(data))
+	found := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--max-combine-workers" && args[i+1] == "2" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("generated config args omit max combine workers: %v", args)
+	}
+}
+
+func TestEvalPersistentCombineWorkersConfigValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cluster.json")
+	config := struct {
+		Network NetworkConfig  `json:"network"`
+		Limits  ResourceLimits `json:"limits"`
+	}{
+		Network: NetworkConfig{Mode: "libp2p", StreamMode: streamModePersistentLanes},
+		Limits:  ResourceLimits{MaxCombineWorkers: 2},
+	}
+	if err := writeJSONFile(path, config); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePersistentClusterConfig(path, streamModePersistentLanes, 2); err != nil {
+		t.Fatalf("matching persistent config rejected: %v", err)
+	}
+	if err := validatePersistentClusterConfig(path, streamModePersistentLanes, 1); err == nil || !strings.Contains(err.Error(), "combine workers") {
+		t.Fatalf("worker mismatch error = %v", err)
+	}
+	legacyPath := filepath.Join(t.TempDir(), "cluster.json")
+	if err := os.WriteFile(legacyPath, []byte(`{"network":{"mode":"libp2p","stream_mode":"persistent-lanes"},"limits":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePersistentClusterConfig(legacyPath, streamModePersistentLanes, 1); err != nil {
+		t.Fatalf("legacy omitted combine workers did not default to one: %v", err)
+	}
+}
+
 func TestEvalSuiteStreamModeDefaultsAndOverrides(t *testing.T) {
 	defaults, err := parseEvalSuiteOptions(nil)
 	if err != nil {
@@ -251,6 +336,38 @@ func TestRunMeasurementsRecordFixedConfiguration(t *testing.T) {
 		if got := records[1][index[name]]; got != want {
 			t.Fatalf("%s = %s, want %s", name, got, want)
 		}
+	}
+}
+
+func TestEvalMeasurementCombineWorkersColumns(t *testing.T) {
+	run := EvalRun{
+		RunID: "run", MaxCombineWorkers: 2,
+		Results: []Result{{NodeID: 0, Metrics: Metrics{CombineWorkersConfigured: 2, CombineWorkersEffective: 2}}},
+	}
+	for name, write := range map[string]func(string, []EvalRun) error{
+		"run":  writeRunMeasurements,
+		"node": writeNodeMeasurements,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), name+".csv")
+			if err := write(path, []EvalRun{run}); err != nil {
+				t.Fatal(err)
+			}
+			records, err := readCSV(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			columns := make(map[string]int, len(records[0]))
+			for i, column := range records[0] {
+				columns[column] = i
+			}
+			if got := records[1][columns["max_combine_workers"]]; got != "2" {
+				t.Fatalf("max_combine_workers = %q, want 2", got)
+			}
+			if got := records[1][columns["effective_combine_workers"]]; got != "2" {
+				t.Fatalf("effective_combine_workers = %q, want 2", got)
+			}
+		})
 	}
 }
 

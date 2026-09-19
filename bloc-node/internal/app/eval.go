@@ -45,6 +45,7 @@ type EvalRun struct {
 	ReceivedTxCount     int                `json:"received_tx_count,omitempty"`
 	MaxDecryptedGas     uint64             `json:"max_decrypted_gas"`
 	MaxDecryptedTxs     int                `json:"max_decrypted_txs"`
+	MaxCombineWorkers   int                `json:"max_combine_workers"`
 	Network             string             `json:"network"`
 	StreamMode          string             `json:"stream_mode"`
 	Faults              map[uint64]string  `json:"faults,omitempty"`
@@ -76,6 +77,7 @@ func evalLocal(args []string) error {
 	feeStep := fs.Uint64("fee-step-wei", 1, "generated fee increment per transaction")
 	maxDecryptedGas := fs.Uint64("max-decrypted-gas", 0, "maximum gas to decrypt per slot; 0 means uncapped")
 	maxDecryptedTxs := fs.Int("max-decrypted-txs", 0, "maximum transactions to decrypt per slot; 0 means bmax")
+	maxCombineWorkers := fs.Int("max-combine-workers", defaultMaxCombineWorkers, "maximum concurrent BTE combine workers")
 	outDir := fs.String("out-dir", "results", "directory for run artifacts")
 	basePort := fs.Int("base-port", 21000, "base port; HTTP uses base+1000 and libp2p uses base+2000")
 	timeout := fs.Duration("timeout", 20*time.Second, "per-run timeout")
@@ -102,7 +104,7 @@ func evalLocal(args []string) error {
 		if err := os.MkdirAll(runDir, 0755); err != nil {
 			return err
 		}
-		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *basePort+(idx*2000), *timeout, *faultRaw, false, streamModeFresh)
+		run, err := runLocalExperiment(self, runDir, runID, *nodes, *threshold, *bmax, batchSize, *txSize, *txGas, *feeStart, *feeStep, *maxDecryptedGas, *maxDecryptedTxs, *maxCombineWorkers, *basePort+(idx*2000), *timeout, *faultRaw, false, streamModeFresh)
 		if err != nil {
 			run.Error = err.Error()
 		}
@@ -123,21 +125,22 @@ func evalLocal(args []string) error {
 	return nil
 }
 
-func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs int, basePort int, timeout time.Duration, faultRaw string, acsTrace bool, streamMode string) (EvalRun, error) {
+func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batchSize, txSize int, txGas, feeStart, feeStep, maxDecryptedGas uint64, maxDecryptedTxs, maxCombineWorkers, basePort int, timeout time.Duration, faultRaw string, acsTrace bool, streamMode string) (EvalRun, error) {
 	run := EvalRun{
-		RunID:           runID,
-		Nodes:           nodes,
-		Threshold:       threshold,
-		BMax:            bmax,
-		BatchSize:       batchSize,
-		TxSize:          txSize,
-		TxGas:           txGas,
-		MaxDecryptedGas: maxDecryptedGas,
-		MaxDecryptedTxs: maxDecryptedTxs,
-		Network:         "libp2p",
-		StreamMode:      streamMode,
-		Faults:          make(map[uint64]string),
-		StartedAt:       time.Now(),
+		RunID:             runID,
+		Nodes:             nodes,
+		Threshold:         threshold,
+		BMax:              bmax,
+		BatchSize:         batchSize,
+		TxSize:            txSize,
+		TxGas:             txGas,
+		MaxDecryptedGas:   maxDecryptedGas,
+		MaxDecryptedTxs:   maxDecryptedTxs,
+		MaxCombineWorkers: maxCombineWorkers,
+		Network:           "libp2p",
+		StreamMode:        streamMode,
+		Faults:            make(map[uint64]string),
+		StartedAt:         time.Now(),
 	}
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return run, err
@@ -157,7 +160,7 @@ func runLocalExperiment(self, runDir, runID string, nodes, threshold, bmax, batc
 	}
 	defer os.RemoveAll(configRoot)
 	configPath := filepath.Join(configRoot, "cluster.json")
-	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--stream-mode", streamMode, "--out", configPath}
+	args := []string{"gen-config", "--nodes", strconv.Itoa(nodes), "--threshold", strconv.Itoa(run.Threshold), "--bmax", strconv.Itoa(bmax), "--base-http-port", strconv.Itoa(basePort + 1000), "--base-p2p-port", strconv.Itoa(basePort + 2000), "--max-decrypted-gas", strconv.FormatUint(maxDecryptedGas, 10), "--max-decrypted-txs", strconv.Itoa(maxDecryptedTxs), "--max-combine-workers", strconv.Itoa(maxCombineWorkers), "--default-tx-gas", strconv.FormatUint(txGas, 10), "--stream-mode", streamMode, "--out", configPath}
 	if acsTrace {
 		args = append(args, "--acs-trace")
 	}
@@ -485,7 +488,7 @@ func writeEvalOutputs(outDir string, runs []EvalRun) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "success", "consistent", "error", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "materialization_us", "commit_to_plaintext_us", "metrics_finalized", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
+	if err := w.Write([]string{"run_id", "network", "nodes", "threshold", "bmax", "batch_size", "tx_size", "tx_gas", "max_decrypted_gas", "max_decrypted_txs", "max_combine_workers", "success", "consistent", "error", "node_id", "agreed_lists", "agreed_ciphertexts", "selected_ciphertexts", "skipped_ciphertexts", "selected_gas", "ciphertexts", "slot_ms", "acs_ms", "commit_to_plaintext_ms", "total_slot_us", "proposal_preparation_us", "acs_us", "merge_plan_us", "share_generation_us", "threshold_wait_us", "combine_us", "combine_attempts", "effective_combine_workers", "materialization_us", "commit_to_plaintext_us", "metrics_finalized", "outbound_acs_bytes", "outbound_share_bytes"}); err != nil {
 		return err
 	}
 	for _, run := range runs {
@@ -516,12 +519,13 @@ func evalSummaryRecord(run EvalRun, result *Result) []string {
 		strconv.FormatUint(run.TxGas, 10),
 		strconv.FormatUint(run.MaxDecryptedGas, 10),
 		strconv.Itoa(run.MaxDecryptedTxs),
+		strconv.Itoa(run.MaxCombineWorkers),
 		strconv.FormatBool(run.Success),
 		strconv.FormatBool(run.Consistent),
 		run.Error,
 	}
 	if result == nil {
-		return append(record, make([]string, 23)...)
+		return append(record, make([]string, 24)...)
 	}
 	return append(record,
 		strconv.FormatUint(result.NodeID, 10),
@@ -542,6 +546,7 @@ func evalSummaryRecord(run EvalRun, result *Result) []string {
 		strconv.FormatInt(result.Metrics.ThresholdWaitUS, 10),
 		strconv.FormatInt(result.Metrics.CombineUS, 10),
 		strconv.Itoa(result.Metrics.CombineAttempts),
+		strconv.Itoa(result.Metrics.CombineWorkersEffective),
 		strconv.FormatInt(result.Metrics.MaterializationUS, 10),
 		strconv.FormatInt(result.Metrics.CommitToPlaintextUS, 10),
 		strconv.FormatBool(result.Metrics.MetricsFinalized),

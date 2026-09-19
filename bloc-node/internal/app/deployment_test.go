@@ -186,6 +186,23 @@ func TestReadRemoteEvalConfigSupportsEndpointShortcut(t *testing.T) {
 	if cfg.StreamMode != streamModeFresh {
 		t.Fatalf("legacy remote stream mode = %q, want fresh", cfg.StreamMode)
 	}
+	if cfg.MaxCombineWorkers != 1 {
+		t.Fatalf("legacy remote max combine workers = %d, want 1", cfg.MaxCombineWorkers)
+	}
+}
+
+func TestRemoteEvalCombineWorkersExplicitValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remote.json")
+	if err := os.WriteFile(path, []byte(`{"endpoints":["http://node-a"],"max_combine_workers":2}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := readRemoteEvalConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MaxCombineWorkers; got != 2 {
+		t.Fatalf("remote max combine workers = %d, want 2", got)
+	}
 }
 
 func TestReadRemoteEvalConfigRejectsUnknownStreamMode(t *testing.T) {
@@ -235,7 +252,7 @@ func TestRemoteManifestRecordsDeploymentFields(t *testing.T) {
 	}
 }
 
-func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
+func TestBuildEC2ConfigsUsesPrivateAddressesAndCombineWorkers(t *testing.T) {
 	inventory := ec2Inventory{
 		Deployment: map[string]string{"region": "us-east-1"},
 		Controller: &ec2InventoryHost{
@@ -250,18 +267,24 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 		},
 	}
 	options := ec2ConfigOptions{
-		ClusterOut:    "cluster.ec2.json",
-		CRSOut:        "cluster.ec2.crs",
-		ClusterID:     "bloc-ec2-test",
-		BMax:          128,
-		Slot:          7,
-		HTTPPort:      8000,
-		P2PPort:       9000,
-		HTTPHostMode:  "private-ip",
-		P2PHostMode:   "private-ip",
-		ProviderMode:  "direct",
-		StreamMode:    streamModePersistent,
-		DefaultTxGas:  21000,
+		ClusterOut:   "cluster.ec2.json",
+		CRSOut:       "cluster.ec2.crs",
+		ClusterID:    "bloc-ec2-test",
+		BMax:         128,
+		Slot:         7,
+		HTTPPort:     8000,
+		P2PPort:      9000,
+		HTTPHostMode: "private-ip",
+		P2PHostMode:  "private-ip",
+		ProviderMode: "direct",
+		StreamMode:   streamModePersistent,
+		DefaultTxGas: 21000,
+		Limits: ResourceLimits{
+			MaxProposalBytes:              defaultMaxProposalBytes,
+			MaxEnvelopeBytes:              defaultMaxEnvelopeBytes,
+			MaxCombineAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch,
+			MaxCombineWorkers:             2,
+		},
 		PrometheusURL: "http://controller:9090",
 		GrafanaURL:    "http://controller:3000",
 	}
@@ -272,8 +295,8 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	if cluster.N != 4 || cluster.Threshold != 3 || cluster.Slot != 7 {
 		t.Fatalf("unexpected cluster metadata: %+v", cluster)
 	}
-	if cluster.Limits != defaultResourceLimits() {
-		t.Fatalf("generated resource limits = %+v, want %+v", cluster.Limits, defaultResourceLimits())
+	if cluster.Limits.MaxCombineWorkers != 2 || remote.MaxCombineWorkers != 2 {
+		t.Fatalf("combine workers not retained: cluster=%d remote=%d", cluster.Limits.MaxCombineWorkers, remote.MaxCombineWorkers)
 	}
 	if cluster.Provider.MempoolTimeoutMS != defaultMempoolTimeoutMS {
 		t.Fatalf("generated mempool timeout = %d ms, want %d", cluster.Provider.MempoolTimeoutMS, defaultMempoolTimeoutMS)
@@ -302,6 +325,16 @@ func TestBuildEC2ConfigsUsesPrivateAddressesForSidecars(t *testing.T) {
 	}
 	if remote.Deployment["environment"] != "ec2" || remote.Deployment["region"] != "us-east-1" || remote.Deployment["controller"] != "controller" {
 		t.Fatalf("unexpected deployment metadata: %+v", remote.Deployment)
+	}
+}
+
+func TestEC2CombineWorkersFlag(t *testing.T) {
+	options, err := parseEC2ConfigOptions([]string{"--max-combine-workers", "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := options.Limits.MaxCombineWorkers; got != 2 {
+		t.Fatalf("EC2 max combine workers = %d, want 2", got)
 	}
 }
 

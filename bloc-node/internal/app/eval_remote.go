@@ -41,16 +41,17 @@ type remoteEvalOptions struct {
 }
 
 type remoteEvalConfig struct {
-	Nodes       []remoteEvalNode  `json:"nodes"`
-	Endpoints   []string          `json:"endpoints,omitempty"`
-	NodeCount   int               `json:"node_count,omitempty"`
-	Threshold   int               `json:"threshold,omitempty"`
-	BMax        int               `json:"bmax,omitempty"`
-	Network     string            `json:"network,omitempty"`
-	StreamMode  string            `json:"stream_mode,omitempty"`
-	Deployment  map[string]string `json:"deployment,omitempty"`
-	InitialSlot uint64            `json:"initial_slot,omitempty"`
-	Corpus      corpusProvenance  `json:"corpus,omitempty"`
+	Nodes             []remoteEvalNode  `json:"nodes"`
+	Endpoints         []string          `json:"endpoints,omitempty"`
+	NodeCount         int               `json:"node_count,omitempty"`
+	Threshold         int               `json:"threshold,omitempty"`
+	BMax              int               `json:"bmax,omitempty"`
+	MaxCombineWorkers int               `json:"max_combine_workers,omitempty"`
+	Network           string            `json:"network,omitempty"`
+	StreamMode        string            `json:"stream_mode,omitempty"`
+	Deployment        map[string]string `json:"deployment,omitempty"`
+	InitialSlot       uint64            `json:"initial_slot,omitempty"`
+	Corpus            corpusProvenance  `json:"corpus,omitempty"`
 }
 
 type remoteEvalNode struct {
@@ -136,6 +137,7 @@ func evalRemote(args []string) error {
 		PlannedScenarioRuns: map[string]int{scenario.ID: options.PlannedScenarioRuns},
 		Seed:                options.Seed,
 		BMax:                cfg.BMax,
+		MaxCombineWorkers:   cfg.MaxCombineWorkers,
 		TxSize:              options.TxSize,
 		TxGas:               options.TxGas,
 		TxSource:            options.TxSource,
@@ -338,6 +340,12 @@ func readRemoteEvalConfig(path string) (remoteEvalConfig, error) {
 			cfg.Nodes = append(cfg.Nodes, remoteEvalNode{ID: id, URL: endpoint})
 		}
 	}
+	if cfg.MaxCombineWorkers == 0 {
+		cfg.MaxCombineWorkers = defaultMaxCombineWorkers
+	}
+	if cfg.MaxCombineWorkers < 1 || cfg.MaxCombineWorkers > absoluteMaxCombineWorkers {
+		return remoteEvalConfig{}, fmt.Errorf("max_combine_workers must be in [1,%d]", absoluteMaxCombineWorkers)
+	}
 	if len(cfg.Nodes) == 0 {
 		return remoteEvalConfig{}, fmt.Errorf("remote config requires nodes or endpoints")
 	}
@@ -384,7 +392,7 @@ func waitForRemoteHTTP(client *http.Client, nodes []remoteEvalNode, timeout time
 }
 
 func runRemoteSlot(client *http.Client, outDir, runID string, cfg remoteEvalConfig, scenario evalScenario, phase string, iteration, orderIndex int, slotID uint64, corpus []evalSubmission, options remoteEvalOptions, prepare bool) (EvalRun, error) {
-	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, Network: scenario.Network, StreamMode: cfg.StreamMode, StartedAt: time.Now(), Results: []Result{}}
+	run := EvalRun{RunID: runID, ScenarioID: scenario.ID, Phase: phase, Iteration: iteration, OrderIndex: orderIndex, Slot: slotID, Nodes: scenario.Nodes, Threshold: scenario.Threshold, BMax: cfg.BMax, BatchSize: scenario.BatchSize, TxSize: options.TxSize, TxGas: options.TxGas, TxSource: options.TxSource, MaxCombineWorkers: cfg.MaxCombineWorkers, Network: scenario.Network, StreamMode: cfg.StreamMode, StartedAt: time.Now(), Results: []Result{}}
 	if options.TxSource == "mock-encrypted-corpus" {
 		identity := corpusIdentityForCount(cfg.Corpus, scenario.BatchSize)
 		run.Corpus = &identity

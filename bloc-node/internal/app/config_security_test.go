@@ -273,6 +273,59 @@ func TestGenConfigRejectsNegativeMempoolTimeout(t *testing.T) {
 	}
 }
 
+func TestCombineWorkersConfigGenerationDefault(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4", "--threshold", "3", "--bmax", "8",
+		"--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+
+	raw, err := os.ReadFile(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Limits map[string]int `json:"limits"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if got := document.Limits["max_combine_workers"]; got != 1 {
+		t.Fatalf("generated max_combine_workers = %d, want 1", got)
+	}
+}
+
+func TestCombineWorkersConfigGenerationRequestedValue(t *testing.T) {
+	dir := t.TempDir()
+	clusterPath := filepath.Join(dir, "cluster.json")
+	if err := genConfig([]string{
+		"--nodes", "4", "--threshold", "3", "--bmax", "8",
+		"--max-combine-workers", "2", "--out", clusterPath,
+	}); err != nil {
+		t.Fatalf("gen config: %v", err)
+	}
+	cfg, err := readConfig(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Limits.MaxCombineWorkers; got != 2 {
+		t.Fatalf("generated max_combine_workers = %d, want 2", got)
+	}
+}
+
+func TestCombineWorkersEC2ConfigDefault(t *testing.T) {
+	options, err := parseEC2ConfigOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := options.Limits.MaxCombineWorkers; got != 1 {
+		t.Fatalf("EC2 max combine workers = %d, want 1", got)
+	}
+}
+
 func TestReadConfigRejectsLegacyCombinedSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cluster.json")
 	if err := os.WriteFile(path, []byte(`{"crs_seed_hex":"seed","shares":[]}`), 0644); err != nil {

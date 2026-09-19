@@ -19,11 +19,13 @@ const (
 	defaultMaxProposalBytes                     = 8 << 20
 	defaultMaxEnvelopeBytes                     = 16 << 20
 	defaultMaxCombineAttemptsPerSubBatch        = 256
+	defaultMaxCombineWorkers                    = 1
 	defaultMempoolTimeoutMS               int64 = 2000
 	maximumMempoolTimeoutMS               int64 = (1<<63 - 1) / int64(time.Millisecond)
 	absoluteMaxProposalBytes                    = 32 << 20
 	absoluteMaxEnvelopeBytes                    = 64 << 20
 	absoluteMaxCombineAttemptsPerSubBatch       = 4096
+	absoluteMaxCombineWorkers                   = 64
 	minimumEnvelopeHeadroomBytes                = 64 << 10
 
 	streamModeFresh           = "fresh"
@@ -64,9 +66,11 @@ type ResourceLimits struct {
 	MaxProposalBytes              int `json:"max_proposal_bytes,omitempty"`
 	MaxEnvelopeBytes              int `json:"max_envelope_bytes,omitempty"`
 	MaxCombineAttemptsPerSubBatch int `json:"max_combine_attempts_per_sub_batch,omitempty"`
+	MaxCombineWorkers             int `json:"max_combine_workers,omitempty"`
 	explicitZeroProposal          bool
 	explicitZeroEnvelope          bool
 	explicitZeroCombineAttempts   bool
+	explicitZeroCombineWorkers    bool
 }
 
 func defaultResourceLimits() ResourceLimits {
@@ -74,6 +78,7 @@ func defaultResourceLimits() ResourceLimits {
 		MaxProposalBytes:              defaultMaxProposalBytes,
 		MaxEnvelopeBytes:              defaultMaxEnvelopeBytes,
 		MaxCombineAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch,
+		MaxCombineWorkers:             defaultMaxCombineWorkers,
 	}
 }
 
@@ -325,6 +330,8 @@ type Metrics struct {
 	SharesRejected               int              `json:"shares_rejected"`
 	ShareSubsetAttempts          int              `json:"share_subset_attempts"`
 	CombineAttempts              int              `json:"combine_attempts"`
+	CombineWorkersConfigured     int              `json:"combine_workers_configured"`
+	CombineWorkersEffective      int              `json:"combine_workers_effective"`
 	SharesNeededPerSub           int              `json:"shares_needed_per_sub_batch"`
 	OutboundMessages             map[string]int   `json:"outbound_messages"`
 	InboundMessages              map[string]int   `json:"inbound_messages"`

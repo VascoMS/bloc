@@ -30,6 +30,7 @@ func genConfig(args []string) error {
 	maxProposalBytes := fs.Int("max-proposal-bytes", defaultMaxProposalBytes, "maximum encoded inclusion-list proposal bytes")
 	maxEnvelopeBytes := fs.Int("max-envelope-bytes", defaultMaxEnvelopeBytes, "maximum protobuf envelope bytes")
 	maxCombineAttempts := fs.Int("max-combine-attempts-per-sub-batch", defaultMaxCombineAttemptsPerSubBatch, "cumulative threshold-subset attempts per sub-batch")
+	maxCombineWorkers := fs.Int("max-combine-workers", defaultMaxCombineWorkers, "maximum concurrent BTE combine workers")
 	acsTrace := fs.Bool("acs-trace", false, "enable bounded ACS diagnostic tracing")
 	streamMode := fs.String("stream-mode", streamModeFresh, "libp2p envelope streams: fresh, persistent, or persistent-lanes")
 	providerMode := fs.String("provider", "direct", "inclusion-list provider: direct or mempool-http")
@@ -64,6 +65,7 @@ func genConfig(args []string) error {
 		MaxProposalBytes:              *maxProposalBytes,
 		MaxEnvelopeBytes:              *maxEnvelopeBytes,
 		MaxCombineAttemptsPerSubBatch: *maxCombineAttempts,
+		MaxCombineWorkers:             *maxCombineWorkers,
 	}
 	if err := validateResourceLimits(limits); err != nil {
 		return err

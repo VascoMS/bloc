@@ -51,6 +51,30 @@ func TestBuildCampaignIdentityContainsNoDeploymentAddresses(t *testing.T) {
 	}
 }
 
+func TestBuildCampaignIdentityDefaultsOmittedProgrammaticCombineWorkers(t *testing.T) {
+	identity, _, _, err := buildCampaignIdentity(campaignIdentityOptions{
+		ClusterID: "final-n4",
+		N:         4,
+		Threshold: 3,
+		BMax:      128,
+		Blockspace: BlockspaceConfig{
+			MaxDecryptedTxs: 128,
+			DefaultTxGas:    21000,
+		},
+		Limits: ResourceLimits{
+			MaxProposalBytes:              defaultMaxProposalBytes,
+			MaxEnvelopeBytes:              defaultMaxEnvelopeBytes,
+			MaxCombineAttemptsPerSubBatch: defaultMaxCombineAttemptsPerSubBatch,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := identity.Limits.MaxCombineWorkers; got != defaultMaxCombineWorkers {
+		t.Fatalf("programmatic max combine workers = %d, want %d", got, defaultMaxCombineWorkers)
+	}
+}
+
 func TestGenCampaignIdentityWritesPrivateSecretsAndRefusesOverwrite(t *testing.T) {
 	root, identityPath, crsPath, secretDir := generateCampaignIdentityFixture(t)
 	for path, wantMode := range map[string]os.FileMode{

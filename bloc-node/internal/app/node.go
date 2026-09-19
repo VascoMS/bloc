@@ -911,6 +911,7 @@ func (n *Node) tryCombine() {
 	results, stats, err := n.cluster.CombineSharesBounded(attempt.plan, shares, be.CombineOptions{
 		MaxAttemptsPerSubBatch:  n.cfg.Limits.MaxCombineAttemptsPerSubBatch,
 		AttemptLimitsBySubBatch: append([]int(nil), attempt.attemptLimits...),
+		MaxWorkers:              n.cfg.Limits.MaxCombineWorkers,
 	})
 	n.recordCombineStats(stats)
 	if err != nil {
@@ -1020,6 +1021,8 @@ func (n *Node) claimCombine() (combineAttempt, bool) {
 
 func (n *Node) recordCombineStats(stats be.CombineStats) {
 	n.mu.Lock()
+	n.metrics.CombineWorkersConfigured = stats.ConfiguredWorkers
+	n.metrics.CombineWorkersEffective = stats.EffectiveWorkers
 	total := 0
 	for subBatchID, attempts := range stats.AttemptsBySubBatch {
 		if subBatchID < len(n.combineAttemptsLeft) {

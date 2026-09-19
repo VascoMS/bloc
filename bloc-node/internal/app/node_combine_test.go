@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -112,6 +113,78 @@ func TestCombineAttemptBudgetIsCumulativeAcrossRetries(t *testing.T) {
 	}
 }
 
+func TestRecordCombineStatsRetainsWorkerMetricsWithoutChangingAttemptBudget(t *testing.T) {
+	node := combineTestNode(2)
+	node.combineAttemptsLeft[0] = 4
+	node.recordCombineStats(be.CombineStats{
+		AttemptsBySubBatch: []int{2},
+		ConfiguredWorkers:  2,
+		EffectiveWorkers:   1,
+	})
+	if node.combineAttemptsLeft[0] != 2 {
+		t.Fatalf("remaining attempts = %d, want 2", node.combineAttemptsLeft[0])
+	}
+	raw, err := json.Marshal(node.metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	var configured int
+	if err := json.Unmarshal(document["combine_workers_configured"], &configured); err != nil {
+		t.Fatal(err)
+	}
+	if got := configured; got != 2 {
+		t.Fatalf("configured combine workers = %d, want 2", got)
+	}
+	var effective int
+	if err := json.Unmarshal(document["combine_workers_effective"], &effective); err != nil {
+		t.Fatal(err)
+	}
+	if got := effective; got != 1 {
+		t.Fatalf("effective combine workers = %d, want 1", got)
+	}
+}
+
+func TestTryCombinePassesConfiguredWorkersToBTE(t *testing.T) {
+	fixture := newMergePlanBenchmarkFixture(t, 4, 2, true)
+	plan, err := fixture.cluster.PlanBatch(fixture.ciphertexts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := combineTestNode(3)
+	node.cluster = fixture.cluster
+	node.cfg.Limits.MaxCombineWorkers = 2
+	node.plan = plan
+	node.combineAttemptsLeft = make([]int, len(plan.SubBatches))
+	shares := make([]be.DecryptionShare, 0, len(plan.SubBatches)*node.cfg.Threshold)
+	for subBatchID := range plan.SubBatches {
+		node.combineAttemptsLeft[subBatchID] = defaultMaxCombineAttemptsPerSubBatch
+		for operatorID := 0; operatorID < node.cfg.Threshold; operatorID++ {
+			share, err := fixture.cluster.MakeShare(fixture.cluster.Shares[operatorID], plan, subBatchID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shares = append(shares, share)
+		}
+	}
+	node.shareVersion = uint64(len(shares))
+	setCombineTestShares(node, shares)
+
+	node.tryCombine()
+	if node.result == nil {
+		t.Fatal("combine did not produce a result")
+	}
+	if got := node.metrics.CombineWorkersConfigured; got != 2 {
+		t.Fatalf("configured combine workers = %d, want 2", got)
+	}
+	if got := node.metrics.CombineWorkersEffective; got < 1 || got > 2 {
+		t.Fatalf("effective combine workers = %d, want [1,2]", got)
+	}
+}
+
 func combineTestNode(threshold int) *Node {
 	var batchID [32]byte
 	batchID[0] = 1
@@ -155,10 +228,15 @@ func setCombineTestShares(node *Node, shares []be.DecryptionShare) {
 	node.shareCandidates = make(map[int]*operatorShareCandidates)
 	for _, candidate := range shares {
 		encoded, _ := candidate.Share.V.MarshalBinary()
-		node.shareCandidates[candidate.OperatorID] = &operatorShareCandidates{
-			batchID:  candidate.BatchID,
-			batchSet: true,
-			shares:   map[int]retainedShare{candidate.SubBatchID: {value: candidate, encoded: encoded}},
+		candidates := node.shareCandidates[candidate.OperatorID]
+		if candidates == nil {
+			candidates = &operatorShareCandidates{
+				batchID:  candidate.BatchID,
+				batchSet: true,
+				shares:   make(map[int]retainedShare),
+			}
+			node.shareCandidates[candidate.OperatorID] = candidates
 		}
+		candidates.shares[candidate.SubBatchID] = retainedShare{value: candidate, encoded: encoded}
 	}
 }

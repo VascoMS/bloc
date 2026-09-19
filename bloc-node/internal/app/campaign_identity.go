@@ -122,6 +122,9 @@ func buildCampaignIdentity(options campaignIdentityOptions) (campaignIdentity, [
 	if options.Limits == (ResourceLimits{}) {
 		options.Limits = defaultResourceLimits()
 	}
+	if options.Limits.MaxCombineWorkers == 0 {
+		options.Limits.MaxCombineWorkers = defaultMaxCombineWorkers
+	}
 	if err := validateResourceLimits(options.Limits); err != nil {
 		return campaignIdentity{}, nil, nil, err
 	}

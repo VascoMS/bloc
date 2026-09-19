@@ -94,7 +94,7 @@ func genEC2Config(args []string) error {
 }
 
 func parseEC2ConfigOptions(args []string) (ec2ConfigOptions, error) {
-	options := ec2ConfigOptions{}
+	options := ec2ConfigOptions{Limits: ResourceLimits{MaxCombineWorkers: defaultMaxCombineWorkers}}
 	fs := flag.NewFlagSet("gen-ec2-config", flag.ContinueOnError)
 	fs.StringVar(&options.InventoryPath, "inventory", "deploy/ec2/inventory.json", "EC2 inventory JSON from Terraform or scripts")
 	fs.StringVar(&options.ClusterOut, "cluster-out", "cluster.ec2.json", "output sidecar cluster config")

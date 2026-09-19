@@ -23,11 +23,11 @@ func TestResourceLimitsDefaultsAndValidation(t *testing.T) {
 	}
 
 	tests := []ResourceLimits{
-		{MaxProposalBytes: -1, MaxEnvelopeBytes: defaultMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: 1},
-		{MaxProposalBytes: absoluteMaxProposalBytes + 1, MaxEnvelopeBytes: absoluteMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: 1},
-		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: defaultMaxProposalBytes, MaxCombineAttemptsPerSubBatch: 1},
-		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: absoluteMaxEnvelopeBytes + 1, MaxCombineAttemptsPerSubBatch: 1},
-		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: defaultMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: absoluteMaxCombineAttemptsPerSubBatch + 1},
+		{MaxProposalBytes: -1, MaxEnvelopeBytes: defaultMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: 1, MaxCombineWorkers: defaultMaxCombineWorkers},
+		{MaxProposalBytes: absoluteMaxProposalBytes + 1, MaxEnvelopeBytes: absoluteMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: 1, MaxCombineWorkers: defaultMaxCombineWorkers},
+		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: defaultMaxProposalBytes, MaxCombineAttemptsPerSubBatch: 1, MaxCombineWorkers: defaultMaxCombineWorkers},
+		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: absoluteMaxEnvelopeBytes + 1, MaxCombineAttemptsPerSubBatch: 1, MaxCombineWorkers: defaultMaxCombineWorkers},
+		{MaxProposalBytes: defaultMaxProposalBytes, MaxEnvelopeBytes: defaultMaxEnvelopeBytes, MaxCombineAttemptsPerSubBatch: absoluteMaxCombineAttemptsPerSubBatch + 1, MaxCombineWorkers: defaultMaxCombineWorkers},
 	}
 	for _, limits := range tests {
 		if err := validateResourceLimits(limits); err == nil {
@@ -45,6 +45,49 @@ func TestResourceLimitsRejectExplicitJSONZero(t *testing.T) {
 	normalizeConfig(&cfg)
 	if err := validateResourceLimits(cfg.Limits); err == nil {
 		t.Fatal("explicit zero proposal limit was replaced by a default")
+	}
+}
+
+func TestResourceLimitsDefaultCombineWorkersWhenOmitted(t *testing.T) {
+	var limits ResourceLimits
+	if err := json.Unmarshal([]byte(`{}`), &limits); err != nil {
+		t.Fatal(err)
+	}
+	cfg := ConfigFile{Limits: limits}
+	normalizeConfig(&cfg)
+	raw, err := json.Marshal(cfg.Limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]int
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if got := document["max_combine_workers"]; got != 1 {
+		t.Fatalf("omitted max_combine_workers normalized to %d, want 1", got)
+	}
+	if err := validateResourceLimits(cfg.Limits); err != nil {
+		t.Fatalf("default combine workers rejected: %v", err)
+	}
+}
+
+func TestResourceLimitsRejectInvalidCombineWorkers(t *testing.T) {
+	for _, raw := range []string{
+		`{"max_combine_workers":0}`,
+		`{"max_combine_workers":-1}`,
+		`{"max_combine_workers":65}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			var limits ResourceLimits
+			if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+				t.Fatalf("decode limits: %v", err)
+			}
+			cfg := ConfigFile{Limits: limits}
+			normalizeConfig(&cfg)
+			if err := validateResourceLimits(cfg.Limits); err == nil || !strings.Contains(err.Error(), "limits.max_combine_workers") {
+				t.Fatalf("invalid max_combine_workers error = %v", err)
+			}
+		})
 	}
 }
 

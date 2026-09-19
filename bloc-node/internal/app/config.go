@@ -117,6 +117,7 @@ func (limits *ResourceLimits) UnmarshalJSON(data []byte) error {
 		MaxProposalBytes              *int `json:"max_proposal_bytes"`
 		MaxEnvelopeBytes              *int `json:"max_envelope_bytes"`
 		MaxCombineAttemptsPerSubBatch *int `json:"max_combine_attempts_per_sub_batch"`
+		MaxCombineWorkers             *int `json:"max_combine_workers"`
 	}
 	var wire wireLimits
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -135,6 +136,10 @@ func (limits *ResourceLimits) UnmarshalJSON(data []byte) error {
 	if wire.MaxCombineAttemptsPerSubBatch != nil {
 		limits.MaxCombineAttemptsPerSubBatch = *wire.MaxCombineAttemptsPerSubBatch
 		limits.explicitZeroCombineAttempts = *wire.MaxCombineAttemptsPerSubBatch == 0
+	}
+	if wire.MaxCombineWorkers != nil {
+		limits.MaxCombineWorkers = *wire.MaxCombineWorkers
+		limits.explicitZeroCombineWorkers = *wire.MaxCombineWorkers == 0
 	}
 	return nil
 }
@@ -208,6 +213,9 @@ func normalizeConfig(cfg *ConfigFile) {
 	if cfg.Limits.MaxCombineAttemptsPerSubBatch == 0 && !cfg.Limits.explicitZeroCombineAttempts {
 		cfg.Limits.MaxCombineAttemptsPerSubBatch = defaults.MaxCombineAttemptsPerSubBatch
 	}
+	if cfg.Limits.MaxCombineWorkers == 0 && !cfg.Limits.explicitZeroCombineWorkers {
+		cfg.Limits.MaxCombineWorkers = defaults.MaxCombineWorkers
+	}
 	for i := range cfg.Nodes {
 		normalizeNodeConfig(&cfg.Nodes[i])
 	}
@@ -274,6 +282,9 @@ func validateResourceLimits(limits ResourceLimits) error {
 	}
 	if limits.MaxCombineAttemptsPerSubBatch < 1 || limits.MaxCombineAttemptsPerSubBatch > absoluteMaxCombineAttemptsPerSubBatch {
 		return fmt.Errorf("limits.max_combine_attempts_per_sub_batch must be in [1,%d]", absoluteMaxCombineAttemptsPerSubBatch)
+	}
+	if limits.MaxCombineWorkers < 1 || limits.MaxCombineWorkers > absoluteMaxCombineWorkers {
+		return fmt.Errorf("limits.max_combine_workers must be in [1,%d]", absoluteMaxCombineWorkers)
 	}
 	return nil
 }

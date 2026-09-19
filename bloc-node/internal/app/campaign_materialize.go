@@ -95,7 +95,8 @@ func buildMaterializedCampaignConfigs(bundle campaignBundle, inventory ec2Invent
 	}
 	remote := remoteEvalConfig{
 		NodeCount: bundle.Identity.N, Threshold: bundle.Identity.Threshold, BMax: bundle.Identity.BMax,
-		Network: "libp2p", StreamMode: network.StreamMode, InitialSlot: 1, Corpus: bundle.Corpus,
+		MaxCombineWorkers: bundle.Manifest.MaxCombineWorkers,
+		Network:           "libp2p", StreamMode: network.StreamMode, InitialSlot: 1, Corpus: bundle.Corpus,
 		Deployment: map[string]string{
 			"environment": "ec2", "topology": options.Topology,
 			"prometheus": options.PrometheusURL, "grafana": options.GrafanaURL,

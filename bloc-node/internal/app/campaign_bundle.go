@@ -40,6 +40,7 @@ type campaignBundleManifest struct {
 	N                       int               `json:"n"`
 	Threshold               int               `json:"threshold"`
 	BMax                    int               `json:"bmax"`
+	MaxCombineWorkers       int               `json:"max_combine_workers,omitempty"`
 	PublicConfigID          string            `json:"public_config_id"`
 	PlaintextMasterCorpusID string            `json:"plaintext_master_corpus_id"`
 	PlaintextPrefixSetIDs   map[string]string `json:"plaintext_prefix_set_ids"`
@@ -102,6 +103,7 @@ func buildCampaignBundleManifest(root, sourceSHA, blocImage, mempoolImage string
 		N:                       bundle.Identity.N,
 		Threshold:               bundle.Identity.Threshold,
 		BMax:                    bundle.Identity.BMax,
+		MaxCombineWorkers:       bundle.Identity.Limits.MaxCombineWorkers,
 		PublicConfigID:          bundle.Corpus.PublicConfigID,
 		PlaintextMasterCorpusID: bundle.Corpus.PlaintextMasterCorpusID,
 		PlaintextPrefixSetIDs:   cloneStringMap(bundle.Corpus.PlaintextPrefixSetIDs),
@@ -121,9 +123,9 @@ func loadCampaignBundle(root string) (campaignBundle, error) {
 	if err != nil {
 		return campaignBundle{}, err
 	}
-	var manifest campaignBundleManifest
-	if err := decodeStrictJSON(data, &manifest); err != nil {
-		return campaignBundle{}, fmt.Errorf("decode campaign bundle manifest: %w", err)
+	manifest, err := decodeCampaignBundleManifest(data)
+	if err != nil {
+		return campaignBundle{}, err
 	}
 	if manifest.Version != campaignBundleVersion {
 		return campaignBundle{}, fmt.Errorf("unsupported campaign bundle version %q", manifest.Version)
@@ -160,6 +162,25 @@ func loadCampaignBundle(root string) (campaignBundle, error) {
 	}
 	bundle.Manifest = manifest
 	return bundle, nil
+}
+
+func decodeCampaignBundleManifest(data []byte) (campaignBundleManifest, error) {
+	var manifest campaignBundleManifest
+	if err := decodeStrictJSON(data, &manifest); err != nil {
+		return campaignBundleManifest{}, fmt.Errorf("decode campaign bundle manifest: %w", err)
+	}
+	var workerPresence struct {
+		MaxCombineWorkers *int `json:"max_combine_workers"`
+	}
+	if err := json.Unmarshal(data, &workerPresence); err != nil {
+		return campaignBundleManifest{}, fmt.Errorf("decode campaign bundle worker provenance: %w", err)
+	}
+	if workerPresence.MaxCombineWorkers == nil {
+		manifest.MaxCombineWorkers = defaultMaxCombineWorkers
+	} else if manifest.MaxCombineWorkers < 1 || manifest.MaxCombineWorkers > absoluteMaxCombineWorkers {
+		return campaignBundleManifest{}, fmt.Errorf("campaign bundle max combine workers must be in [1,%d]", absoluteMaxCombineWorkers)
+	}
+	return manifest, nil
 }
 
 func readCampaignBundlePublicInputs(root string) (campaignBundle, string, error) {
@@ -338,6 +359,9 @@ func compareCampaignBundleManifests(got, want campaignBundleManifest) error {
 	}
 	if got.IndexAssignment != want.IndexAssignment {
 		return fmt.Errorf("campaign index assignment mismatch")
+	}
+	if got.MaxCombineWorkers != want.MaxCombineWorkers {
+		return fmt.Errorf("campaign combine workers mismatch: got %d, want %d", got.MaxCombineWorkers, want.MaxCombineWorkers)
 	}
 	if !reflect.DeepEqual(got, want) {
 		return fmt.Errorf("campaign bundle manifest does not match frozen public inputs")

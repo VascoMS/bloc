@@ -40,6 +40,60 @@ func TestBuildAndLoadCampaignBundle(t *testing.T) {
 	}
 }
 
+func TestCampaignBundleCombineWorkersBoundAndCompatible(t *testing.T) {
+	parallelRoot := writeCampaignBundleFixture(t, 4, 3, 512)
+	setCampaignBundleCombineWorkers(t, parallelRoot, 2)
+	parallelManifest, err := buildCampaignBundleManifest(parallelRoot, testCampaignSourceSHA, testCampaignBlocImage, testCampaignMempoolImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parallelManifest.MaxCombineWorkers; got != 2 {
+		t.Fatalf("manifest max combine workers = %d, want 2", got)
+	}
+	writeCampaignBundleManifestForTest(t, parallelRoot, parallelManifest, true)
+	bundle, err := loadCampaignBundle(parallelRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Manifest.MaxCombineWorkers != 2 || bundle.Identity.Limits.MaxCombineWorkers != 2 {
+		t.Fatalf("parallel worker binding lost: manifest=%d identity=%d", bundle.Manifest.MaxCombineWorkers, bundle.Identity.Limits.MaxCombineWorkers)
+	}
+
+	t.Run("mismatch", func(t *testing.T) {
+		got := parallelManifest
+		got.MaxCombineWorkers = 1
+		if err := compareCampaignBundleManifests(got, parallelManifest); err == nil || !strings.Contains(err.Error(), "combine workers") {
+			t.Fatalf("worker mismatch error = %v", err)
+		}
+	})
+
+	t.Run("new-b512-omission", func(t *testing.T) {
+		got, err := decodeCampaignBundleManifest(campaignBundleManifestBytesForTest(t, parallelManifest, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := compareCampaignBundleManifests(got, parallelManifest); err == nil || !strings.Contains(err.Error(), "combine workers") {
+			t.Fatalf("new B512 omission error = %v", err)
+		}
+	})
+
+	t.Run("historical-omission", func(t *testing.T) {
+		want := parallelManifest
+		want.BMax = 128
+		want.MaxCombineWorkers = 1
+		got, err := decodeCampaignBundleManifest(campaignBundleManifestBytesForTest(t, want, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.MaxCombineWorkers != 1 {
+			t.Fatalf("historical max combine workers = %d, want 1", got.MaxCombineWorkers)
+		}
+		if err := compareCampaignBundleManifests(got, want); err != nil {
+			t.Fatalf("historical omission did not match identity default one: %v", err)
+		}
+	})
+}
+
 func TestFinalCampaignBundleValidationAcceptsScaleExtensionInputs(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -313,4 +367,47 @@ func copyCampaignBundleFixture(t *testing.T, source string) string {
 		}
 	}
 	return destination
+}
+
+func setCampaignBundleCombineWorkers(t *testing.T, root string, workers int) {
+	t.Helper()
+	path := filepath.Join(root, campaignBundleIdentityFile)
+	identity, _, err := readCampaignIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.Limits.MaxCombineWorkers = workers
+	if err := writeJSONFileAtomic(path, identity, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCampaignBundleManifestForTest(t *testing.T, root string, manifest campaignBundleManifest, includeWorkers bool) {
+	t.Helper()
+	path := filepath.Join(root, campaignBundleManifestFile)
+	data := campaignBundleManifestBytesForTest(t, manifest, includeWorkers)
+	if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func campaignBundleManifestBytesForTest(t *testing.T, manifest campaignBundleManifest, includeWorkers bool) []byte {
+	t.Helper()
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if includeWorkers {
+		return data
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	delete(document, "max_combine_workers")
+	data, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

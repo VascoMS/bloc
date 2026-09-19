@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -53,6 +54,45 @@ func TestMaterializeCampaignConfigPreservesFrozenInputsAcrossTopologies(t *testi
 		if sameCluster.Nodes[i].HTTPAdvertiseURL == threeCluster.Nodes[i].HTTPAdvertiseURL {
 			t.Fatalf("operator %d topology address did not change", i)
 		}
+	}
+}
+
+func TestCampaignMaterializeCombineWorkersReachPublicAndRemoteConfigs(t *testing.T) {
+	crsPath := filepath.Join(t.TempDir(), "cluster.crs")
+	if err := os.WriteFile(crsPath, []byte("validated fixture CRS"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	limits := defaultResourceLimits()
+	limits.MaxCombineWorkers = 2
+	bundle := campaignBundle{
+		CRSPath: crsPath,
+		Identity: campaignIdentity{
+			ClusterID: "workers-n4", N: 4, Threshold: 3, BMax: 512, Limits: limits,
+			Operators: []campaignOperatorIdentity{
+				{ID: 0, P2PPeerID: "peer-0"}, {ID: 1, P2PPeerID: "peer-1"},
+				{ID: 2, P2PPeerID: "peer-2"}, {ID: 3, P2PPeerID: "peer-3"},
+			},
+		},
+		Manifest: campaignBundleManifest{MaxCombineWorkers: 2},
+		Corpus: corpusProvenance{
+			PublicConfigID: "public", PlaintextMasterCorpusID: "plaintext",
+			EncryptedCorpusID: "encrypted", EncryptedPrefixSetIDs: map[string]string{"512": "prefix"},
+		},
+	}
+	options := campaignMaterializeOptions{
+		ClusterOut: "cluster.json", CRSOut: "cluster.crs", Topology: "T2-three-region",
+		MempoolURL: "http://mempool-il:8080", HTTPPort: 8000, P2PPort: 9000,
+		HTTPHostMode: "private-ip", P2PHostMode: "private-ip", StreamMode: streamModePersistentLanes,
+	}
+	cluster, _, remote, err := buildMaterializedCampaignConfigs(bundle, campaignTestInventory("three-region"), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.Limits.MaxCombineWorkers; got != 2 {
+		t.Fatalf("public config max combine workers = %d, want 2", got)
+	}
+	if got := remote.MaxCombineWorkers; got != 2 {
+		t.Fatalf("remote config max combine workers = %d, want 2", got)
 	}
 }
 

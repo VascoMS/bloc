@@ -653,7 +653,7 @@ make_fixture() {
   printf 'corpus\n' >"$root/bundle/encrypted-corpus.json"
   printf 'secret\n' >"$root/bundle/secrets/operator-0.json"
   chmod 600 "$root/bundle/secrets/operator-0.json"
-  printf '{"version":"bloc-campaign-bundle-v1","source_sha":"","bloc_image":"","mempool_image":"","n":4,"threshold":3,"bmax":128,"public_config_id":"public","encrypted_corpus_id":"corpus","file_sha256":{}}\n' >"$root/bundle/bundle-manifest.json"
+  printf '{"version":"bloc-campaign-bundle-v1","source_sha":"","bloc_image":"","mempool_image":"","n":4,"threshold":3,"bmax":128,"max_combine_workers":1,"public_config_id":"public","encrypted_corpus_id":"corpus","file_sha256":{}}\n' >"$root/bundle/bundle-manifest.json"
 }
 
 install_fakes() {
@@ -672,6 +672,7 @@ install_fakes() {
   FINAL_BATCHES=8,32,128 FINAL_SEED=20260621 FINAL_DEADLINE=12s
   FINAL_ACS_TRACE_SCHEMA=""
   FINAL_STREAM_MODE=fresh
+  FINAL_MAX_COMBINE_WORKERS=1
   FINAL_FAIL_STAGE=""
 
   final_topology_prepare() { printf 'prepare\n' >>"$FINAL_EVENT_LOG"; }
@@ -690,9 +691,16 @@ install_fakes() {
   final_materialize_public() {
     printf 'materialize\n' >>"$FINAL_EVENT_LOG"
     mkdir -p "$1/generated-public"
-    printf 'cluster\n' >"$1/generated-public/cluster.json"
+    local materialized_workers="$FINAL_MAX_COMBINE_WORKERS"
+    if [[ "$FINAL_FAIL_STAGE" == worker-frozen ]]; then
+      jq '.max_combine_workers=1' "$1/frozen-inputs.json" >"$1/frozen-inputs.json.tmp"
+      mv "$1/frozen-inputs.json.tmp" "$1/frozen-inputs.json"
+    elif [[ "$FINAL_FAIL_STAGE" == worker-generated ]]; then
+      materialized_workers=1
+    fi
+    printf '{"limits":{"max_combine_workers":%s}}\n' "$materialized_workers" >"$1/generated-public/cluster.json"
     printf 'crs\n' >"$1/generated-public/cluster.crs"
-    printf 'remote\n' >"$1/generated-public/remote-eval.json"
+    printf '{"max_combine_workers":%s}\n' "$materialized_workers" >"$1/generated-public/remote-eval.json"
   }
   final_stage_hosts() { printf 'stage\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != checksum ]]; }
   final_pull_verify_images() { printf 'images\n' >>"$FINAL_EVENT_LOG"; [[ "$FINAL_FAIL_STAGE" != image ]]; }
@@ -724,9 +732,12 @@ run_case() {
   [[ "$nodes" -eq 7 ]] && threshold=5
   [[ "$nodes" -eq 10 ]] && threshold=7
   [[ "$batches" == 512 ]] && bmax=512
+  local combine_workers=1
+  [[ "$bmax" -eq 512 ]] && combine_workers=2
+  FINAL_MAX_COMBINE_WORKERS="$combine_workers"
   jq --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
-    --argjson n "$nodes" --argjson threshold "$threshold" --argjson bmax "$bmax" \
-    '.source_sha=$source | .bloc_image=$bloc | .mempool_image=$mempool | .n=$n | .threshold=$threshold | .bmax=$bmax' \
+    --argjson n "$nodes" --argjson threshold "$threshold" --argjson bmax "$bmax" --argjson workers "$combine_workers" \
+    '.source_sha=$source | .bloc_image=$bloc | .mempool_image=$mempool | .n=$n | .threshold=$threshold | .bmax=$bmax | .max_combine_workers=$workers' \
     "$FINAL_BUNDLE_ROOT/bundle-manifest.json" >"$FINAL_BUNDLE_ROOT/bundle-manifest.json.tmp"
   mv "$FINAL_BUNDLE_ROOT/bundle-manifest.json.tmp" "$FINAL_BUNDLE_ROOT/bundle-manifest.json"
   status=0
@@ -768,6 +779,18 @@ if task6_selected mandatory-validation; then
     echo "extension lifecycle did not freeze its exact bundle shape and source provenance" >&2
     exit 1
   }
+
+  extension_512_root="$(run_case extension-512-pilot extension-pilot off '' 0 '' persistent-lanes 512 4)"
+  jq -e '.max_combine_workers == 2' "$extension_512_root/artifacts/manifest.json" >/dev/null || {
+    echo "B512 lifecycle manifest omitted combine workers" >&2
+    exit 1
+  }
+  jq -e '.max_combine_workers == 2' "$extension_512_root/artifacts/frozen-inputs.json" >/dev/null || {
+    echo "B512 lifecycle frozen inputs omitted combine workers" >&2
+    exit 1
+  }
+  run_case extension-512-frozen-drift extension-pilot off worker-frozen 1 '' persistent-lanes 512 4 >/dev/null
+  run_case extension-512-generated-drift extension-pilot off worker-generated 1 '' persistent-lanes 512 4 >/dev/null
 
   resource_root="$(run_case resource resource on '' 0)"
   grep -Fq finalize-resources "$resource_root/events"

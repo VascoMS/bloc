@@ -389,6 +389,7 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         mempool = "123456789012.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:" + "b" * 64
         threshold = {4: 3, 7: 5, 10: 7}[nodes]
         bmax = 512 if tuple(batches) == (512,) else 128
+        combine_workers = 2 if bmax == 512 else 1
         artifacts.write_json(root / "manifest.json", {
             "schema_version": "bloc-final-campaign-phase-v1", "status": "complete",
             "topology": topology, "phase": phase, "node_count": nodes,
@@ -401,11 +402,13 @@ class FinalCampaignArtifactTests(unittest.TestCase):
             "stream_mode": stream_mode,
             "execution_mode": "persistent", "echo_mode": "broadcast",
             "selective_echo_enabled": False,
+            "max_combine_workers": combine_workers,
         })
         artifacts.write_json(root / "frozen-inputs.json", {
             "version": "bloc-campaign-bundle-v1", "source_sha": source,
             "bloc_image": bloc, "mempool_image": mempool,
             "n": nodes, "threshold": threshold, "bmax": bmax,
+            "max_combine_workers": combine_workers,
             "public_config_id": "public", "encrypted_corpus_id": "corpus",
             "file_sha256": {
                 "cluster-identity.json": "d" * 64,
@@ -413,12 +416,21 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                 "encrypted-corpus.json": "f" * 64,
             },
         })
+        artifacts.write_json(root / "bundle-manifest.json", {
+            "version": "bloc-campaign-bundle-v1", "source_sha": source,
+            "bloc_image": bloc, "mempool_image": mempool, "n": nodes,
+            "threshold": threshold, "bmax": bmax,
+            "max_combine_workers": combine_workers,
+        })
         generated = root / "generated-public"
         generated.mkdir()
         artifacts.write_json(generated / "cluster.json", {
             "network": {"mode": "libp2p", "stream_mode": stream_mode},
+            "limits": {"max_combine_workers": combine_workers},
         })
-        artifacts.write_json(generated / "remote-eval.json", {"stream_mode": stream_mode})
+        artifacts.write_json(generated / "remote-eval.json", {
+            "stream_mode": stream_mode, "max_combine_workers": combine_workers,
+        })
         regions = ["us-east-1", "eu-west-1", "eu-central-1"]
         artifacts.write_json(root / "inventory.json", {"nodes": [
             {"id": i, "region": regions[i % 3] if topology == "three-region" else "us-east-1",
@@ -430,8 +442,11 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         scenario.mkdir(parents=True)
         fields = ["run_id", "phase", "measurement_block", "block_iteration", "schedule_seed",
                   "planned_scenario_runs", "slot", "nodes", "batch_size", "stream_mode",
+                  "max_combine_workers", "effective_combine_workers", "combine_us",
                   "success", "consistent", "outcome", "timed_out", "selected_ciphertexts"]
-        artifacts.write_json(scenario / "manifest.json", {"stream_mode": stream_mode})
+        artifacts.write_json(scenario / "manifest.json", {
+            "stream_mode": stream_mode, "max_combine_workers": combine_workers,
+        })
         with (scenario / "run_measurements.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
             for batch in batches:
@@ -442,6 +457,8 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                                          "schedule_seed": "20260621", "planned_scenario_runs": str(attempts),
                                          "slot": str((block - 1) * (attempts // blocks) + index),
                                          "nodes": str(nodes), "batch_size": str(batch), "stream_mode": stream_mode, "success": "true",
+                                         "max_combine_workers": str(combine_workers),
+                                         "effective_combine_workers": str(combine_workers), "combine_us": "1",
                                          "consistent": "true", "outcome": "completed", "timed_out": "false",
                                          "selected_ciphertexts": str(batch)})
         node_rows = []
@@ -451,6 +468,8 @@ class FinalCampaignArtifactTests(unittest.TestCase):
                     "run_id": run["run_id"], "phase": run["phase"],
                     "measurement_block": run["measurement_block"], "node_id": str(node_id),
                     "acs_trace_schema": "", "stream_mode": stream_mode,
+                    "max_combine_workers": str(combine_workers),
+                    "effective_combine_workers": str(combine_workers), "combine_us": "1",
                 })
         artifacts.write_csv(scenario / "node_measurements.csv", node_rows, list(node_rows[0]))
         return root
@@ -680,6 +699,31 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "frozen BMax"):
             artifacts.assert_final_phase(root, "same-az", "extension-full")
 
+    def test_final_batch512_rejects_combine_worker_provenance_drift(self):
+        mutations = {
+            "final manifest combine workers": lambda root: self._change_json(root / "manifest.json", "max_combine_workers", 1),
+            "frozen combine workers": lambda root: self._change_json(root / "frozen-inputs.json", "max_combine_workers", 1),
+            "bundle combine workers": lambda root: self._change_json(root / "bundle-manifest.json", "max_combine_workers", 1),
+            "cluster combine workers": lambda root: self._change_nested_json(root / "generated-public/cluster.json", ("limits", "max_combine_workers"), 1),
+            "remote combine workers": lambda root: self._change_json(root / "generated-public/remote-eval.json", "max_combine_workers", 1),
+            "scenario combine workers": lambda root: self._change_json(next(root.glob("scenarios/**/manifest.json")), "max_combine_workers", 1),
+            "run combine workers": lambda root: self._change_csv_field(next(root.glob("scenarios/**/run_measurements.csv")), "max_combine_workers", "1"),
+            "run effective combine workers": lambda root: self._change_csv_field(next(root.glob("scenarios/**/run_measurements.csv")), "effective_combine_workers", "1"),
+            "node combine workers": lambda root: self._change_csv_field(next(root.glob("scenarios/**/node_measurements.csv")), "max_combine_workers", "1"),
+            "node effective combine workers": lambda root: self._change_csv_field(next(root.glob("scenarios/**/node_measurements.csv")), "effective_combine_workers", "1"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                root = self.make_phase("extension-pilot", attempts=30, blocks_override=3,
+                                       warmups_override=5, stream_mode="persistent-lanes",
+                                       topology="three-region", nodes=4, batches=(512,))
+                try:
+                    mutate(root)
+                    with self.assertRaisesRegex(ValueError, "combine worker"):
+                        artifacts.assert_final_phase(root, "three-region", "extension-pilot")
+                finally:
+                    shutil.rmtree(root)
+
     def test_final_extension_rejects_non_candidate_stream_mode(self):
         root = self.make_phase("extension-pilot", attempts=30, blocks_override=3,
                                warmups_override=5, stream_mode="fresh",
@@ -884,6 +928,21 @@ class FinalCampaignArtifactTests(unittest.TestCase):
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload[key] = value
         artifacts.write_json(path, payload)
+
+    @staticmethod
+    def _change_nested_json(path, keys, value):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        target = payload
+        for key in keys[:-1]:
+            target = target[key]
+        target[keys[-1]] = value
+        artifacts.write_json(path, payload)
+
+    @staticmethod
+    def _change_csv_field(path, field, value):
+        rows = artifacts.read_csv(path)
+        rows[0][field] = value
+        artifacts.write_csv(path, rows, list(rows[0]))
 
     @staticmethod
     def _remove_json_key(path, key):

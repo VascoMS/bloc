@@ -15,7 +15,8 @@ final_run_campaign_lifecycle() {
   [[ ! -e "$artifact_root" ]] || { echo "artifact root already exists: $artifact_root" >&2; return 1; }
   mkdir -p "$artifact_root/generated-public" "$artifact_root/scenarios" "$artifact_root/logs"
   : >"$artifact_root/lifecycle.jsonl"
-  jq '{version,source_sha,bloc_image,mempool_image,n,threshold,bmax,public_config_id,encrypted_corpus_id,file_sha256}' \
+  cp "$FINAL_BUNDLE_ROOT/bundle-manifest.json" "$artifact_root/bundle-manifest.json"
+  jq '{version,source_sha,bloc_image,mempool_image,n,threshold,bmax,max_combine_workers,public_config_id,encrypted_corpus_id,file_sha256}' \
     "$FINAL_BUNDLE_ROOT/bundle-manifest.json" >"$artifact_root/frozen-inputs.json"
 
   if final_topology_prepare "$artifact_root" "$FINAL_NODE_COUNT"; then
@@ -28,7 +29,7 @@ final_run_campaign_lifecycle() {
   elif [[ "$status" -eq 0 ]]; then
     final_lifecycle_event "$artifact_root" topology-apply failed; status=1
   fi
-  if [[ "$status" -eq 0 ]] && final_materialize_public "$artifact_root"; then
+  if [[ "$status" -eq 0 ]] && final_materialize_public "$artifact_root" && final_validate_materialized_worker_provenance "$artifact_root"; then
     final_lifecycle_event "$artifact_root" materialize ok
   elif [[ "$status" -eq 0 ]]; then
     final_lifecycle_event "$artifact_root" materialize failed; status=1
@@ -85,14 +86,14 @@ final_run_campaign_lifecycle() {
     --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
     --arg deadline "$FINAL_DEADLINE" --arg sampler "$FINAL_SAMPLER" --argjson warmups "$FINAL_WARMUPS" \
     --argjson repetitions "$FINAL_REPETITIONS" --argjson blocks "$FINAL_BLOCKS" --argjson seed "$FINAL_SEED" \
-    --arg batches "$FINAL_BATCHES" \
+    --arg batches "$FINAL_BATCHES" --argjson max_combine_workers "$FINAL_MAX_COMBINE_WORKERS" \
     --arg acs_trace_schema "${FINAL_ACS_TRACE_SCHEMA:-}" --arg stream_mode "${FINAL_STREAM_MODE:-fresh}" \
     --slurpfile bundle "$FINAL_BUNDLE_ROOT/bundle-manifest.json" \
     '{schema_version:"bloc-final-campaign-phase-v1",status:$status,phase:$phase,topology:$topology,node_count:$n,
       source_sha:$source,bloc_image:$bloc,mempool_image:$mempool,bundle_version:$bundle[0].version,
       public_config_id:$bundle[0].public_config_id,encrypted_corpus_id:$bundle[0].encrypted_corpus_id,
       batches:($batches | split(",") | map(tonumber)),seed:$seed,deadline:$deadline,warmups:$warmups,repetitions:$repetitions,blocks:$blocks,
-      sampler:$sampler,acs_trace_schema:$acs_trace_schema,stream_mode:$stream_mode,
+      sampler:$sampler,acs_trace_schema:$acs_trace_schema,stream_mode:$stream_mode,max_combine_workers:$max_combine_workers,
       execution_mode:"persistent",echo_mode:"broadcast",selective_echo_enabled:false}' \
     >"$artifact_root/manifest.json"
   if [[ "$status" -eq 0 ]]; then
@@ -108,6 +109,14 @@ final_run_campaign_lifecycle() {
     fi
   fi
   return "$status"
+}
+
+final_validate_materialized_worker_provenance() {
+  local artifact_root="$1" workers="${FINAL_MAX_COMBINE_WORKERS:?validated combine worker count is required}"
+  jq -e --argjson workers "$workers" 'if $workers == 1 then (.max_combine_workers // 1) == 1 else .max_combine_workers == $workers end' "$FINAL_BUNDLE_ROOT/bundle-manifest.json" >/dev/null &&
+    jq -e --argjson workers "$workers" 'if $workers == 1 then (.max_combine_workers // 1) == 1 else .max_combine_workers == $workers end' "$artifact_root/frozen-inputs.json" >/dev/null &&
+    jq -e --argjson workers "$workers" '.limits.max_combine_workers == $workers' "$artifact_root/generated-public/cluster.json" >/dev/null &&
+    jq -e --argjson workers "$workers" '.max_combine_workers == $workers' "$artifact_root/generated-public/remote-eval.json" >/dev/null
 }
 
 final_ssh() {

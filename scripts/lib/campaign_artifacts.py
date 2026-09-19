@@ -978,6 +978,37 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     expected_bmax = 512 if batches == [512] else 128
     if int(frozen.get("bmax", 0)) != expected_bmax:
         raise ValueError(f"{frozen_path}: frozen BMax mismatch")
+    expected_combine_workers = 2 if expected_bmax == 512 else 1
+
+    def require_combine_workers(payload, path, *, nested=False):
+        value = payload.get("limits", {}).get("max_combine_workers") if nested else payload.get("max_combine_workers")
+        if value is None:
+            if expected_combine_workers == 2:
+                raise ValueError(f"{path}: combine worker provenance is missing")
+            value = 1
+        if int(value) != expected_combine_workers:
+            raise ValueError(f"{path}: combine worker provenance mismatch")
+
+    def csv_combine_workers(row, field, context):
+        value = row.get(field)
+        if value in (None, ""):
+            if expected_combine_workers == 2:
+                raise ValueError(f"{context}: {field} provenance is missing")
+            return 1
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{context}: {field} provenance is invalid") from exc
+
+    require_combine_workers(manifest, manifest_path)
+    require_combine_workers(frozen, frozen_path)
+    bundle_path = phase_root / "bundle-manifest.json"
+    if bundle_path.exists():
+        require_combine_workers(json.loads(bundle_path.read_text(encoding="utf-8-sig")), bundle_path)
+    elif expected_combine_workers == 2:
+        raise ValueError(f"{bundle_path}: combine worker provenance is missing")
+    require_combine_workers(cluster, cluster_path, nested=True)
+    require_combine_workers(remote, remote_path)
     file_hashes = frozen.get("file_sha256")
     required_hashes = {"cluster-identity.json", "cluster.crs", "encrypted-corpus.json"}
     if not isinstance(file_hashes, dict) or set(file_hashes) != required_hashes or any(
@@ -1009,6 +1040,13 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
     if not run_paths:
         raise ValueError(f"{phase_root}: run measurements are missing")
     rows = [row for path in run_paths for row in read_csv(path) if row.get("phase") == "measured"]
+    node_paths = list((phase_root / "scenarios").glob("**/node_measurements.csv"))
+    node_rows = [row for path in node_paths for row in read_csv(path) if row.get("phase") == "measured"]
+    for path in run_paths:
+        scenario_manifest_path = path.parent / "manifest.json"
+        scenario_manifest = json.loads(scenario_manifest_path.read_text(encoding="utf-8-sig"))
+        require_combine_workers(scenario_manifest, scenario_manifest_path)
+    success_by_run = {}
     for batch in batches:
         selected = [row for row in rows if int(row.get("batch_size", 0)) == batch]
         attempt_ids = {(row.get("measurement_block"), row.get("run_id")) for row in selected}
@@ -1037,12 +1075,32 @@ def assert_final_phase(phase_root: Path, expected_topology: str, expected_phase:
                 raise ValueError(f"batch {batch}: block iteration schedule is invalid")
         for row in selected:
             success = _true(row.get("success", "")) and _true(row.get("consistent", ""))
+            success_by_run[row.get("run_id", "")] = success
+            if csv_combine_workers(row, "max_combine_workers", f"batch {batch}") != expected_combine_workers:
+                raise ValueError(f"batch {batch}: run combine worker provenance mismatch")
+            effective_workers = csv_combine_workers(row, "effective_combine_workers", f"batch {batch}")
+            if effective_workers not in {0, expected_combine_workers}:
+                raise ValueError(f"batch {batch}: effective combine worker provenance mismatch")
+            if success and effective_workers != expected_combine_workers:
+                raise ValueError(f"batch {batch}: successful run combine worker count mismatch")
+            if effective_workers == 0 and int(row.get("combine_us", 0)) != 0:
+                raise ValueError(f"batch {batch}: zero effective combine workers after combine work")
             if success and int(row.get("selected_ciphertexts", 0)) != batch:
                 raise ValueError(f"batch {batch}: successful row selected the wrong transaction count")
             if not success and row.get("outcome") not in {"failed", "timed_out"}:
                 raise ValueError(f"batch {batch}: failed row was not retained with a classification")
             if row.get("outcome") == "timed_out" and not _true(row.get("timed_out", "")):
                 raise ValueError(f"batch {batch}: timeout classification is inconsistent")
+    for row in node_rows:
+        if csv_combine_workers(row, "max_combine_workers", "node") != expected_combine_workers:
+            raise ValueError("node combine worker provenance mismatch")
+        effective_workers = csv_combine_workers(row, "effective_combine_workers", "node")
+        if effective_workers not in {0, expected_combine_workers}:
+            raise ValueError("effective node combine worker provenance mismatch")
+        if success_by_run.get(row.get("run_id", ""), False) and effective_workers != expected_combine_workers:
+            raise ValueError("successful node combine worker count mismatch")
+        if effective_workers == 0 and int(row.get("combine_us", 0)) != 0:
+            raise ValueError("zero effective node combine workers after combine work")
     for path in run_paths:
         assert_acs_trace_artifacts(path.parent, nodes, trace_schema, stream_mode)
     if expected_phase == "resource":

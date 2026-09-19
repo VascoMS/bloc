@@ -50,18 +50,24 @@ if final_validate_ecr_image "${bloc_image/us-east-1/eu-west-1}"; then
 fi
 mkdir -p "$fixture/n4" "$fixture/n7" "$fixture/n10" \
   "$fixture/n4-b512" "$fixture/n7-b512" "$fixture/n10-b512" "$fixture/fake-bin"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":4,"threshold":3,"bmax":128}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":4,"threshold":3,"bmax":128,"max_combine_workers":1}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n4/bundle-manifest.json"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":7,"threshold":5,"bmax":128}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":7,"threshold":5,"bmax":128,"max_combine_workers":1}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n7/bundle-manifest.json"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":10,"threshold":7,"bmax":128}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":10,"threshold":7,"bmax":128,"max_combine_workers":1}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n10/bundle-manifest.json"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":4,"threshold":3,"bmax":512}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":4,"threshold":3,"bmax":512,"max_combine_workers":2}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n4-b512/bundle-manifest.json"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":7,"threshold":5,"bmax":512}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":7,"threshold":5,"bmax":512,"max_combine_workers":2}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n7-b512/bundle-manifest.json"
-printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":10,"threshold":7,"bmax":512}\n' \
+printf '{"version":"bloc-campaign-bundle-v1","source_sha":"%s","bloc_image":"%s","mempool_image":"%s","n":10,"threshold":7,"bmax":512,"max_combine_workers":2}\n' \
   "$source_sha" "$bloc_image" "$mempool_image" >"$fixture/n10-b512/bundle-manifest.json"
+for root in n4 n7 n10; do
+  printf '%s\n' '{"limits":{"max_combine_workers":1}}' >"$fixture/$root/cluster-identity.json"
+done
+for root in n4-b512 n7-b512 n10-b512; do
+  printf '%s\n' '{"limits":{"max_combine_workers":2}}' >"$fixture/$root/cluster-identity.json"
+done
 
 call_log="$fixture/calls.log"
 : >"$call_log"
@@ -136,17 +142,18 @@ expect_success "$runner" --topology same-az --phase extension-pilot --batch-size
   --stream-mode persistent-lanes --validate-only
 grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=8 seed=20260621 deadline=12s' "$fixture/stdout"
 expect_success "$runner" --topology three-region --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4-b512" --node-count 4 "${common_args[@]}" \
-  --stream-mode persistent-lanes --validate-only
+  --stream-mode persistent-lanes --max-combine-workers 2 --validate-only
 grep -Fq 'warmups=5 repetitions=30 blocks=3 sampler=off batches=512 seed=20260621 deadline=12s' "$fixture/stdout"
 grep -Fq 'bmax=512' "$fixture/stdout" || {
   echo "extension contract did not expose the validated BMax to the live lifecycle" >&2
   exit 1
 }
+grep -Fq 'max_combine_workers=2' "$fixture/stdout"
 expect_success "$runner" --topology same-az --phase extension-full --batch-size 128 --bundle-root "$fixture/n10" --node-count 10 "${common_args[@]}" \
   --stream-mode persistent-lanes --validate-only
 grep -Fq 'warmups=10 repetitions=1000 blocks=10 sampler=off batches=128 seed=20260621 deadline=12s' "$fixture/stdout"
 expect_success "$runner" --topology three-region --phase extension-boundary --batch-size 512 --bundle-root "$fixture/n10-b512" --node-count 10 "${common_args[@]}" \
-  --stream-mode persistent-lanes --validate-only
+  --stream-mode persistent-lanes --max-combine-workers 2 --validate-only
 grep -Fq 'warmups=10 repetitions=100 blocks=10 sampler=off batches=512 seed=20260621 deadline=12s' "$fixture/stdout"
 
 expect_success "$same_wrapper" --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --validate-only
@@ -170,6 +177,11 @@ grep -Fq 'extension phases require trace-off persistent-lanes' "$fixture/stderr"
 expect_failure "$runner" --topology same-az --phase extension-pilot --batch-size 128 --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --validate-only
 expect_failure "$runner" --topology same-az --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --validate-only
 expect_failure "$runner" --topology same-az --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4-b512" --node-count 10 "${common_args[@]}" --stream-mode persistent-lanes --validate-only
+expect_failure "$runner" --topology three-region --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4-b512" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --max-combine-workers 1 --validate-only
+cp "$fixture/n4-b512/cluster-identity.json" "$fixture/n4-b512/cluster-identity.json.saved"
+printf '%s\n' '{"limits":{"max_combine_workers":1}}' >"$fixture/n4-b512/cluster-identity.json"
+expect_failure "$runner" --topology three-region --phase extension-pilot --batch-size 512 --bundle-root "$fixture/n4-b512" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --max-combine-workers 2 --validate-only
+mv "$fixture/n4-b512/cluster-identity.json.saved" "$fixture/n4-b512/cluster-identity.json"
 expect_failure "$runner" --topology same-az --phase extension-full --batch-size 32 --bundle-root "$fixture/n10" --node-count 10 "${common_args[@]}" --stream-mode persistent-lanes --acs-trace-schema bloc-acs-trace/v3 --validate-only
 expect_failure "$runner" --topology same-az --phase latency --batch-size 8 --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --stream-mode persistent-lanes --validate-only
 expect_failure "$runner" --topology same-az --phase latency --bundle-root "$fixture/n4" --node-count 4 "${common_args[@]}" --warmups 1 --validate-only

@@ -8,6 +8,7 @@ Usage: run-final-campaign.sh --topology same-az|three-region
   --bloc-image ECR@DIGEST --mempool-image ECR@DIGEST
   --experiment-id ID --admin-cidr CIDR --aws-profile PROFILE
   [--batch-size 8|32|128|512]
+  [--max-combine-workers 1..64]
   [--stream-mode fresh|persistent|persistent-lanes]
   [--acs-trace-schema bloc-acs-trace/v1|bloc-acs-trace/v2|bloc-acs-trace/v3]
   [--validate-only | --execute-live]
@@ -28,7 +29,7 @@ final_parse_campaign_args() {
   FINAL_SOURCE_SHA="" FINAL_BLOC_IMAGE="" FINAL_MEMPOOL_IMAGE=""
   FINAL_EXPERIMENT_ID="" FINAL_ADMIN_CIDR="" FINAL_AWS_PROFILE=""
   FINAL_ACS_TRACE_SCHEMA="" FINAL_STREAM_MODE=fresh FINAL_BATCH_SIZE=""
-  FINAL_BMAX=""
+  FINAL_BMAX="" FINAL_MAX_COMBINE_WORKERS=1
   FINAL_VALIDATE_ONLY=0 FINAL_EXECUTE_LIVE=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -43,6 +44,7 @@ final_parse_campaign_args() {
       --admin-cidr) final_take_value "$1" "${2-}" || return; FINAL_ADMIN_CIDR="$2"; shift 2 ;;
       --aws-profile) final_take_value "$1" "${2-}" || return; FINAL_AWS_PROFILE="$2"; shift 2 ;;
       --batch-size) final_take_value "$1" "${2-}" || return; FINAL_BATCH_SIZE="$2"; shift 2 ;;
+      --max-combine-workers) final_take_value "$1" "${2-}" || return; FINAL_MAX_COMBINE_WORKERS="$2"; shift 2 ;;
       --stream-mode) final_take_value "$1" "${2-}" || return; FINAL_STREAM_MODE="$2"; shift 2 ;;
       --acs-trace-schema) final_take_value "$1" "${2-}" || return; FINAL_ACS_TRACE_SCHEMA="$2"; shift 2 ;;
       --validate-only) FINAL_VALIDATE_ONLY=1; shift ;;
@@ -58,7 +60,8 @@ final_validate_ecr_image() {
 }
 
 final_validate_campaign_contract() {
-  local repo_root="$1" manifest="$FINAL_BUNDLE_ROOT/bundle-manifest.json" expected_bmax=128 expected_threshold=""
+  local repo_root="$1" manifest="$FINAL_BUNDLE_ROOT/bundle-manifest.json" identity="$FINAL_BUNDLE_ROOT/cluster-identity.json"
+  local expected_bmax=128 expected_threshold="" expected_workers=1
   [[ "$FINAL_TOPOLOGY" == same-az || "$FINAL_TOPOLOGY" == three-region ]] || final_die "topology must be same-az or three-region" || return
   [[ "$FINAL_NODE_COUNT" == 4 || "$FINAL_NODE_COUNT" == 7 || "$FINAL_NODE_COUNT" == 10 ]] || final_die "node count must be 4, 7, or 10" || return
   [[ "$FINAL_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || final_die "source SHA must be 40 lowercase hexadecimal characters" || return
@@ -69,6 +72,7 @@ final_validate_campaign_contract() {
   [[ "$FINAL_ADMIN_CIDR" == */* ]] || final_die "admin CIDR is required" || return
   [[ -n "$FINAL_AWS_PROFILE" ]] || final_die "AWS profile is required" || return
   [[ "$FINAL_STREAM_MODE" == fresh || "$FINAL_STREAM_MODE" == persistent || "$FINAL_STREAM_MODE" == persistent-lanes ]] || final_die "stream mode must be fresh, persistent, or persistent-lanes" || return
+  [[ "$FINAL_MAX_COMBINE_WORKERS" =~ ^[0-9]+$ && "$FINAL_MAX_COMBINE_WORKERS" -ge 1 && "$FINAL_MAX_COMBINE_WORKERS" -le 64 ]] || final_die "max combine workers must be in [1,64]" || return
   [[ -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v1 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "unsupported ACS trace schema" || return
   [[ "$FINAL_STREAM_MODE" != persistent || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v2 || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "persistent stream mode requires ACS trace schema bloc-acs-trace/v2 or bloc-acs-trace/v3" || return
   [[ "$FINAL_STREAM_MODE" != persistent-lanes || -z "$FINAL_ACS_TRACE_SCHEMA" || "$FINAL_ACS_TRACE_SCHEMA" == bloc-acs-trace/v3 ]] || final_die "persistent-lanes stream mode requires trace-off operation or ACS trace schema bloc-acs-trace/v3" || return
@@ -104,7 +108,7 @@ final_validate_campaign_contract() {
       [[ "$FINAL_STREAM_MODE" == persistent-lanes && -z "$FINAL_ACS_TRACE_SCHEMA" ]] ||
         final_die "extension phases require trace-off persistent-lanes" || return
       FINAL_BATCHES="$FINAL_BATCH_SIZE" FINAL_SAMPLER=off
-      [[ "$FINAL_BATCH_SIZE" != 512 ]] || expected_bmax=512
+      if [[ "$FINAL_BATCH_SIZE" == 512 ]]; then expected_bmax=512; expected_workers=2; fi
       if [[ "$FINAL_PHASE" == extension-pilot ]]; then
         FINAL_WARMUPS=5 FINAL_REPETITIONS=30 FINAL_BLOCKS=3
       elif [[ "$FINAL_PHASE" == extension-full ]]; then
@@ -121,13 +125,21 @@ final_validate_campaign_contract() {
     10) expected_threshold=7 ;;
   esac
   [[ -f "$manifest" ]] || final_die "bundle manifest is missing" || return
+  [[ -f "$identity" ]] || final_die "bundle identity is missing" || return
+  [[ "$FINAL_MAX_COMBINE_WORKERS" -eq "$expected_workers" ]] || final_die "requested combine workers do not match campaign cell" || return
   jq -e --arg source "$FINAL_SOURCE_SHA" --arg bloc "$FINAL_BLOC_IMAGE" --arg mempool "$FINAL_MEMPOOL_IMAGE" \
-    --argjson n "$FINAL_NODE_COUNT" --argjson threshold "$expected_threshold" --argjson bmax "$expected_bmax" '
+    --argjson n "$FINAL_NODE_COUNT" --argjson threshold "$expected_threshold" --argjson bmax "$expected_bmax" --argjson workers "$expected_workers" '
     .version == "bloc-campaign-bundle-v1" and .source_sha == $source and
     .bloc_image == $bloc and .mempool_image == $mempool and .n == $n and
-    .threshold == $threshold and .bmax == $bmax
+    .threshold == $threshold and .bmax == $bmax and
+    (if $workers == 1 then (.max_combine_workers // 1) == 1 else .max_combine_workers == $workers end)
   ' "$manifest" >/dev/null || final_die "bundle identities do not match invocation" || return
+  jq -e --argjson workers "$expected_workers" '
+    if $workers == 1 then (.limits.max_combine_workers // 1) == 1
+    else .limits.max_combine_workers == $workers end
+  ' "$identity" >/dev/null || final_die "bundle identity combine workers do not match manifest" || return
   FINAL_BMAX="$expected_bmax"
+  FINAL_MAX_COMBINE_WORKERS="$expected_workers"
   if [[ -n "$FINAL_ACS_TRACE_SCHEMA" ]]; then
     if [[ "$FINAL_PHASE" == latency ]]; then
       FINAL_WARMUPS=5 FINAL_REPETITIONS=30 FINAL_BLOCKS=3 FINAL_SAMPLER=off
@@ -144,4 +156,5 @@ final_print_campaign_contract() {
   printf 'acs_trace_schema=%s\n' "${FINAL_ACS_TRACE_SCHEMA:-disabled}"
   printf 'stream_mode=%s\n' "$FINAL_STREAM_MODE"
   printf 'bmax=%s\n' "$FINAL_BMAX"
+  printf 'max_combine_workers=%s\n' "$FINAL_MAX_COMBINE_WORKERS"
 }

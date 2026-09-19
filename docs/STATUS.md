@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-17`
+- Last reviewed: `2026-09-19`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
@@ -31,6 +31,12 @@ now selects trace-off `persistent-lanes` with broadcast ECHO as the active M5
 development candidate for the complete three-region n4/n7/n10 and
 batch-8/32/128/512 matrix; this is an evaluation selection, not an accepted
 thesis performance claim.
+Issue #33 now implements bounded parallel Opt-2 sub-batch combine with two
+workers for new BMax-512 evidence while preserving serial subset enumeration,
+deterministic failure/attempt semantics, and the existing stream/RBC/ACS
+candidate. Its local ten-sample isolated benchmark and n4/n7/n10 B=512 smokes
+pass as validation-only evidence; image publication and AWS execution remain
+gated on the complete pre-publication review.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -208,9 +214,11 @@ release-candidate configuration contract are defined in
   qualify for a continuation. Because the recorded execution order required
   accepted n4 evidence before n7/batch-512 and accepted n7 evidence before
   n10/batch-512, neither larger batch-512 pilot was launched. Successful
-  earlier preliminary cells were not rerun. Changing that ordered gate now
-  requires an explicit campaign decision rather than an inferred extension of
-  the existing authorization.
+  earlier preliminary cells were not rerun. Decision 0031 and issue #33 now
+  explicitly supersede that ordered gate only for newly frozen two-worker
+  BMax-512 evidence: n4, n7, and n10 are independent 30-observation cells after
+  the pre-publication review, while every historical row keeps its source and
+  worker label.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -709,18 +717,19 @@ release-candidate configuration contract are defined in
    n4/batch-512 negative performance boundary. Issue #33 now owns the approved
    bounded parallel-combine development campaign; do not reinterpret the old
    artifact as evidence for that new architecture.
-2. Implement and locally validate deterministic bounded parallel Opt-2
-   sub-batch combine with two workers on the existing two-vCPU operator shape.
-   Keep `persistent-lanes`, broadcast ECHO, trace-off execution, and
-   selective/hash-only ECHO disabled.
+2. Execute issue #33's complete pre-publication gate: both affected-module
+   normal/race suites, repeated focused concurrency tests, campaign contracts,
+   branch hygiene, and whole-branch code review. The implementation,
+   ten-sample B=512 benchmark, three local committee smokes, provenance gates,
+   and both Terraform validations are complete locally.
 3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.
 4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
    continuations, but do not start a continuation until the stopped
    preliminary sweep and replacement n4/n7 primary-phase order are resolved.
-5. After issue #33 passes implementation, race, benchmark, provenance, review,
-   freeze, quota, cost, and validate-only gates, run only the new n4/n7/n10
+5. After issue #33 passes review, freeze, quota, cost, and exact validate-only
+   gates, run only the new n4/n7/n10
    batch-512 30-observation three-region pilots. Treat the three cells
    independently so one cell's boundary does not suppress the later committee
    pilots; do not start a 1,000-observation continuation without a new decision.

@@ -161,6 +161,31 @@ the checksum-manifest SHA-256 is
 The ordered campaign contract required accepted n4 evidence before n7/b512 and
 accepted n7 evidence before n10/b512; neither larger batch-512 pilot was run.
 
+Issue #33 preserves that serial n4 artifact as negative performance evidence
+and evaluates a new bounded-parallel-combine architecture without relabeling or
+pooling the old rows. The development candidate keeps trace-off
+`persistent-lanes`, broadcast ECHO, and disabled selective/hash-only ECHO, and
+sets `max_combine_workers=2` only in newly frozen BMax-512 bundles. Sub-batches
+may execute concurrently, but threshold-subset enumeration within each
+sub-batch remains serial; lowest-failure and committed-attempt semantics must
+match the one-worker path.
+
+The accepted local pre-publication evidence is validation-only:
+
+- the isolated B=512 benchmark retained ten samples each for workers one, two,
+  and the `GOMAXPROCS=2` cap; local means were `4.044/2.148/2.147 s`, a 46.9%
+  two-worker wall-clock reduction, with fixture construction excluded; and
+- one n4/t3, n7/t5, and n10/t7 `eval-local` B=512 smoke each completed
+  successfully and consistently with batch size 512 and configured/effective
+  worker counts two on every node.
+
+These timings do not support an AWS latency claim. After the complete normal,
+race, campaign-contract, Terraform, branch-hygiene, and code-review gate—and
+before any image publication—the live preliminary design is three independent
+three-region 30-observation cells at n=4/7/10 and batch 512. One cell's boundary
+does not suppress the later cells; none supports p99 or authorizes a 1,000-run
+continuation. Accepted BMax-128 pilots are not rerun.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,
@@ -209,7 +234,7 @@ campaign, even when their CSV columns remain compatible.
 |---|---|---|
 | `bloc-node` logic | `go test ./...` in `bloc-node` | Run `eval-local` or the demo for consensus, transport, or end-to-end changes |
 | `mempool-il` logic | `go test ./...` in `mempool-il` | Add a service or mock-placeholder smoke for API/source changes |
-| BTE library logic | `go test ./...` in `bte/btd-impl-main` | Run the full-path benchmark for performance/planning changes |
+| BTE library logic | `go test ./...` in `bte/btd-impl-main` | Run the isolated B=512 bounded-combine benchmark plus full-path benchmark for combine/planning changes |
 | `sbc/hbbft` logic | `go test ./...` in `sbc/hbbft` | Run the ACS safety campaign for safety/liveness changes |
 | Latency charts | `python -m pytest` in `latency-charts` | Render from representative accepted-schema artifacts |
 | Cross-module protocol behavior | Affected module tests plus `bloc-node` smoke | Use `eval-suite` for local preflight validation; collect new cloud evidence only when explicitly authorized |
@@ -655,7 +680,9 @@ Acceptance requires coverage proving:
 - `batch_plan_us`: deterministic sub-batch layout and `BatchID` construction.
 - `share_generation_us`: local share creation and encoding; overlaps collection.
 - `threshold_wait_us`: plan readiness through threshold-share availability.
-- `combine_us`: threshold availability through BTE combination.
+- `combine_us`: threshold availability through bounded BTE combination. It is
+  wall-clock time, not aggregate CPU time, and is not divided by configured or
+  effective worker count.
 - `materialization_us`: combination through parsed materialized output.
 - `commit_to_plaintext_us`: ACS decision through materialization.
 - `total_slot_us`: local slot start through materialization.
@@ -665,6 +692,12 @@ slowest correct node's `total_slot_us`, and that node supplies the stage
 breakdown. Stages can overlap and must not generally be summed. Warmups and
 failed/inconsistent runs remain in raw output but are excluded from accepted
 distributions. Thirty observations support Type-7 p50/p95, not p99.
+
+Worker provenance is independent of timing: run and node artifacts report the
+configured limit, while successful nonempty rows also report the effective
+count after capping by planned sub-batches and `GOMAXPROCS`. For new B=512 issue
+#33 evidence both values must be two. A failed row may report effective zero
+only when no combine work occurred.
 
 The five Merge + Plan substages must sum to `merge_plan_us` within 20
 microseconds. Harness `prepare_us`, `submission_us`, and cluster startup are not

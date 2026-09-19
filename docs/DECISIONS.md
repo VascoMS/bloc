@@ -722,3 +722,38 @@ Use this file for major architecture, protocol, and workflow decisions.
   `scripts/lib/final-campaign-contract.sh`,
   `scripts/lib/final-campaign-lifecycle.sh`, `deploy/ec2/README.md`,
   `docs/VALIDATION.md`, `docs/STATUS.md`
+
+## 0031. Bound parallel BTE combine by independent sub-batches
+
+- Date: 2026-09-19
+- Status: Accepted
+- Context: The corrected serial n4/B=512 pilot retained complete negative
+  performance evidence: successful observations spent roughly 7.45 seconds at
+  combine p50 while ACS stayed below one second. Its 46 Opt-2 sub-batches were
+  independent and normally needed one valid subset attempt each, and the
+  existing `t3.small` operator shape provides two vCPUs.
+- Options considered: retain serial combine and change instance class;
+  parallelize threshold-subset enumeration; launch one goroutine per sub-batch;
+  or use a fixed worker pool across sub-batches while preserving serial subset
+  search inside each job.
+- Decision: Add deterministic bounded sub-batch parallelism to
+  `CombineSharesBounded`. Configuration omission retains one worker; new issue
+  #33 BMax-512 bundles explicitly use two. Effective concurrency is capped by
+  configured workers, planned sub-batches, and `GOMAXPROCS`. Preflight remains
+  serial, results commit by sub-batch/original position, the lowest failure
+  wins, and caller-visible attempts match the serial prefix. Keep trace-off
+  `persistent-lanes`, broadcast ECHO, and disabled selective/hash-only ECHO.
+- Rationale: This targets the measured post-ACS bottleneck without changing
+  Opt-2 planning, cryptographic identities, subset order, ACS/RBC behavior, or
+  the deployment instance class. A bounded pool matches the available CPU
+  shape and avoids unbounded fan-out over 46 jobs.
+- Consequences: Configured/effective worker provenance is mandatory throughout
+  new B=512 artifacts. Historical one-worker evidence remains labeled and is
+  never pooled with worker-two rows. After complete local review and before
+  image publication, the preliminary AWS design is three independent 30-run
+  n4/n7/n10 B=512 cells; accepted BMax-128 pilots are not rerun and no cell
+  authorizes p99 or a full continuation.
+- Related files: `bte/btd-impl-main/be/cluster.go`,
+  `bte/btd-impl-main/be/combine_parallel.go`, `bloc-node/internal/app`,
+  `scripts/lib/final-campaign-contract.sh`, `docs/VALIDATION.md`,
+  `deploy/ec2/README.md`

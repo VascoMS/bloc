@@ -371,12 +371,21 @@ attacker-controlled metric labels.
 
 It snapshots the plan, materialization prefix, canonical candidate set, share
 version, and remaining per-sub-batch budgets. The BTE library sorts by operator
-ID and searches deterministic threshold subsets. Attempt statistics are
-charged back to slot state, so a new share can trigger one retry but cannot
+ID and searches deterministic threshold subsets serially within each sub-batch,
+while a bounded worker pool may process independent sub-batches concurrently.
+Worker completion order does not change original-position output, the lowest
+reported failing sub-batch, or the committed attempt vector. Attempt statistics
+are charged back to slot state, so a new share can trigger one retry but cannot
 reset work already consumed. A sub-batch that exhausts its configured budget
 permanently fails closed for that slot. Candidates are still not publicly
 verifiable; the bounded search is the prototype fallback rather than proof of
 production-grade share validity.
+
+`limits.max_combine_workers` is omitted-to-one compatible. New configuration
+must reject an explicit zero, negative value, or value above the repository
+bound. For a nonempty plan, runtime effective workers are capped by configured
+workers, planned sub-batches, and `GOMAXPROCS`. Slot metrics and evaluator
+artifacts retain both configured and effective values.
 
 ## Materialization And Results
 
@@ -484,6 +493,9 @@ arrays and an empty `BatchID`, marks metrics finalized, and transitions to
   for the same operator/sub-batch is rejected without replacing the first.
 - Subset recovery is deterministic and consumes a cumulative configured budget
   per sub-batch across retries; exhaustion prevents further combine work.
+- Combine worker concurrency is bounded, while subset enumeration within one
+  sub-batch remains serial; parallel completion preserves the serial failure
+  and committed-attempt contract.
 - Results preserve selected order even though cryptography executes by
   sub-batch.
 - Old-slot envelopes are discarded before metrics and state mutation.
@@ -515,6 +527,10 @@ and experiment acceptance semantics are in
 [VALIDATION.md](../../docs/VALIDATION.md). Generic evaluator workflow is in
 [WORKFLOWS.md](../../docs/WORKFLOWS.md); environment-specific deployment is in
 the matching `deploy/*/README.md`.
+
+`combine_us` remains wall-clock time from threshold availability through the
+bounded combine return. It is neither divided by effective workers nor
+reported as aggregate CPU time.
 
 ## Paper Correspondence And Deviations
 

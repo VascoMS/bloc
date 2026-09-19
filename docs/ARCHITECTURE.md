@@ -117,7 +117,7 @@ sequenceDiagram
     N->>B: MakeShare for each sub-batch
     N->>P: BatchID-scoped decryption shares
     P-->>N: BatchID-scoped decryption shares
-    N->>B: CombineShares at threshold
+    N->>B: CombineSharesBounded at threshold
     B-->>N: plaintexts in consensus order
     N->>N: parse Ethereum transactions and publish result
 ```
@@ -145,7 +145,7 @@ timed slot. The direct evaluator `/tx` path remains development scaffolding.
 | Merge and bounds | `bloc-node` inclusion package | Canonical accepted lists | Ordered unique ciphertext prefix, `MergedSetHash`, gas and count totals | None | Invalid candidates are skipped; malformed selected BTE data fails later decoding |
 | Ciphertext decode and plan | BTE | Ordered canonical ciphertext bytes | Immutable decoded batch, `BatchID`, `alpha`, and deterministic sub-batches | None | Any selected structural error fails the slot; empty selection completes successfully |
 | Share generation | BTE plus `bloc-node` | Secret share and one planned sub-batch | `DecryptionShare(operator, BatchID, subBatchID, point)` | Direct share envelopes | Proof/share generation error fails the slot; configured withholding sends nothing |
-| Threshold combine | BTE | Plan and candidate shares | Raw plaintext bytes restored to original positions | None | Requires threshold candidates per sub-batch and searches for a reconstructing subset |
+| Threshold combine | BTE | Plan and candidate shares | Raw plaintext bytes restored to original positions | None | Requires threshold candidates per sub-batch; a bounded worker pool processes independent sub-batches while each sub-batch searches candidate subsets serially and deterministically |
 | Materialization | `bloc-node` | Ordered raw bytes | `MaterializedTransactionSet` and `Result` | HTTP result/metrics only | Invalid Ethereum bytes are currently reported per item while the slot still completes |
 
 ## Canonical Identities And Ordering
@@ -192,7 +192,13 @@ only input order used to compute `BatchID` and original positions.
 - **Bounded resources:** shared cluster limits cap encoded proposals and every
   inbound/outbound libp2p envelope. Pre-plan share state is bounded by
   `N*BMax`, post-plan state by `N*alpha`, and invalid-share recovery has a
-  cumulative per-sub-batch attempt budget.
+  cumulative per-sub-batch attempt budget. Combine concurrency is bounded by
+  `min(configured workers, planned sub-batches, GOMAXPROCS)`; omission preserves
+  the historical one-worker path.
+- **Deterministic parallel combine:** workers may complete sub-batches in any
+  order, but plaintexts are committed by sub-batch/original position. The
+  lowest failing sub-batch wins, and only its prefix of attempt statistics is
+  visible, matching the serial contract.
 - **Ownership:** successful decoding fixes `BatchID` from accepted wire bytes;
   later caller mutation cannot change decoded ciphertexts or planning identity.
 - **Fail-closed selected data:** malformed accepted lists or selected BTE

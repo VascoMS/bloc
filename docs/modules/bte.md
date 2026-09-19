@@ -241,14 +241,11 @@ correct.
 
 ### Candidate-share validation
 
-`CombineShares` rejects a candidate whose `BatchID` differs, whose sub-batch ID
-is out of range, or whose application operator ID is duplicated within a
-sub-batch. It requires at least `t` candidates for every sub-batch and sorts
+`CombineSharesBounded` rejects a candidate whose `BatchID` differs, whose
+sub-batch or operator ID is out of range, whose application operator ID is
+duplicated within a sub-batch, or whose Kyber share index does not equal that
+operator ID. It requires at least `t` candidates for every sub-batch and sorts
 Kyber shares by their interpolation index.
-
-The library does not know cluster membership and does not bind application
-operator ID to the Kyber share index. That responsibility currently sits at the
-caller boundary and is incomplete in `bloc-node`.
 
 ### Threshold reconstruction
 
@@ -266,6 +263,21 @@ AEAD/plaintext-hash checks succeed. For each candidate subset:
 Results are returned in original consensus order. Trying combinations tolerates
 some malformed extra shares, but it can become combinatorially expensive when
 many unverified candidates are admitted.
+
+`CombineSharesBounded` completes full serial preflight before starting work,
+then submits one immutable job per planned sub-batch to a bounded worker pool.
+Subset enumeration inside each job remains serial and keeps its existing
+operator-order and attempt-budget semantics. Outcomes are committed in
+sub-batch order, so parallel completion cannot change plaintext order, the
+lowest reported failure, or the visible committed-attempt prefix. Later
+speculative work is discarded from caller-visible statistics.
+
+`CombineOptions.MaxWorkers` normalizes zero to one for programmatic
+compatibility. The node configuration loader separately distinguishes omission,
+which becomes one, from an explicit zero or negative value, which is invalid.
+The effective count for a nonempty plan is
+`min(configured, sub-batches, GOMAXPROCS)`. `CombineStats` reports configured
+and effective counts alongside attempts by sub-batch.
 
 ## Determinism And Invariants
 
@@ -297,12 +309,16 @@ many unverified candidates are admitted.
 
 ## Concurrency And Ownership
 
-The cluster-facing library does not provide internal synchronization. A node
-uses it serially for encryption requests through its input lock, share
-generation within one ACS-output handler, and combination through a node-level
-single-flight claim. Independent BTE objects may be used by independent nodes.
+The cluster-facing library internally parallelizes independent planned
+sub-batches only within `CombineSharesBounded`; it does not make the whole
+`ClusterBTE` object generally concurrent. A node still serializes encryption
+through its input lock, performs local share generation in one ACS-output
+handler, and admits at most one combine through its node-level single-flight
+claim. Independent BTE objects may be used by independent nodes.
 
-Kyber objects are mutable interfaces. `DecodedBatch` explicitly clones them
+Kyber objects are mutable interfaces. Pairing operands used by parallel
+reconstruction are cloned at the call boundary, while public setup data remains
+shared and read-only. `DecodedBatch` explicitly clones them
 when returning public ciphertexts, but `BatchPlan`, `SecretShare`, and
 `DecryptionShare` remain public mutable structures. Callers must not mutate a
 plan being used concurrently.

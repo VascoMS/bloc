@@ -207,6 +207,11 @@ n4/n7/n10:
 Pass the unique batch with `--batch-size`. Batches through 128 require an exact
 BMax-128 bundle; batch 512 requires an exact BMax-512 bundle. Extension phases
 require trace-off `persistent-lanes` and always keep the resource sampler off.
+Issue #33 preserves that stream/RBC contract and changes only the new B=512
+bundles to `max_combine_workers=2`. Its preliminary campaign consists of three
+independent 30-observation three-region cells at `(n,t)=(4,3),(7,5),(10,7)`;
+one cell's performance boundary does not suppress either later committee.
+Accepted BMax-128 pilots are not rerun.
 The lifecycle passes the bundle's validated BMax to operator Compose as
 `MEMPOOL_MAX_ITEMS`; Compose has no independent default. Before measurement,
 the health gate requests exactly that many corpus entries and requires the
@@ -243,10 +248,19 @@ bash deploy/ec2/run-three-region-campaign.sh \
   --source-sha <40-char-source> \
   --bloc-image <private-ecr-bloc-image@sha256:digest> \
   --mempool-image <private-ecr-mempool-image@sha256:digest> \
-  --experiment-id bloc-ec2-i30-tr-n10-b512-p1 \
+  --experiment-id bloc-ec2-i33-tr-n10-b512-p1 \
   --admin-cidr <controller-public-ip>/32 --aws-profile <profile> \
-  --stream-mode persistent-lanes --validate-only
+  --stream-mode persistent-lanes --max-combine-workers 2 --validate-only
 ```
+
+The runner requires worker count two to agree across the B=512 bundle manifest,
+cluster identity, frozen inputs, generated public config, evaluator config,
+scenario manifests, and retained run/node rows. Omission-to-one compatibility is
+reserved for accepted historical inputs. Before building or publishing a new
+image, complete the source review gate: normal/race suites, focused concurrency
+tests, campaign contracts, local n4/n7/n10 B=512 smokes, both Terraform
+validations, and a clean branch review. Image publication and live execution
+remain separate external mutations.
 
 The n10 capacity preflight is 11 `t3.small` instances including the controller,
 using 10/6/6 vCPUs in `us-east-1`/`eu-west-1`/`eu-central-1` for the

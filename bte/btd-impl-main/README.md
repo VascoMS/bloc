@@ -14,7 +14,9 @@ and [docs/VALIDATION.md](../../docs/VALIDATION.md).
 
 - The source groups `G_1` and `G_2` are swapped relative to the paper because `G_1` operations are more efficient in this implementation.
 - The cluster-facing `PlanBatch` path used by `bloc-node` enables BEAT-MEV-style `Opt-2` sub-batching by default: `alpha = ceil(2*sqrt(B))`, raised only when repeated indices require more sub-batches.
-- The integrated path does not currently expose runtime switches for normal combine, `Opt-1`, or parallel combine; use the inherited benchmark code for those comparisons.
+- The integrated path uses Opt-2 planning and exposes bounded sub-batch combine
+  workers. It does not expose runtime switches for normal combine or `Opt-1`;
+  use the inherited benchmark code for those planning-variant comparisons.
 - Cluster combination validates operator/share indices and uses deterministic
   bounded subset recovery. `bloc-node` supplies the shared per-sub-batch budget
   and records every cryptographic attempt.
@@ -37,6 +39,18 @@ Run the cluster-facing full-path benchmarks:
 ```sh
 go test ./be -run '^$' -bench '^BenchmarkHybridFullPath' -benchtime=1x
 ```
+
+Run the isolated B=512 bounded-combine comparison with the current two-vCPU
+deployment analogue:
+
+```sh
+mkdir -p results/issue-33
+GOMAXPROCS=2 go test ./be -run '^$' -bench '^BenchmarkCombineSharesBoundedB512$' -benchtime=1x -count=10 | tee results/issue-33/combine-b512.txt
+```
+
+Fixture construction is outside the timed region; the three distinct rows are
+one worker, two workers, and the `GOMAXPROCS` cap. The ignored output supports
+local implementation comparison and `benchstat`, not an AWS latency claim.
 
 You can also rerun the original benchmark script with:
 

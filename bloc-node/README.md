@@ -75,7 +75,7 @@ All correct operators should report the same `batch_id`, merged-set hash, select
 - blockspace caps and defaults,
 - provider mode, mempool URL, and mempool request timeout,
 - shared resource limits for encoded proposals, libp2p envelopes, and
-  per-sub-batch recovery attempts.
+  per-sub-batch recovery attempts plus bounded combine workers.
 
 The clean v2 config boundary rejects legacy files that combine the CRS seed,
 all BTE shares, and all libp2p private keys. The public CRS does not contain the
@@ -109,7 +109,9 @@ The v2 defaults are 8 MiB per encoded proposal, 16 MiB per inbound/outbound
 envelope, and 256 cumulative recovery attempts per sub-batch. Share candidates
 are restricted to authenticated configured operators, one batch identity, and
 one point per sub-batch; planning prunes the pre-plan `N*BMax` bound to
-`N*alpha`. Old v2 files without `limits` receive the defaults.
+`N*alpha`. `limits.max_combine_workers` defaults to one only when omitted;
+explicit zero, negative, and over-bound values fail validation. Old v2 files
+without `limits` receive the compatibility defaults.
 
 The `mempool-http` provider uses a node-owned HTTP client with no retries.
 `mempool_timeout_ms` and `--mempool-timeout-ms` default to `2000`; zero in an
@@ -143,6 +145,19 @@ go run ./cmd/bloc-node eval-local \
   --base-port 24000 \
   --out-dir results/local
 ```
+
+For the issue #33 B=512 two-worker correctness/artifact-shape smoke, run the
+three committee sizes on non-overlapping port ranges:
+
+```sh
+go run ./cmd/bloc-node eval-local --nodes 4 --threshold 3 --bmax 512 --batch-sizes 512 --max-combine-workers 2 --base-port 31000 --timeout 60s --out-dir results/issue-33/n4-b512 --print summary
+go run ./cmd/bloc-node eval-local --nodes 7 --threshold 5 --bmax 512 --batch-sizes 512 --max-combine-workers 2 --base-port 41000 --timeout 60s --out-dir results/issue-33/n7-b512 --print summary
+go run ./cmd/bloc-node eval-local --nodes 10 --threshold 7 --bmax 512 --batch-sizes 512 --max-combine-workers 2 --base-port 51000 --timeout 60s --out-dir results/issue-33/n10-b512 --print summary
+```
+
+Require success, consistency, batch size 512, configured workers two, and
+effective workers two in every node result. Local stage timings are validation
+diagnostics, not AWS latency evidence.
 
 For a bounded ACS diagnostic artifact, use `eval-suite --acs-trace`. The flag
 is opt-in and propagates to generated isolated and persistent configs; new

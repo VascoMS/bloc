@@ -179,12 +179,18 @@ The accepted local pre-publication evidence is validation-only:
   successfully and consistently with batch size 512 and configured/effective
   worker counts two on every node.
 
-These timings do not support an AWS latency claim. After the complete normal,
-race, campaign-contract, Terraform, branch-hygiene, and code-review gate—and
-before any image publication—the live preliminary design is three independent
-three-region 30-observation cells at n=4/7/10 and batch 512. One cell's boundary
-does not suppress the later cells; none supports p99 or authorizes a 1,000-run
-continuation. Accepted BMax-128 pilots are not rerun.
+These timings do not support an AWS latency claim. The pre-publication gate
+passes the complete normal suites, complete BTE race suite, repeated focused
+parallel-combine race tests, campaign contracts, Terraform validation, branch
+hygiene, and inline whole-branch review. The complete `bloc-node` race command
+remained CPU-runnable in quadratic CRS validation when bounded attempts timed
+out at 45 and 90 minutes; after the focused changed-path race passed 20
+repetitions, the user explicitly waived that repository-wide race command. It
+must be reported as waived, not passed. Before image publication, the live
+preliminary design is three independent three-region 30-observation cells at
+n=4/7/10 and batch 512. One cell's boundary does not suppress the later cells;
+none supports p99 or authorizes a 1,000-run continuation. Accepted BMax-128
+pilots are not rerun.
 
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its

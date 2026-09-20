@@ -41,7 +41,11 @@ func TestBuildAndLoadCampaignBundle(t *testing.T) {
 }
 
 func TestCampaignBundleCombineWorkersBoundAndCompatible(t *testing.T) {
-	parallelRoot := writeCampaignBundleFixture(t, 4, 3, 512)
+	// Worker provenance is independent of the quadratic-size public CRS. Keep
+	// this unit fixture small so the complete race suite remains practical; the
+	// explicit B=512 omission contract below uses manifest-only data, while B=512
+	// cryptography is covered by the dedicated BTE and evaluator smoke tests.
+	parallelRoot := writeCampaignBundleFixture(t, 4, 3, 128)
 	setCampaignBundleCombineWorkers(t, parallelRoot, 2)
 	parallelManifest, err := buildCampaignBundleManifest(parallelRoot, testCampaignSourceSHA, testCampaignBlocImage, testCampaignMempoolImage)
 	if err != nil {
@@ -68,11 +72,13 @@ func TestCampaignBundleCombineWorkersBoundAndCompatible(t *testing.T) {
 	})
 
 	t.Run("new-b512-omission", func(t *testing.T) {
-		got, err := decodeCampaignBundleManifest(campaignBundleManifestBytesForTest(t, parallelManifest, false))
+		want := parallelManifest
+		want.BMax = 512
+		got, err := decodeCampaignBundleManifest(campaignBundleManifestBytesForTest(t, want, false))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := compareCampaignBundleManifests(got, parallelManifest); err == nil || !strings.Contains(err.Error(), "combine workers") {
+		if err := compareCampaignBundleManifests(got, want); err == nil || !strings.Contains(err.Error(), "combine workers") {
 			t.Fatalf("new B512 omission error = %v", err)
 		}
 	})

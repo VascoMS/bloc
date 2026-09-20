@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-19`
+- Last reviewed: `2026-09-20`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
@@ -35,8 +35,12 @@ Issue #33 now implements bounded parallel Opt-2 sub-batch combine with two
 workers for new BMax-512 evidence while preserving serial subset enumeration,
 deterministic failure/attempt semantics, and the existing stream/RBC/ACS
 candidate. Its local ten-sample isolated benchmark and n4/n7/n10 B=512 smokes
-pass as validation-only evidence; image publication and AWS execution remain
-gated on the complete pre-publication review.
+pass as validation-only evidence. The pre-publication review is complete with
+full normal suites, the full BTE race suite, a 20-repetition focused parallel
+combine race gate, campaign/Terraform contracts, and clean branch/design review.
+The user explicitly waived the impractical full `bloc-node` race suite after
+45- and 90-minute CPU-bound timeouts produced no race finding; it is not
+represented as a pass. Image publication and AWS execution have not started.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -717,11 +721,12 @@ release-candidate configuration contract are defined in
    n4/batch-512 negative performance boundary. Issue #33 now owns the approved
    bounded parallel-combine development campaign; do not reinterpret the old
    artifact as evidence for that new architecture.
-2. Execute issue #33's complete pre-publication gate: both affected-module
-   normal/race suites, repeated focused concurrency tests, campaign contracts,
-   branch hygiene, and whole-branch code review. The implementation,
-   ten-sample B=512 benchmark, three local committee smokes, provenance gates,
-   and both Terraform validations are complete locally.
+2. Freeze issue #33's reviewed source, perform the quota/cost and exact
+   `--validate-only` checks, then publish and verify immutable images before any
+   AWS allocation. The complete normal suites, full BTE race suite, focused
+   20-repetition parallel race gate, campaign contracts, branch hygiene, and
+   inline whole-branch review pass. The full `bloc-node` race suite was
+   explicitly waived after documented CPU-bound timeouts and is not a pass.
 3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.

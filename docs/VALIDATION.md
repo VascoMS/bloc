@@ -214,6 +214,37 @@ is three independent three-region 30-observation cells at n=4/7/10 and batch
 512. One cell's boundary does not suppress the later cells; none supports p99
 or authorizes a 1,000-run continuation. Accepted BMax-128 pilots are not rerun.
 
+The authorized issue #33 sweep completed all three independent cells from the
+frozen contract above. Every cell passed all 11 lifecycle events, all three
+durable controller jobs, the independent final-phase and cleanup validators,
+empty Terraform state, and a fresh authenticated regional/IAM absence audit.
+Terraform destroyed 39, 42, and 45 resources for n4, n7, and n10 respectively.
+
+| Nodes | Attempted | Successful, consistent, <=12 s | Timeouts | Blocks | Total p50/p95 (ms) | ACS p50/p95 (ms) | Merge+Plan p50/p95 (ms) | Combine p50/p95 (ms) |
+|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| 4 | 30 | 29 | 1 | 9/10/10 | 9707.420 / 11539.625 | 768.805 / 945.342 | 1468.150 / 2166.530 | 6520.757 / 7404.462 |
+| 7 | 30 | 29 | 1 | 9/10/10 | 9367.011 / 11274.385 | 1005.510 / 1425.424 | 1114.599 / 2118.440 | 6471.354 / 6493.887 |
+| 10 | 30 | 16 | 14 | 2/5/9 | 9984.553 / 11288.223 | 1388.084 / 1513.542 | 1266.049 / 1698.849 | 6492.668 / 7712.309 |
+
+Quantiles are Type-7 estimates over only successful, consistent, deadline-met
+measurements; failed and timed-out attempts remain in the complete artifacts
+but do not enter latency quantiles. The n10 cell is accepted as complete
+negative performance evidence and crosses the at-least-three-timeout boundary,
+so it does not qualify for any continuation. None of these cells is p99
+eligible. The separately labeled serial n4 pilot had 23/30 qualifying rows,
+total-slot p50 `10132.754 ms`, and combine p50 `7450.442 ms`; the worker-two n4
+cell therefore changes those preliminary p50s by -4.2% and -12.5%, respectively,
+without making a pooled or final-source claim.
+
+Provider-cache-free retained roots are
+`results/ec2/bloc-ec2-i33-tr-n4-b512-p1/`,
+`results/ec2/bloc-ec2-i33-tr-n7-b512-p1/`, and
+`results/ec2/bloc-ec2-i33-tr-n10-b512-p1/`. Their 231, 337, and 420 checksum
+entries verify. The checksum-manifest SHA-256 values are
+`128368f6091f4db92fe8bc9ac8d8112d7dc801bbbff4a6bf62318418961dd3eb`,
+`34087fd691e5e8785fb350111c45aa54455675630640158a4e61655d008f31c7`,
+and `f37c3bbc4931216ef737390a3743f6092646cd3a1be9eaa176893b85372d0c63`.
+
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its
 extension runs `n=10,t=7`, batches `8/32/128`, and batch `512` at `n=4/7/10`,

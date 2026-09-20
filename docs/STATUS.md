@@ -48,9 +48,17 @@ and mempool image
 `sha256:b695e66930244ce78106c1331251a8521fd3350356535a1097e52f21b329ffc3`.
 All three fresh n4/n7/n10 BMax-512 worker=2 bundles independently reverify and
 their exact three-region extension-pilot `--validate-only` commands pass.
-Current 16-vCPU regional quotas and fixed-zone offerings fit the largest
-10/6/6-vCPU cell, and the conservative ceiling is USD 15 per pilot. No
-Terraform or EC2 resource has been created for issue #33.
+The authorized independent three-region pilots then completed with all
+lifecycle, controller-job, phase, cleanup, empty-state, and fresh authenticated
+absence gates passing. Successful/attempted counts were `29/30`, `29/30`, and
+`16/30` at n4/n7/n10; every attempt remained cross-node consistent. Type-7
+total-slot p50/p95 were `9707.420/11539.625`, `9367.011/11274.385`, and
+`9984.553/11288.223 ms`; combine p50/p95 were `6520.757/7404.462`,
+`6471.354/6493.887`, and `6492.668/7712.309 ms`. The n10 cell's 14 deadline
+misses are a negative scaling boundary and prohibit continuation; none of the
+30-observation cells supports p99. Provider-cache-free retained artifacts have
+231/337/420 verified checksum entries under their respective `results/ec2/`
+roots. No issue #33 AWS resource remains.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -233,6 +241,25 @@ release-candidate configuration contract are defined in
   BMax-512 evidence: n4, n7, and n10 are independent 30-observation cells after
   the pre-publication review, while every historical row keeps its source and
   worker label.
+
+- **Issue #33's worker-two BMax-512 preliminary sweep is complete and n10 is a
+  performance boundary:** n4 and n7 each retained `29/30` successful,
+  consistent, deadline-met measurements; n10 retained `16/30`, with 14
+  timeouts. Successful-run Type-7 total-slot p50/p95 were
+  `9707.420/11539.625`, `9367.011/11274.385`, and `9984.553/11288.223 ms` for
+  n4/n7/n10. Combine remained dominant at p50
+  `6520.757/6471.354/6492.668 ms`. Against the separately labeled serial n4
+  pilot, worker-two n4 reduced combine p50 by 12.5% and total-slot p50 by 4.2%,
+  while increasing qualifying observations from 23 to 29; this is preliminary
+  cross-source evidence, not a pooled or final thesis estimate. All three
+  deployments passed 11 lifecycle events, three controller jobs, independent
+  phase/cleanup validators, destroy of 39/42/45 resources, fresh regional/IAM
+  absence audits, and empty Terraform state. The provider-cache-free retained
+  roots are `results/ec2/bloc-ec2-i33-tr-n4-b512-p1/`,
+  `results/ec2/bloc-ec2-i33-tr-n7-b512-p1/`, and
+  `results/ec2/bloc-ec2-i33-tr-n10-b512-p1/`; all 231/337/420 checksum entries
+  verify. The n10 boundary blocks any B=512 continuation pending an explicit
+  architectural decision.
 
 - **Persistent control/data lanes have accepted historical mechanism-only
   three-region evidence:** issue #25's finalized
@@ -739,15 +766,14 @@ release-candidate configuration contract are defined in
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.
 4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
-   continuations, but do not start a continuation until the stopped
-   preliminary sweep and replacement n4/n7 primary-phase order are resolved.
-5. Immediately recheck regional capacity, resolve the controller public `/32`
-   locally, then run only the new n4/n7/n10 batch-512 30-observation
-   three-region pilots with the USD 15 per-cell ceiling. Recover, destroy, and
-   independently prove empty cleanup before starting the next cell. Treat the
-   three cells independently so one boundary does not suppress the later
-   committees; do not start a 1,000-observation continuation without a new
-   decision.
+   continuations, but keep the new worker-two B=512 rows separate. The n10/B=512
+   cell is a negative performance boundary and does not qualify for a
+   continuation.
+5. Analyze the complete issue #33 phase breakdown and decide explicitly whether
+   the next development target is additional combine optimization, a larger
+   fixed-performance instance, or both. Do not start any 1,000-observation
+   continuation until that architecture and one-source campaign scope are
+   approved.
 6. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

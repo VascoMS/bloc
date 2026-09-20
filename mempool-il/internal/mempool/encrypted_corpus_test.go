@@ -322,6 +322,7 @@ func writeEncryptedCorpusTestCluster(t *testing.T, bmax, n, threshold int) (stri
 			"max_proposal_bytes":                 8388608,
 			"max_envelope_bytes":                 16777216,
 			"max_combine_attempts_per_sub_batch": 256,
+			"max_combine_workers":                2,
 		},
 		"operators": operators,
 	}

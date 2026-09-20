@@ -59,6 +59,7 @@ type corpusCampaignLimits struct {
 	MaxProposalBytes              int `json:"max_proposal_bytes"`
 	MaxEnvelopeBytes              int `json:"max_envelope_bytes"`
 	MaxCombineAttemptsPerSubBatch int `json:"max_combine_attempts_per_sub_batch"`
+	MaxCombineWorkers             int `json:"max_combine_workers,omitempty"`
 }
 
 type corpusCampaignOperator struct {

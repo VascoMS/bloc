@@ -3,7 +3,7 @@
 - Last reviewed: `2026-09-20`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
-- Last known good source: `e632b04c07df89391c9b427ed32bf78bfdc6e2ac`
+- Last known good source: `7d462dc58e6c6a2f763deeded120cd9891fecd63`
 
 ## Current Prototype State
 
@@ -40,7 +40,17 @@ full normal suites, the full BTE race suite, a 20-repetition focused parallel
 combine race gate, campaign/Terraform contracts, and clean branch/design review.
 The user explicitly waived the impractical full `bloc-node` race suite after
 45- and 90-minute CPU-bound timeouts produced no race finding; it is not
-represented as a pass. Image publication and AWS execution have not started.
+represented as a pass. Real bundle generation then exposed and regression-fixed
+one strict mempool campaign-identity decoding gap. Clean source
+`7d462dc58e6c6a2f763deeded120cd9891fecd63` is published and frozen with BLOC
+image `sha256:16c57d493ddf21c61841c791b5c0466902f3d1b6ef0bdd6a93ea0dd4078e3846`
+and mempool image
+`sha256:b695e66930244ce78106c1331251a8521fd3350356535a1097e52f21b329ffc3`.
+All three fresh n4/n7/n10 BMax-512 worker=2 bundles independently reverify and
+their exact three-region extension-pilot `--validate-only` commands pass.
+Current 16-vCPU regional quotas and fixed-zone offerings fit the largest
+10/6/6-vCPU cell, and the conservative ceiling is USD 15 per pilot. No
+Terraform or EC2 resource has been created for issue #33.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -721,23 +731,23 @@ release-candidate configuration contract are defined in
    n4/batch-512 negative performance boundary. Issue #33 now owns the approved
    bounded parallel-combine development campaign; do not reinterpret the old
    artifact as evidence for that new architecture.
-2. Freeze issue #33's reviewed source, perform the quota/cost and exact
-   `--validate-only` checks, then publish and verify immutable images before any
-   AWS allocation. The complete normal suites, full BTE race suite, focused
-   20-repetition parallel race gate, campaign contracts, branch hygiene, and
-   inline whole-branch review pass. The full `bloc-node` race suite was
-   explicitly waived after documented CPU-bound timeouts and is not a pass.
+2. Use only issue #33 source `7d462dc58e6c6a2f763deeded120cd9891fecd63`,
+   its two recorded immutable image digests, and its three fresh BMax-512
+   worker=2 bundle manifests. The earlier pre-fix image publication is
+   superseded and must not be used for a campaign.
 3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.
 4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
    continuations, but do not start a continuation until the stopped
    preliminary sweep and replacement n4/n7 primary-phase order are resolved.
-5. After issue #33 passes review, freeze, quota, cost, and exact validate-only
-   gates, run only the new n4/n7/n10
-   batch-512 30-observation three-region pilots. Treat the three cells
-   independently so one cell's boundary does not suppress the later committee
-   pilots; do not start a 1,000-observation continuation without a new decision.
+5. Immediately recheck regional capacity, resolve the controller public `/32`
+   locally, then run only the new n4/n7/n10 batch-512 30-observation
+   three-region pilots with the USD 15 per-cell ceiling. Recover, destroy, and
+   independently prove empty cleanup before starting the next cell. Treat the
+   three cells independently so one boundary does not suppress the later
+   committees; do not start a 1,000-observation continuation without a new
+   decision.
 6. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.

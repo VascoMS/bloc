@@ -181,6 +181,11 @@ Encryption is randomized, so the cached value is stable within a process but a
 fresh service process produces different ciphertext bytes for the same corpus
 and slot.
 
+The campaign-identity decoder remains strict while recognizing the node's
+`limits.max_combine_workers` provenance field. That limit controls downstream
+BTE combine execution and does not alter the public key, CRS, ciphertexts, or
+encrypted-corpus identities.
+
 ### 6. Client-overhead evidence
 
 Issue #13 separates two strict corpus contracts from ordinary replay input.

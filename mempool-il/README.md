@@ -119,6 +119,10 @@ go run ./cmd/encrypt-corpus \
 prefix and its public/plaintext/encrypted identities. It never returns raw
 target bytes. The final campaign bundle verifier binds these identities before
 topology-specific public node and evaluator configuration is materialized.
+The strict campaign-identity decoder also recognizes
+`limits.max_combine_workers` so bounded-combine campaigns can use the same
+identity for corpus generation and deployment provenance; the field does not
+change corpus encryption.
 
 ## Client-Overhead Corpus And Report
 

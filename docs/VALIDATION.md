@@ -186,11 +186,33 @@ hygiene, and inline whole-branch review. The complete `bloc-node` race command
 remained CPU-runnable in quadratic CRS validation when bounded attempts timed
 out at 45 and 90 minutes; after the focused changed-path race passed 20
 repetitions, the user explicitly waived that repository-wide race command. It
-must be reported as waived, not passed. Before image publication, the live
-preliminary design is three independent three-region 30-observation cells at
-n=4/7/10 and batch 512. One cell's boundary does not suppress the later cells;
-none supports p99 or authorizes a 1,000-run continuation. Accepted BMax-128
-pilots are not rerun.
+must be reported as waived, not passed.
+
+The deployable issue #33 contract is frozen at source
+`7d462dc58e6c6a2f763deeded120cd9891fecd63`, BLOC image
+`632783683536.dkr.ecr.us-east-1.amazonaws.com/bloc-node@sha256:16c57d493ddf21c61841c791b5c0466902f3d1b6ef0bdd6a93ea0dd4078e3846`,
+and mempool image
+`632783683536.dkr.ecr.us-east-1.amazonaws.com/mempool-il@sha256:b695e66930244ce78106c1331251a8521fd3350356535a1097e52f21b329ffc3`.
+Real bundle generation first exposed that the strict mempool campaign-identity
+decoder did not recognize `max_combine_workers`; the source above contains the
+regression-tested compatibility fix, and the earlier source/image attempt is
+superseded for campaign use. Fresh n4/n7/n10 BMax-512 bundles carry worker count
+two, exact source/images, write-once manifests, mode-0600 operator secrets, and
+independently reverified identity, CRS, corpus, prefix, and self-decryption
+contracts. All three exact three-region `extension-pilot --validate-only`
+invocations pass with trace-off `persistent-lanes`, five warmups, 30 measured
+attempts, three blocks, seed `20260621`, and the 12-second deadline.
+
+Current preflight evidence records no running or pending instances, fixed-zone
+`t3.small` offerings, and 16 Standard On-Demand vCPUs in each region. The n10
+maximum uses 10/6/6 vCPUs in `us-east-1`/`eu-west-1`/`eu-central-1` and fits.
+Official AWS price files published `2026-09-18` preserve the conservative USD
+15 operational ceiling for each two-hour extension pilot, including maximum T3
+Unlimited surplus credits, public IPv4, gp2, and a USD 10 inter-region reserve.
+Capacity must be rechecked immediately before every live cell. The live design
+is three independent three-region 30-observation cells at n=4/7/10 and batch
+512. One cell's boundary does not suppress the later cells; none supports p99
+or authorizes a 1,000-run continuation. Accepted BMax-128 pilots are not rerun.
 
 Issue #8's local distributed-campaign preflight runs `n=4,t=3` and `n=7,t=5`,
 batches `8/32/128`, with 1 warmup and 1 measured observation per cell. Its

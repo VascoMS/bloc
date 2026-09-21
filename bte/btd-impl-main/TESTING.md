@@ -344,26 +344,28 @@ GOCACHE=/tmp/bte-go-cache-scaling GOMODCACHE=/tmp/bloc-go-mod-verify GOMAXPROCS=
 
 The retained local run on 2026-09-21 used Go `1.26.5`, macOS `26.6.2`,
 Darwin/arm64, an Apple M5 Pro host with 15 logical CPUs, source
-`dae0db551b0bed40218fe5cc39e8ec6d52d76e47`, branch
-`codex/combine-worker-scaling`, and `GOMAXPROCS=8`. All 360 observations
-reported 46 sub-batches and an effective worker count equal to the configured
-count. Type-7 summaries follow; speedup is relative to that committee's
-worker-one p50 and efficiency is speedup divided by effective workers.
+`53180f1e5ce3d39464715ef52eef38ed339eafd9`, branch
+`codex/combine-worker-scaling`, and `GOMAXPROCS=8`; the benchmark working tree
+exactly matches that commit. All 360 observations reported 46 sub-batches and
+an effective worker count equal to the configured count. Type-7 summaries
+follow; speedup is relative to that committee's worker-one p50 and efficiency
+is speedup divided by effective workers. Conventional B/op and allocation
+medians average observations 15 and 16 after sorting.
 
 | Committee | Samples | Configured/effective | p50 / p95 ms/op | p50 speedup | p50 efficiency | Median B/op | Median allocs/op | Sub-batches |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | n4/t3, w1 | 30 | 1/1 | 4305.315 / 4407.881 | 1.000 | 1.000 | 316683344 | 1636656 | 46 |
-| n4/t3, w2 | 30 | 2/2 | 2188.926 / 2194.455 | 1.967 | 0.983 | 316682844 | 1636671 | 46 |
+| n4/t3, w2 | 30 | 2/2 | 2188.926 / 2194.455 | 1.967 | 0.983 | 316682844 | 1636671.5 | 46 |
 | n4/t3, w4 | 30 | 4/4 | 1284.350 / 1295.844 | 3.352 | 0.838 | 316684320 | 1636692 | 46 |
 | n4/t3, w8 | 30 | 8/8 | 649.266 / 711.755 | 6.631 | 0.829 | 316683248 | 1636680 | 46 |
-| n7/t5, w1 | 30 | 1/1 | 4359.778 / 4373.757 | 1.000 | 1.000 | 317224924 | 1642889 | 46 |
+| n7/t5, w1 | 30 | 1/1 | 4359.778 / 4373.757 | 1.000 | 1.000 | 317224924 | 1642889.5 | 46 |
 | n7/t5, w2 | 30 | 2/2 | 2189.385 / 2193.302 | 1.991 | 0.996 | 317223712 | 1642898 | 46 |
-| n7/t5, w4 | 30 | 4/4 | 1228.872 / 1240.825 | 3.548 | 0.887 | 317225708 | 1642920 | 46 |
-| n7/t5, w8 | 30 | 8/8 | 634.111 / 668.206 | 6.875 | 0.859 | 317225072 | 1642913 | 46 |
-| n10/t7, w1 | 30 | 1/1 | 4362.020 / 4371.066 | 1.000 | 1.000 | 317834904 | 1651817 | 46 |
-| n10/t7, w2 | 30 | 2/2 | 2191.135 / 2210.964 | 1.991 | 0.995 | 317835480 | 1651836 | 46 |
-| n10/t7, w4 | 30 | 4/4 | 1253.681 / 1259.359 | 3.479 | 0.870 | 317835524 | 1651855 | 46 |
-| n10/t7, w8 | 30 | 8/8 | 673.094 / 713.491 | 6.481 | 0.810 | 317834568 | 1651838 | 46 |
+| n7/t5, w4 | 30 | 4/4 | 1228.872 / 1240.825 | 3.548 | 0.887 | 317225708 | 1642920.5 | 46 |
+| n7/t5, w8 | 30 | 8/8 | 634.111 / 668.206 | 6.875 | 0.859 | 317225072 | 1642913.5 | 46 |
+| n10/t7, w1 | 30 | 1/1 | 4362.020 / 4371.066 | 1.000 | 1.000 | 317834904 | 1651817.5 | 46 |
+| n10/t7, w2 | 30 | 2/2 | 2191.135 / 2210.964 | 1.991 | 0.995 | 317835480 | 1651836.5 | 46 |
+| n10/t7, w4 | 30 | 4/4 | 1253.681 / 1259.359 | 3.479 | 0.870 | 317835524 | 1651855.5 | 46 |
+| n10/t7, w8 | 30 | 8/8 | 673.094 / 713.491 | 6.481 | 0.810 | 317834568 | 1651838.5 | 46 |
 
 The raw output, smoke shape check, race result, and environment metadata are
 ignored under `results/local/combine-worker-scaling-b512/`. These local samples

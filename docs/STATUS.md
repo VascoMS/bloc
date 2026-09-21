@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-20`
+- Last reviewed: `2026-09-21`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `7d462dc58e6c6a2f763deeded120cd9891fecd63`
@@ -59,6 +59,14 @@ misses are a negative scaling boundary and prohibit continuation; none of the
 30-observation cells supports p99. Provider-cache-free retained artifacts have
 231/337/420 verified checksum entries under their respective `results/ec2/`
 roots. No issue #33 AWS resource remains.
+Issue #34 adds accepted local-only B=512 combine-worker scaling evidence from
+source `53180f1e5ce3d39464715ef52eef38ed339eafd9`: all 12 n4/t3, n7/t5, and
+n10/t7 × workers 1/2/4/8 cells retained 30 observations at `GOMAXPROCS=8`,
+with effective workers equal to configuration and 46 sub-batches. Type-7 p50
+speedup ranges from `1.967x`--`1.991x` (two workers) to
+`6.481x`--`6.875x` (eight); this remains local implementation evidence only,
+does not alter the frozen worker-two AWS inputs, and supports no AWS, p99, or
+thesis-latency claim.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -769,9 +777,11 @@ release-candidate configuration contract are defined in
    continuations, but keep the new worker-two B=512 rows separate. The n10/B=512
    cell is a negative performance boundary and does not qualify for a
    continuation.
-5. Analyze the complete issue #33 phase breakdown and decide explicitly whether
-   the next development target is additional combine optimization, a larger
-   fixed-performance instance, or both. Do not start any 1,000-observation
+5. Analyze the complete issue #33 phase breakdown together with issue #34's
+   local combine-worker scaling curve, then decide explicitly whether the next
+   development target is additional combine optimization, a larger
+   fixed-performance instance, or both. Do not treat the local curve as AWS,
+   p99, or thesis-latency evidence, and do not start any 1,000-observation
    continuation until that architecture and one-source campaign scope are
    approved.
 6. Leave issue #15 open and paused for resource collection. Do not admit its

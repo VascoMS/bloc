@@ -40,17 +40,21 @@ Run the cluster-facing full-path benchmarks:
 go test ./be -run '^$' -bench '^BenchmarkHybridFullPath' -benchtime=1x
 ```
 
-Run the isolated B=512 bounded-combine comparison with the current two-vCPU
-deployment analogue:
+Run the local-only B=512 combine-worker scaling matrix:
 
 ```sh
-mkdir -p results/issue-33
-GOMAXPROCS=2 go test ./be -run '^$' -bench '^BenchmarkCombineSharesBoundedB512$' -benchtime=1x -count=10 | tee results/issue-33/combine-b512.txt
+mkdir -p results/local/combine-worker-scaling-b512
+GOCACHE=/tmp/bte-go-cache-scaling GOMODCACHE=/tmp/bloc-go-mod-verify GOMAXPROCS=8 \
+  go test ./be -run '^$' -bench '^BenchmarkCombineSharesBoundedB512$' \
+  -benchtime=1x -count=30 -benchmem -timeout=90m \
+  | tee results/local/combine-worker-scaling-b512/retained.txt
 ```
 
-Fixture construction is outside the timed region; the three distinct rows are
-one worker, two workers, and the `GOMAXPROCS` cap. The ignored output supports
-local implementation comparison and `benchstat`, not an AWS latency claim.
+The 12 leaves cover `(n,t)=(4,3),(7,5),(10,7)` and configured workers
+`1/2/4/8`. Fixture construction is outside the timed region; only combine
+wall-clock time and allocations are measured. The ignored output supports
+local implementation comparison, not an AWS latency claim. The historical
+Issue #33 `GOMAXPROCS=2` ten-sample n4 means remain separately labeled.
 
 You can also rerun the original benchmark script with:
 

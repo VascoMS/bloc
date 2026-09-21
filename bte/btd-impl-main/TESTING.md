@@ -316,11 +316,14 @@ GOCACHE=/private/tmp/bte-go-cache go test ./be -run '^$' -bench '^BenchmarkHybri
 
 ### Isolated B=512 bounded-combine benchmark
 
-`BenchmarkCombineSharesBoundedB512` compares one worker, two workers, and the
-current `GOMAXPROCS` value on one prepared B=512, n=4, t=3 fixture. Its
-sub-benchmarks are named `workers-1`, `workers-2`, and
-`workers-gomaxprocs-N` so the deployment-cap row remains distinguishable when
-`GOMAXPROCS=2`.
+`BenchmarkCombineSharesBoundedB512` has exactly 12 leaves: committees
+`(n,t)=(4,3),(7,5),(10,7)` crossed with configured workers `1/2/4/8`.
+Each prepared B=512 fixture uses 512 distinct puncture indices, yielding 46
+Opt-2 sub-batches, and supplies exactly its threshold-valid share count
+`3/5/7`. Each timed combine asserts plaintext consensus order and bytes, no
+top-level or per-result error, one committed attempt per sub-batch, and exact
+configured/effective worker statistics. Benchmark output also reports
+`configured_workers`, `effective_workers`, and `sub_batches` metrics.
 
 CRS generation, key generation, encryption, Opt-2 planning, and threshold-share
 generation occur before the timer. Only `CombineSharesBounded` wall-clock time
@@ -328,20 +331,45 @@ and allocations are measured. Plaintext ordering, per-result errors, committed
 attempts, and configured/effective worker statistics are checked after the
 timer is stopped for every iteration.
 
-Run the deployment-relevant comparison with two available processors and retain
-the standard Go benchmark output in the ignored results tree:
+Run the local worker-scaling matrix after first confirming the host has at least
+eight logical CPUs:
 
 ```sh
-mkdir -p results/issue-33
-GOCACHE=/private/tmp/bte-go-cache GOMAXPROCS=2 go test ./be -run '^$' \
-  -bench '^BenchmarkCombineSharesBoundedB512$' -benchtime=1x -count=10 \
-  | tee results/issue-33/combine-b512.txt
+mkdir -p results/local/combine-worker-scaling-b512
+GOCACHE=/tmp/bte-go-cache-scaling GOMODCACHE=/tmp/bloc-go-mod-verify GOMAXPROCS=8 \
+  go test ./be -run '^$' -bench '^BenchmarkCombineSharesBoundedB512$' \
+  -benchtime=1x -count=30 -benchmem -timeout=90m \
+  | tee results/local/combine-worker-scaling-b512/retained.txt
 ```
 
-The `GOMAXPROCS=2` cap is a CPU-concurrency analogue for the current two-vCPU
-deployment, not a hardware-equivalence claim. These local samples support
-implementation comparison and `benchstat` analysis only; they are not AWS
-latency evidence.
+The retained local run on 2026-09-21 used Go `1.26.5`, macOS `26.6.2`,
+Darwin/arm64, an Apple M5 Pro host with 15 logical CPUs, source
+`dae0db551b0bed40218fe5cc39e8ec6d52d76e47`, branch
+`codex/combine-worker-scaling`, and `GOMAXPROCS=8`. All 360 observations
+reported 46 sub-batches and an effective worker count equal to the configured
+count. Type-7 summaries follow; speedup is relative to that committee's
+worker-one p50 and efficiency is speedup divided by effective workers.
+
+| Committee | Samples | Configured/effective | p50 / p95 ms/op | p50 speedup | p50 efficiency | Median B/op | Median allocs/op | Sub-batches |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| n4/t3, w1 | 30 | 1/1 | 4305.315 / 4407.881 | 1.000 | 1.000 | 316683344 | 1636656 | 46 |
+| n4/t3, w2 | 30 | 2/2 | 2188.926 / 2194.455 | 1.967 | 0.983 | 316682844 | 1636671 | 46 |
+| n4/t3, w4 | 30 | 4/4 | 1284.350 / 1295.844 | 3.352 | 0.838 | 316684320 | 1636692 | 46 |
+| n4/t3, w8 | 30 | 8/8 | 649.266 / 711.755 | 6.631 | 0.829 | 316683248 | 1636680 | 46 |
+| n7/t5, w1 | 30 | 1/1 | 4359.778 / 4373.757 | 1.000 | 1.000 | 317224924 | 1642889 | 46 |
+| n7/t5, w2 | 30 | 2/2 | 2189.385 / 2193.302 | 1.991 | 0.996 | 317223712 | 1642898 | 46 |
+| n7/t5, w4 | 30 | 4/4 | 1228.872 / 1240.825 | 3.548 | 0.887 | 317225708 | 1642920 | 46 |
+| n7/t5, w8 | 30 | 8/8 | 634.111 / 668.206 | 6.875 | 0.859 | 317225072 | 1642913 | 46 |
+| n10/t7, w1 | 30 | 1/1 | 4362.020 / 4371.066 | 1.000 | 1.000 | 317834904 | 1651817 | 46 |
+| n10/t7, w2 | 30 | 2/2 | 2191.135 / 2210.964 | 1.991 | 0.995 | 317835480 | 1651836 | 46 |
+| n10/t7, w4 | 30 | 4/4 | 1253.681 / 1259.359 | 3.479 | 0.870 | 317835524 | 1651855 | 46 |
+| n10/t7, w8 | 30 | 8/8 | 673.094 / 713.491 | 6.481 | 0.810 | 317834568 | 1651838 | 46 |
+
+The raw output, smoke shape check, race result, and environment metadata are
+ignored under `results/local/combine-worker-scaling-b512/`. These local samples
+support implementation comparison only; they are not AWS or deployment-latency
+evidence. The historical Issue #33 `GOMAXPROCS=2` n4 means remain separate and
+must not be pooled with this matrix.
 
 ## What Is Not Tested Yet
 

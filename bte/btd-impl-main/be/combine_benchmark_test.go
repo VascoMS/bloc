@@ -3,9 +3,76 @@ package be
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"testing"
 )
+
+type combineBenchmarkCase struct {
+	name      string
+	n         int
+	threshold int
+	workers   int
+}
+
+type combineBenchmarkCommittee struct {
+	name      string
+	n         int
+	threshold int
+}
+
+func combineBenchmarkCommittees() []combineBenchmarkCommittee {
+	return []combineBenchmarkCommittee{
+		{name: "n4-t3", n: 4, threshold: 3},
+		{name: "n7-t5", n: 7, threshold: 5},
+		{name: "n10-t7", n: 10, threshold: 7},
+	}
+}
+
+func combineBenchmarkWorkers() []int {
+	return []int{1, 2, 4, 8}
+}
+
+func combineBenchmarkCases() []combineBenchmarkCase {
+	workers := combineBenchmarkWorkers()
+	committees := combineBenchmarkCommittees()
+	cases := make([]combineBenchmarkCase, 0, len(committees)*len(workers))
+	for _, committee := range committees {
+		for _, workerCount := range workers {
+			cases = append(cases, combineBenchmarkCase{
+				name:      fmt.Sprintf("%s/workers-%d", committee.name, workerCount),
+				n:         committee.n,
+				threshold: committee.threshold,
+				workers:   workerCount,
+			})
+		}
+	}
+	return cases
+}
+
+func TestCombineBenchmarkCasesCoverWorkerScalingMatrix(t *testing.T) {
+	want := []combineBenchmarkCase{
+		{name: "n4-t3/workers-1", n: 4, threshold: 3, workers: 1},
+		{name: "n4-t3/workers-2", n: 4, threshold: 3, workers: 2},
+		{name: "n4-t3/workers-4", n: 4, threshold: 3, workers: 4},
+		{name: "n4-t3/workers-8", n: 4, threshold: 3, workers: 8},
+		{name: "n7-t5/workers-1", n: 7, threshold: 5, workers: 1},
+		{name: "n7-t5/workers-2", n: 7, threshold: 5, workers: 2},
+		{name: "n7-t5/workers-4", n: 7, threshold: 5, workers: 4},
+		{name: "n7-t5/workers-8", n: 7, threshold: 5, workers: 8},
+		{name: "n10-t7/workers-1", n: 10, threshold: 7, workers: 1},
+		{name: "n10-t7/workers-2", n: 10, threshold: 7, workers: 2},
+		{name: "n10-t7/workers-4", n: 10, threshold: 7, workers: 4},
+		{name: "n10-t7/workers-8", n: 10, threshold: 7, workers: 8},
+	}
+	got := combineBenchmarkCases()
+	if len(got) != len(want) {
+		t.Fatalf("benchmark matrix has %d leaf cases, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("benchmark case %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
 
 type combineBenchmarkFixture struct {
 	cluster *ClusterBTE
@@ -14,9 +81,9 @@ type combineBenchmarkFixture struct {
 	raw     [][]byte
 }
 
-func newCombineBenchmarkFixture(b *testing.B, batchSize int) combineBenchmarkFixture {
+func newCombineBenchmarkFixture(b *testing.B, batchSize, n, threshold int) combineBenchmarkFixture {
 	b.Helper()
-	cluster := newTestCluster(b, batchSize, 4, 3)
+	cluster := newTestCluster(b, batchSize, n, threshold)
 	raw := make([][]byte, batchSize)
 	ciphertexts := make([]Ciphertext, batchSize)
 	for i := range ciphertexts {
@@ -30,6 +97,9 @@ func newCombineBenchmarkFixture(b *testing.B, batchSize int) combineBenchmarkFix
 	plan, err := cluster.PlanBatch(ciphertexts)
 	if err != nil {
 		b.Fatalf("plan batch: %v", err)
+	}
+	if len(plan.SubBatches) != 46 {
+		b.Fatalf("planned sub-batches = %d, want 46", len(plan.SubBatches))
 	}
 	shares := make([]DecryptionShare, 0, cluster.btd.T*len(plan.SubBatches))
 	for subBatchID := range plan.SubBatches {
@@ -78,30 +148,29 @@ func (fixture combineBenchmarkFixture) validate(b *testing.B, workers int, resul
 }
 
 func BenchmarkCombineSharesBoundedB512(b *testing.B) {
-	fixture := newCombineBenchmarkFixture(b, 512)
-	tests := []struct {
-		name    string
-		workers int
-	}{
-		{name: "workers-1", workers: 1},
-		{name: "workers-2", workers: 2},
-		{name: fmt.Sprintf("workers-gomaxprocs-%d", runtime.GOMAXPROCS(0)), workers: runtime.GOMAXPROCS(0)},
-	}
-	for _, test := range tests {
-		b.Run(test.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				results, stats, err := fixture.cluster.CombineSharesBounded(
-					fixture.plan,
-					fixture.shares,
-					CombineOptions{MaxAttemptsPerSubBatch: 256, MaxWorkers: test.workers},
-				)
-				b.StopTimer()
-				fixture.validate(b, test.workers, results, stats, err)
-				if i+1 < b.N {
-					b.StartTimer()
-				}
+	for _, committee := range combineBenchmarkCommittees() {
+		b.Run(committee.name, func(b *testing.B) {
+			fixture := newCombineBenchmarkFixture(b, 512, committee.n, committee.threshold)
+			for _, workerCount := range combineBenchmarkWorkers() {
+				b.Run(fmt.Sprintf("workers-%d", workerCount), func(b *testing.B) {
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						results, stats, err := fixture.cluster.CombineSharesBounded(
+							fixture.plan,
+							fixture.shares,
+							CombineOptions{MaxAttemptsPerSubBatch: 256, MaxWorkers: workerCount},
+						)
+						b.StopTimer()
+						fixture.validate(b, workerCount, results, stats, err)
+						b.ReportMetric(float64(stats.ConfiguredWorkers), "configured_workers")
+						b.ReportMetric(float64(stats.EffectiveWorkers), "effective_workers")
+						b.ReportMetric(float64(len(fixture.plan.SubBatches)), "sub_batches")
+						if i+1 < b.N {
+							b.StartTimer()
+						}
+					}
+				})
 			}
 		})
 	}

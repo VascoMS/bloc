@@ -179,6 +179,19 @@ The accepted local pre-publication evidence is validation-only:
   successfully and consistently with batch size 512 and configured/effective
   worker counts two on every node.
 
+Issue #34 adds separate local-only combine-worker scaling evidence at
+`GOMAXPROCS=8`: the isolated B=512 benchmark retained 30 samples for every
+one of the n4/t3, n7/t5, and n10/t7 committees crossed with workers one, two,
+four, and eight. Every one of the 360 observations reported its configured and
+effective worker counts, 46 sub-batches, one committed attempt per sub-batch,
+and consensus-order byte-identical plaintexts. Type-7 p50 speedups range from
+`1.967x` to `1.991x` with two workers, `3.352x` to `3.548x` with four, and
+`6.481x` to `6.875x` with eight; the detailed method, allocation medians, p95s,
+and source/host metadata are in
+[`bte/btd-impl-main/TESTING.md`](../bte/btd-impl-main/TESTING.md). This is
+implementation-comparison evidence only. It neither changes the historical
+`GOMAXPROCS=2` means nor supports an AWS, deployment, or thesis-latency claim.
+
 These timings do not support an AWS latency claim. The pre-publication gate
 passes the complete normal suites, complete BTE race suite, repeated focused
 parallel-combine race tests, campaign contracts, Terraform validation, branch

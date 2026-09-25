@@ -1,6 +1,6 @@
 # Status
 
-- Last reviewed: `2026-09-21`
+- Last reviewed: `2026-09-25`
 - Active milestone: `M5. Performance, Scaling, And Resource Evidence`
 - Latest completed milestone: `M4. Evaluation Readiness And Prototype Hardening`
 - Last known good source: `7d462dc58e6c6a2f763deeded120cd9891fecd63`
@@ -67,6 +67,12 @@ speedup ranges from `1.967x`--`1.991x` (two workers) to
 `6.481x`--`6.875x` (eight); this remains local implementation evidence only,
 does not alter the frozen worker-two AWS inputs, and supports no AWS, p99, or
 thesis-latency claim.
+New [issue #35](https://github.com/VascoMS/bloc/issues/35) is the active
+parallel ciphertext-decode development campaign. It retains issue #33's
+decode-dominant B=512 phase attribution and issue #34's local-only
+combine-worker scaling as motivation while keeping all resulting evidence
+separately labeled. No bounded-decode implementation or local decode evidence
+has been accepted yet, and the campaign does not authorize AWS activity.
 The source-led protocol review and current module boundaries are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md), the module deep dives, and the [PIR evidence
 register](archive/PROTOCOL_IMPLEMENTATION_REVIEW_2026-07.md).
@@ -762,35 +768,37 @@ release-candidate configuration contract are defined in
 
 ## Immediate Next Actions
 
-1. Preserve `bloc-ec2-i30-tr-n4-b512-p2` as the complete serial-combine
-   n4/batch-512 negative performance boundary. Issue #33 now owns the approved
-   bounded parallel-combine development campaign; do not reinterpret the old
-   artifact as evidence for that new architecture.
-2. Use only issue #33 source `7d462dc58e6c6a2f763deeded120cd9891fecd63`,
+1. Start issue #35 Task 1 with the regression-first BTE bounded ciphertext
+   decode executor. Preserve worker-one compatibility and deterministic failure
+   semantics; do not claim implementation or local decode evidence, and do not
+   start AWS activity.
+2. Preserve `bloc-ec2-i30-tr-n4-b512-p2` as the complete serial-combine
+   n4/batch-512 negative performance boundary. Issue #33 owns the accepted
+   bounded parallel-combine evidence; do not reinterpret the old artifact as
+   evidence for that architecture.
+3. Use only issue #33 source `7d462dc58e6c6a2f763deeded120cd9891fecd63`,
    its two recorded immutable image digests, and its three fresh BMax-512
    worker=2 bundle manifests. The earlier pre-fix image publication is
    superseded and must not be used for a campaign.
-3. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
+4. Keep source-`95a3d039` BMax-128 and source-`e632b04` BMax-512 preliminary
    rows labeled separately; never pool them into one latency distribution and
    do not publish p99 from any 30- or 100-observation cell.
-4. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
+5. Retain the accepted `n=10,b=8/32/128` cells as eligible for later full
    continuations, but keep the new worker-two B=512 rows separate. The n10/B=512
    cell is a negative performance boundary and does not qualify for a
    continuation.
-5. Analyze the complete issue #33 phase breakdown together with issue #34's
-   local combine-worker scaling curve, then decide explicitly whether the next
-   development target is additional combine optimization, a larger
-   fixed-performance instance, or both. Do not treat the local curve as AWS,
-   p99, or thesis-latency evidence, and do not start any 1,000-observation
-   continuation until that architecture and one-source campaign scope are
-   approved.
-6. Leave issue #15 open and paused for resource collection. Do not admit its
+6. Issue #35 is the approved next development target: bounded ciphertext
+   decoding. Retain issue #33's phase breakdown and issue #34's local
+   combine-worker curve as motivation only; neither becomes decode, AWS, p99,
+   or thesis-latency evidence, and no 1,000-observation continuation is in
+   scope.
+7. Leave issue #15 open and paused for resource collection. Do not admit its
    resource-phase rows, rejected attempts, or any older source/image results
    into issue #30's p99 distributions.
-7. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
+8. Keep selective/hash-only ECHO, GossipSub, alternate RBC, and other protocol
    changes outside this campaign so the architectural comparison remains
    attributable.
-8. Track granular work in the [BLOC Thesis Prototype GitHub
+9. Track granular work in the [BLOC Thesis Prototype GitHub
    Project](https://github.com/users/VascoMS/projects/1) while keeping this file
    limited to milestone state, major blockers, accepted evidence, and next
    actions.
